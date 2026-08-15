@@ -1,4 +1,4 @@
-# mutant-mcp readme
+# mutant-mcp readme file
 
 A deployable, stateless MCP (Model Context Protocol) server for Mutant Genomics. It
 runs as an AWS Lambda behind API Gateway at a custom domain (e.g.
