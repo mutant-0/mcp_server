@@ -39,7 +39,7 @@ export class MutantMcpStack extends Stack {
 
     const fn = new DockerImageFunction(this, "McpFunction", {
       code: DockerImageCode.fromImageAsset(projectRoot()),
-      architecture: Architecture.ARM_64,
+      architecture: Architecture.X86_64,
       timeout: Duration.seconds(30),
       memorySize: 512,
       reservedConcurrentExecutions: props.reservedConcurrency,
