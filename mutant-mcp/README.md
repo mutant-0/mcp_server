@@ -138,7 +138,11 @@ env var), defaulting to `dev` — e.g. `mutant-mcp-prod`.
 
 ## CI/CD (GitHub Actions)
 
-`.github/workflows/deploy.yml` runs on push to `main` (targeting `dev`) and on
+The workflow lives at the repo root: `.github/workflows/deploy.yml` (this
+project is a monorepo directory `mutant-mcp/` inside the `mcp_server` repo, so
+the workflow must be at the root, like the report-generator flow in `back-end`).
+
+It runs on push to `main` touching `mutant-mcp/**` (targeting `dev`) and on
 manual `workflow_dispatch` where you pick `dev`, `staging`, or `prod`. The
 pipeline mirrors the report-generator flow:
 

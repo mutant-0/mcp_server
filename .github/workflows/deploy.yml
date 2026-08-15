@@ -3,6 +3,8 @@ name: Deploy Mutant MCP
 on:
   push:
     branches: [main]
+    paths:
+      - "mutant-mcp/**"
   workflow_dispatch:
     inputs:
       environment:
@@ -22,6 +24,9 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mutant-mcp
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,6 +36,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
+          cache-dependency-path: mutant-mcp/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -47,6 +53,9 @@ jobs:
   build-and-deploy:
     needs: test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mutant-mcp
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,6 +72,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
+          cache-dependency-path: mutant-mcp/package-lock.json
 
       - name: Install dependencies
         run: npm ci
