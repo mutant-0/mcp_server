@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "bundle": "esbuild src/handler.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/index.mjs --sourcemap",
+    "bundle": "esbuild src/handler.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/index.mjs --sourcemap --banner:js=\"import { createRequire as __cjsRequire } from 'node:module'; const require = __cjsRequire(import.meta.url);\"",
     "bundle:cdk": "esbuild infrastructure/bin/mutant-mcp.ts --bundle --platform=node --target=node22 --format=esm --outfile=infrastructure/dist/mutant-mcp.mjs --external:aws-cdk-lib --external:aws-cdk-lib/* --external:constructs",
     "dev": "tsx watch src/handler.ts",
     "start": "node dist/index.mjs",
