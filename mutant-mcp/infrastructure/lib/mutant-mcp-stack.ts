@@ -69,7 +69,7 @@ export class MutantMcpStack extends Stack {
 
     const defaultDomainMapping = this.configureCustomDomain(props);
 
-    const httpApi = new HttpApi(this, "McpHttpApi", {
+    new HttpApi(this, "McpHttpApi", {
       defaultDomainMapping,
       defaultIntegration: new HttpLambdaIntegration("McpIntegration", fn),
     });
