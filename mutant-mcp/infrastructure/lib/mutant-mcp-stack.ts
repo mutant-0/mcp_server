@@ -2,14 +2,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Duration, Stack, type StackProps } from "aws-cdk-lib";
 import { Alarm, ComparisonOperator, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
-import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatemanager";
-import { DomainName, HttpApi } from "aws-cdk-lib/aws-apigatewayv2";
+import { CfnDomainName, HttpApi } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Architecture, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
-import { ARecord, HostedZone, RecordTarget, type IHostedZone } from "aws-cdk-lib/aws-route53";
-import { ApiGatewayv2DomainProperties } from "aws-cdk-lib/aws-route53-targets";
 import type { Construct } from "constructs";
 
 export interface MutantMcpStackProps extends StackProps {
@@ -17,10 +14,6 @@ export interface MutantMcpStackProps extends StackProps {
   domainName?: string;
   /** API mapping key (path prefix) for the custom domain, e.g. "mcp". Leave unset to map the root path. */
   apiMappingKey?: string;
-  /** Route53 hosted zone id. When set, hostedZoneName must also be set. */
-  hostedZoneId?: string;
-  /** Route53 hosted zone apex domain, e.g. mutantbiotech.com. Required for a custom domain. */
-  hostedZoneName?: string;
   /** Existing Mutant REST Lambda alias ARN */
   serviceLambdaArn?: string;
   oauthIssuer?: string;
@@ -95,47 +88,13 @@ export class MutantMcpStack extends Stack {
     if (!props.domainName) {
       return undefined;
     }
-    const hostedZone = hostedZoneFromProps(this, props);
-    const certificate = new Certificate(this, "McpCertificate", {
-      domainName: props.domainName,
-      validation: CertificateValidation.fromDns(hostedZone),
-    });
-    const customDomain = new DomainName(this, "McpDomainName", {
-      domainName: props.domainName,
-      certificate,
-    });
-    new ARecord(this, "McpDomainAlias", {
-      zone: hostedZone,
-      recordName: recordNameFor(props.domainName, props.hostedZoneName),
-      target: RecordTarget.fromAlias(
-        new ApiGatewayv2DomainProperties(
-          customDomain.regionalDomainName,
-          customDomain.regionalHostedZoneId,
-        ),
-      ),
-    });
-    return { domainName: customDomain, mappingKey: props.apiMappingKey };
+    // Reuse an existing API Gateway custom domain (and its ACM cert + DNS). We only
+    // add an API mapping, so no new certificate, domain, or Route53 record is created.
+    return {
+      domainName: CfnDomainName.fromDomainName(this, "McpImportedDomain", props.domainName),
+      mappingKey: props.apiMappingKey,
+    };
   }
-}
-
-function hostedZoneFromProps(scope: Construct, props: MutantMcpStackProps): IHostedZone {
-  if (!props.hostedZoneName) {
-    throw new Error("domainName requires hostedZoneName (the zone apex, e.g. mutantbiotech.com)");
-  }
-  if (props.hostedZoneId) {
-    return HostedZone.fromHostedZoneAttributes(scope, "McpHostedZone", {
-      hostedZoneId: props.hostedZoneId,
-      zoneName: props.hostedZoneName,
-    });
-  }
-  return HostedZone.fromLookup(scope, "McpHostedZone", { domainName: props.hostedZoneName });
-}
-
-function recordNameFor(domainName: string, zoneName?: string): string | undefined {
-  if (!zoneName || domainName === zoneName) {
-    return undefined;
-  }
-  return domainName.endsWith(`.${zoneName}`) ? domainName.slice(0, -(zoneName.length + 1)) : undefined;
 }
 
 function projectRoot(): string {

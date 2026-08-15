@@ -129,8 +129,9 @@ The stack provisions:
 - a Docker-based Lambda (Lambda Web Adapter, `response_stream`) with reserved
   concurrency and a CloudWatch log group (1-month retention);
 - an API Gateway HTTP API with a `$default` catch-all route;
-- an optional custom domain + TLS certificate (set `domainName` plus
-  `hostedZoneName` and optionally `hostedZoneId` via CDK context or stack props);
+- an optional custom domain mapping to an existing API Gateway custom domain (set
+  `domainName`, e.g. `dev-api.mutantbiotech.com`, which reuses its certificate and
+  DNS; the stack only adds an API mapping, it never creates a cert/domain/record);
 - an optional API mapping key (set `apiMappingKey`, e.g. `mcp`) so the API can
   share a domain whose root path is already mapped to another API. With
   `apiMappingKey: "mcp"`, the endpoint is `https://<domain>/mcp`; leave it unset
@@ -164,13 +165,11 @@ Required GitHub secrets:
 | `MUTANT_SERVICE_LAMBDA_ARN` | Existing Mutant REST Lambda alias to invoke. |
 | `MUTANT_OAUTH_ISSUER` | OIDC issuer URL. |
 | `MUTANT_OAUTH_AUDIENCE` | Expected `aud` claim. |
-| `MUTANT_DOMAIN_NAME` | Optional. Enables the custom domain + TLS (e.g. `dev-api.mutantbiotech.com`). |
-| `MUTANT_HOSTED_ZONE_ID` | Optional. Route53 hosted zone id for the custom domain. |
-| `MUTANT_HOSTED_ZONE_NAME` | Optional. Route53 zone apex, e.g. `mutantbiotech.com`. Required when `MUTANT_DOMAIN_NAME` is set. |
+| `MUTANT_DOMAIN_NAME` | Optional. Enables the custom domain mapping. Must already exist as an API Gateway custom domain (reuses its cert + DNS). |
 | `MUTANT_API_MAPPING_KEY` | Optional. Path prefix for the custom domain (e.g. `mcp`). Set it when sharing a domain whose root path is already mapped. |
 
-When `MUTANT_DOMAIN_NAME` / `MUTANT_HOSTED_ZONE_ID` are unset, the custom domain
-is skipped and the API Gateway auto-URL is used (typical for dev/staging).
+When `MUTANT_DOMAIN_NAME` is unset, the custom domain is skipped and the API
+Gateway auto-URL is used (typical for dev/staging).
 
 ## Tool catalog
 
