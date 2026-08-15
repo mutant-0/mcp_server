@@ -15,6 +15,7 @@ new MutantMcpStack(app, "MutantMcpStack", {
   domainName: process.env.MUTANT_DOMAIN_NAME || undefined,
   apiMappingKey: process.env.MUTANT_API_MAPPING_KEY || undefined,
   hostedZoneId: process.env.MUTANT_HOSTED_ZONE_ID || undefined,
+  hostedZoneName: process.env.MUTANT_HOSTED_ZONE_NAME || undefined,
   serviceLambdaArn: process.env.MUTANT_SERVICE_LAMBDA_ARN || undefined,
   oauthIssuer: process.env.MUTANT_OAUTH_ISSUER || undefined,
   oauthAudience: process.env.MUTANT_OAUTH_AUDIENCE || undefined,

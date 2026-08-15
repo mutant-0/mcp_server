@@ -17,9 +17,9 @@ export interface MutantMcpStackProps extends StackProps {
   domainName?: string;
   /** API mapping key (path prefix) for the custom domain, e.g. "mcp". Leave unset to map the root path. */
   apiMappingKey?: string;
-  /** Route53 hosted zone id (alternative to hostedZoneName) */
+  /** Route53 hosted zone id. When set, hostedZoneName must also be set. */
   hostedZoneId?: string;
-  /** Route53 hosted zone domain (alternative to hostedZoneId) */
+  /** Route53 hosted zone apex domain, e.g. mutantbiotech.com. Required for a custom domain. */
   hostedZoneName?: string;
   /** Existing Mutant REST Lambda alias ARN */
   serviceLambdaArn?: string;
@@ -106,7 +106,7 @@ export class MutantMcpStack extends Stack {
     });
     new ARecord(this, "McpDomainAlias", {
       zone: hostedZone,
-      recordName: props.domainName,
+      recordName: recordNameFor(props.domainName, props.hostedZoneName),
       target: RecordTarget.fromAlias(
         new ApiGatewayv2DomainProperties(
           customDomain.regionalDomainName,
@@ -119,13 +119,23 @@ export class MutantMcpStack extends Stack {
 }
 
 function hostedZoneFromProps(scope: Construct, props: MutantMcpStackProps): IHostedZone {
+  if (!props.hostedZoneName) {
+    throw new Error("domainName requires hostedZoneName (the zone apex, e.g. mutantbiotech.com)");
+  }
   if (props.hostedZoneId) {
-    return HostedZone.fromHostedZoneId(scope, "McpHostedZone", props.hostedZoneId);
+    return HostedZone.fromHostedZoneAttributes(scope, "McpHostedZone", {
+      hostedZoneId: props.hostedZoneId,
+      zoneName: props.hostedZoneName,
+    });
   }
-  if (props.hostedZoneName) {
-    return HostedZone.fromLookup(scope, "McpHostedZone", { domainName: props.hostedZoneName });
+  return HostedZone.fromLookup(scope, "McpHostedZone", { domainName: props.hostedZoneName });
+}
+
+function recordNameFor(domainName: string, zoneName?: string): string | undefined {
+  if (!zoneName || domainName === zoneName) {
+    return undefined;
   }
-  throw new Error("domainName requires either hostedZoneId or hostedZoneName");
+  return domainName.endsWith(`.${zoneName}`) ? domainName.slice(0, -(zoneName.length + 1)) : undefined;
 }
 
 function projectRoot(): string {
