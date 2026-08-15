@@ -1,7 +1,8 @@
 # mutant-mcp readme
 
 A deployable, stateless MCP (Model Context Protocol) server for Mutant Genomics. It
-runs as an AWS Lambda behind API Gateway at `https://api.mutantgenomics.com/mcp`,
+runs as an AWS Lambda behind API Gateway at a custom domain (e.g.
+`https://dev-api.mutantbiotech.com/mcp`),
 authenticates users via Mutant OAuth, registers all seven Mutant tools, enforces
 free/paid access, and invokes the existing Mutant REST Lambda synchronously.
 
@@ -14,7 +15,7 @@ returns placeholder responses. No business logic is wired in yet.
 ChatGPT / MCP client
    |  MCP Streamable HTTP + OAuth bearer token
    v
-API Gateway HTTP API  /mcp
+API Gateway HTTP API  $default (catch-all route)
    |  Lambda Web Adapter (response_stream)
    v
 Mutant MCP Lambda (Node.js HTTP server on :8080)
@@ -34,7 +35,7 @@ Mutant MCP Lambda (Node.js HTTP server on :8080)
 mutant-mcp/
 ├── src/
 │   ├── handler.ts                 # HTTP server entry (Lambda Web Adapter :8080)
-│   ├── http-handler.ts            # POST /mcp routing, auth, transport wiring
+│   ├── http-handler.ts            # POST routing (any path), auth, transport wiring
 │   ├── server.ts                  # assembles McpServer + registers tools
 │   ├── config.ts                  # env loading/validation (Zod)
 │   ├── logger.ts                  # pino, redacts tokens
@@ -127,9 +128,13 @@ The stack provisions:
 
 - a Docker-based Lambda (Lambda Web Adapter, `response_stream`) with reserved
   concurrency and a CloudWatch log group (1-month retention);
-- an API Gateway HTTP API with a `POST /mcp` route;
+- an API Gateway HTTP API with a `$default` catch-all route;
 - an optional custom domain + TLS certificate (set `domainName` plus
   `hostedZoneId`/`hostedZoneName` via CDK context or stack props);
+- an optional API mapping key (set `apiMappingKey`, e.g. `mcp`) so the API can
+  share a domain whose root path is already mapped to another API. With
+  `apiMappingKey: "mcp"`, the endpoint is `https://<domain>/mcp`; leave it unset
+  to map the root path (`https://<domain>/`);
 - IAM scoped to `lambda:InvokeFunction` on the specific production alias;
 - error and latency CloudWatch alarms.
 
@@ -161,6 +166,7 @@ Required GitHub secrets:
 | `MUTANT_OAUTH_AUDIENCE` | Expected `aud` claim. |
 | `MUTANT_DOMAIN_NAME` | Optional. Enables the custom domain + TLS (e.g. `api.mutantgenomics.com`). |
 | `MUTANT_HOSTED_ZONE_ID` | Optional. Route53 hosted zone for the custom domain. |
+| `MUTANT_API_MAPPING_KEY` | Optional. Path prefix for the custom domain (e.g. `mcp`). Set it when sharing a domain whose root path is already mapped. |
 
 When `MUTANT_DOMAIN_NAME` / `MUTANT_HOSTED_ZONE_ID` are unset, the custom domain
 is skipped and the API Gateway auto-URL is used (typical for dev/staging).

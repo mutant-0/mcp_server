@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { Duration, Stack, type StackProps } from "aws-cdk-lib";
 import { Alarm, ComparisonOperator, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
 import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatemanager";
-import { DomainName, HttpApi, HttpMethod } from "aws-cdk-lib/aws-apigatewayv2";
+import { DomainName, HttpApi } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Architecture, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
@@ -15,6 +15,8 @@ import type { Construct } from "constructs";
 export interface MutantMcpStackProps extends StackProps {
   /** Custom domain, e.g. api.mutantgenomics.com */
   domainName?: string;
+  /** API mapping key (path prefix) for the custom domain, e.g. "mcp". Leave unset to map the root path. */
+  apiMappingKey?: string;
   /** Route53 hosted zone id (alternative to hostedZoneName) */
   hostedZoneId?: string;
   /** Route53 hosted zone domain (alternative to hostedZoneId) */
@@ -69,12 +71,7 @@ export class MutantMcpStack extends Stack {
 
     const httpApi = new HttpApi(this, "McpHttpApi", {
       defaultDomainMapping,
-    });
-
-    httpApi.addRoutes({
-      path: "/mcp",
-      methods: [HttpMethod.POST, HttpMethod.GET, HttpMethod.OPTIONS],
-      integration: new HttpLambdaIntegration("McpIntegration", fn),
+      defaultIntegration: new HttpLambdaIntegration("McpIntegration", fn),
     });
 
     new Alarm(this, "McpErrorAlarm", {
@@ -117,7 +114,7 @@ export class MutantMcpStack extends Stack {
         ),
       ),
     });
-    return { domainName: customDomain };
+    return { domainName: customDomain, mappingKey: props.apiMappingKey };
   }
 }
 

@@ -99,6 +99,7 @@ jobs:
           MUTANT_OAUTH_AUDIENCE: ${{ secrets.MUTANT_OAUTH_AUDIENCE }}
           MUTANT_DOMAIN_NAME: ${{ secrets.MUTANT_DOMAIN_NAME }}
           MUTANT_HOSTED_ZONE_ID: ${{ secrets.MUTANT_HOSTED_ZONE_ID }}
+          MUTANT_API_MAPPING_KEY: ${{ secrets.MUTANT_API_MAPPING_KEY }}
         run: |
           npm run bundle:cdk
           npx cdk deploy \
