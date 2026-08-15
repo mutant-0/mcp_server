@@ -1,0 +1,46 @@
+{
+  "name": "mutant-mcp",
+  "version": "1.0.0",
+  "description": "Mutant Genomics MCP server - deployable Lambda shell (Streamable HTTP, OAuth, entitlements, 7 placeholder tools).",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "bundle": "esbuild src/handler.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/index.mjs --sourcemap",
+    "bundle:cdk": "esbuild infrastructure/bin/mutant-mcp.ts --bundle --platform=node --target=node22 --format=esm --outfile=infrastructure/dist/mutant-mcp.mjs --external:aws-cdk-lib --external:aws-cdk-lib/* --external:constructs",
+    "dev": "tsx watch src/handler.ts",
+    "start": "node dist/index.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests infrastructure",
+    "format": "prettier --write .",
+    "cdk:synth": "npm run bundle:cdk && cdk synth --app \"node infrastructure/dist/mutant-mcp.mjs\"",
+    "cdk:deploy": "npm run bundle:cdk && cdk deploy --app \"node infrastructure/dist/mutant-mcp.mjs\""
+  },
+  "dependencies": {
+    "@aws-sdk/client-lambda": "^3.1111.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "jose": "^6.2.9",
+    "pino": "^10.3.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.2.0",
+    "aws-cdk": "^2.1136.0",
+    "aws-cdk-lib": "^2.265.0",
+    "constructs": "^10.8.1",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.8.1",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.10"
+  }
+}

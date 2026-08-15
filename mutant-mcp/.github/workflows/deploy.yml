@@ -1,0 +1,97 @@
+name: Deploy Mutant MCP
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment environment"
+        required: true
+        type: choice
+        default: "dev"
+        options:
+          - dev
+          - staging
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+  build-and-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: github-actions-mutant-mcp
+          aws-region: us-west-2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "target=${{ github.event.inputs.environment }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "target=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: CDK bootstrap (idempotent)
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          npx cdk bootstrap "aws://${ACCOUNT_ID}/us-west-2"
+
+      - name: CDK deploy
+        env:
+          ENVIRONMENT: ${{ steps.env.outputs.target }}
+          MUTANT_SERVICE_LAMBDA_ARN: ${{ secrets.MUTANT_SERVICE_LAMBDA_ARN }}
+          MUTANT_OAUTH_ISSUER: ${{ secrets.MUTANT_OAUTH_ISSUER }}
+          MUTANT_OAUTH_AUDIENCE: ${{ secrets.MUTANT_OAUTH_AUDIENCE }}
+          MUTANT_DOMAIN_NAME: ${{ secrets.MUTANT_DOMAIN_NAME }}
+          MUTANT_HOSTED_ZONE_ID: ${{ secrets.MUTANT_HOSTED_ZONE_ID }}
+        run: |
+          npm run bundle:cdk
+          npx cdk deploy \
+            --app "node infrastructure/dist/mutant-mcp.mjs" \
+            --require-approval never \
+            --context environment=${{ steps.env.outputs.target }}
