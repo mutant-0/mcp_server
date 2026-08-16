@@ -24,7 +24,7 @@ function ensureTrailingSlash(url: string): string {
  * Resolves the token-signing keys from the issuer's OIDC discovery document.
  */
 export async function discoverRemoteKeySet(issuer: string): Promise<JWTVerifyGetKey> {
-  const discoveryUrl = new URL("/.well-known/openid-configuration", ensureTrailingSlash(issuer));
+  const discoveryUrl = new URL(".well-known/openid-configuration", ensureTrailingSlash(issuer));
   const response = await fetch(discoveryUrl);
   if (!response.ok) {
     throw new Error(`OIDC discovery failed for ${issuer}: ${response.status}`);
@@ -40,7 +40,7 @@ export class JwtTokenValidator implements TokenValidator {
   private readonly keySet: JWTVerifyGetKey;
 
   constructor(
-    private readonly config: { issuer: string; audience: string },
+    private readonly config: { issuer: string; audience?: string },
     keySet: JWTVerifyGetKey,
   ) {
     this.keySet = keySet;
@@ -49,7 +49,9 @@ export class JwtTokenValidator implements TokenValidator {
   async validate(token: string): Promise<MutantUserContext> {
     const { payload } = await jwtVerify(token, this.keySet, {
       issuer: this.config.issuer,
-      audience: this.config.audience,
+      // Cognito access tokens without a configured resource server carry no `aud`
+      // claim, so audience validation is skipped unless one is explicitly set.
+      ...(this.config.audience ? { audience: this.config.audience } : {}),
     });
     return contextFromClaims(payload);
   }
@@ -72,14 +74,12 @@ export async function createTokenValidator(options: ValidatorOptions): Promise<T
   if (options.devMode) {
     return new DevTokenValidator();
   }
-  if (!options.issuer || !options.audience) {
-    throw new Error(
-      "MUTANT_OAUTH_ISSUER and MUTANT_OAUTH_AUDIENCE must be set (or enable MUTANT_DEV_MODE)",
-    );
+  if (!options.issuer) {
+    throw new Error("MUTANT_OAUTH_ISSUER must be set (or enable MUTANT_DEV_MODE)");
   }
   const keySet = await discoverRemoteKeySet(options.issuer);
   return new JwtTokenValidator(
-    { issuer: options.issuer, audience: options.audience },
+    { issuer: options.issuer, audience: options.audience || undefined },
     keySet,
   );
 }

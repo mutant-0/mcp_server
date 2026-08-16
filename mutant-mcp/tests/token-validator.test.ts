@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   createLocalJWKSet,
   exportJWK,
@@ -9,6 +9,7 @@ import {
 import {
   contextFromClaims,
   DevTokenValidator,
+  discoverRemoteKeySet,
   JwtTokenValidator,
 } from "../src/auth/token-validator.js";
 
@@ -92,6 +93,20 @@ describe("JwtTokenValidator", () => {
     await expect(makeValidator(publicJwk).validate(token)).rejects.toThrow();
   });
 
+  it("skips audience validation when no audience is configured", async () => {
+    const { publicJwk, privateKey } = await makeKeys();
+    const keySet = createLocalJWKSet({ keys: [publicJwk] });
+    const validator = new JwtTokenValidator({ issuer: ISSUER }, keySet);
+    const token = await new SignJWT({ sub: "user-1" })
+      .setProtectedHeader({ alg: "RS256", kid: KID })
+      .setIssuer(ISSUER)
+      .setIssuedAt()
+      .setExpirationTime("1h")
+      .sign(privateKey);
+    const context = await validator.validate(token);
+    expect(context.userId).toBe("user-1");
+  });
+
   it("rejects an unsigned/tampered token", async () => {
     const { publicJwk } = await makeKeys();
     const other = await generateKeyPair("RS256");
@@ -125,6 +140,29 @@ describe("contextFromClaims", () => {
     });
     expect(context.accountId).toBe("account-9");
     expect(context.analysisId).toBe("analysis-4");
+  });
+});
+
+describe("discoverRemoteKeySet", () => {
+  it("keeps the issuer path when building the discovery URL (Cognito)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        jwks_uri:
+          "https://cognito-idp.us-west-2.amazonaws.com/us-west-2_tgb5TJylh/.well-known/jwks.json",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await discoverRemoteKeySet(
+      "https://cognito-idp.us-west-2.amazonaws.com/us-west-2_tgb5TJylh",
+    );
+
+    const calledUrl = String(fetchMock.mock.calls[0]?.[0]);
+    expect(calledUrl).toBe(
+      "https://cognito-idp.us-west-2.amazonaws.com/us-west-2_tgb5TJylh/.well-known/openid-configuration",
+    );
+    vi.unstubAllGlobals();
   });
 });
 

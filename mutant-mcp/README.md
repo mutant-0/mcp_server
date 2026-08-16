@@ -101,8 +101,8 @@ npm run lint      # eslint
 | Variable | Purpose |
 |---|---|
 | `MUTANT_SERVICE_LAMBDA_ARN` | Existing Mutant REST Lambda alias. Empty uses a mock client. |
-| `MUTANT_OAUTH_ISSUER` | OIDC issuer URL (e.g. `https://auth.mutantgenomics.com`). |
-| `MUTANT_OAUTH_AUDIENCE` | Expected `aud` claim. |
+| `MUTANT_OAUTH_ISSUER` | OIDC issuer URL (e.g. `https://cognito-idp.us-west-2.amazonaws.com/<user_pool_id>`). |
+| `MUTANT_OAUTH_AUDIENCE` | Optional. Expected `aud` claim. Leave empty for Cognito tokens without a resource server. |
 | `MUTANT_UPGRADE_URL` | URL returned in `upgrade_required` responses. |
 | `MUTANT_ONBOARDING_URL` | Onboarding URL (reserved for future tool responses). |
 | `MUTANT_DEV_MODE` | `true` accepts `dev-free` / `dev-paid` tokens. |
@@ -163,8 +163,8 @@ Required GitHub secrets:
 |---|---|
 | `AWS_ROLE_ARN` | OIDC role with ECR push and Lambda/API Gateway/Route53/CloudWatch/IAM deploy permissions. |
 | `MUTANT_SERVICE_LAMBDA_ARN` | Existing Mutant REST Lambda alias to invoke. |
-| `MUTANT_OAUTH_ISSUER` | OIDC issuer URL. |
-| `MUTANT_OAUTH_AUDIENCE` | Expected `aud` claim. |
+| `MUTANT_OAUTH_ISSUER` | OIDC issuer URL (Cognito user-pool URL). |
+| `MUTANT_OAUTH_AUDIENCE` | Optional. Expected `aud` claim; leave empty for Cognito without a resource server. |
 | `MUTANT_DEV_MODE` | Optional. `true` accepts `dev-free`/`dev-paid` tokens instead of real OAuth. Needed if issuer/audience are unset. |
 | `MUTANT_DOMAIN_NAME` | Optional. Enables the custom domain mapping. Must already exist as an API Gateway custom domain (reuses its cert + DNS). |
 | `MUTANT_API_MAPPING_KEY` | Optional. Path prefix for the custom domain (e.g. `mcp`). Set it when sharing a domain whose root path is already mapped. |
