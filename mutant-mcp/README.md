@@ -16,7 +16,7 @@ ChatGPT / MCP client
    |  MCP Streamable HTTP + OAuth bearer token
    v
 API Gateway HTTP API  $default (catch-all route)
-   |  Lambda Web Adapter (response_stream)
+   |  Lambda Web Adapter (buffered)
    v
 Mutant MCP Lambda (Node.js HTTP server on :8080)
    |-- MCP protocol handling (stateless)
@@ -126,7 +126,7 @@ npm run cdk:deploy
 
 The stack provisions:
 
-- a Docker-based Lambda (Lambda Web Adapter, `response_stream`) with reserved
+- a Docker-based Lambda (Lambda Web Adapter, buffered invoke mode) with reserved
   concurrency and a CloudWatch log group (1-month retention);
 - an API Gateway HTTP API with a `$default` catch-all route;
 - an optional custom domain mapping to an existing API Gateway custom domain (set

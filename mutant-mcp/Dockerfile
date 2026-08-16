@@ -11,7 +11,12 @@ RUN npm run bundle
 FROM public.ecr.aws/docker/library/node:22-slim
 COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:1.0.1 /lambda-adapter /opt/extensions/lambda-adapter
 ENV PORT=8080
-ENV AWS_LWA_INVOKE_MODE=response_stream
+# Buffered invoke mode matches the HTTP API (v2) integration, which does not use
+# InvokeWithResponseStream. Streaming mode would cause a 500 on every request.
+ENV AWS_LWA_INVOKE_MODE=buffered
+# Avoid the adapter's default HTTP GET / readiness probe, which the POST-only
+# handler would reject and log as noise.
+ENV AWS_LWA_READINESS_CHECK_PROTOCOL=tcp
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app/dist ./dist
