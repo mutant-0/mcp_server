@@ -165,6 +165,7 @@ Required GitHub secrets:
 | `MUTANT_SERVICE_LAMBDA_ARN` | Existing Mutant REST Lambda alias to invoke. |
 | `MUTANT_OAUTH_ISSUER` | OIDC issuer URL. |
 | `MUTANT_OAUTH_AUDIENCE` | Expected `aud` claim. |
+| `MUTANT_DEV_MODE` | Optional. `true` accepts `dev-free`/`dev-paid` tokens instead of real OAuth. Needed if issuer/audience are unset. |
 | `MUTANT_DOMAIN_NAME` | Optional. Enables the custom domain mapping. Must already exist as an API Gateway custom domain (reuses its cert + DNS). |
 | `MUTANT_API_MAPPING_KEY` | Optional. Path prefix for the custom domain (e.g. `mcp`). Set it when sharing a domain whose root path is already mapped. |
 

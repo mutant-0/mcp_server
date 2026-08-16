@@ -17,6 +17,7 @@ new MutantMcpStack(app, "MutantMcpStack", {
   serviceLambdaArn: process.env.MUTANT_SERVICE_LAMBDA_ARN || undefined,
   oauthIssuer: process.env.MUTANT_OAUTH_ISSUER || undefined,
   oauthAudience: process.env.MUTANT_OAUTH_AUDIENCE || undefined,
+  devMode: process.env.MUTANT_DEV_MODE === "true",
 });
 
 app.synth();

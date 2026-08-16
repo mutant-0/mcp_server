@@ -18,6 +18,8 @@ export interface MutantMcpStackProps extends StackProps {
   serviceLambdaArn?: string;
   oauthIssuer?: string;
   oauthAudience?: string;
+  /** When true, accepts dev-free/dev-paid tokens instead of validating against OIDC. */
+  devMode?: boolean;
   upgradeUrl?: string;
   onboardingUrl?: string;
   logLevel?: string;
@@ -45,6 +47,7 @@ export class MutantMcpStack extends Stack {
         MUTANT_SERVICE_LAMBDA_ARN: serviceLambdaArn,
         MUTANT_OAUTH_ISSUER: props.oauthIssuer ?? "",
         MUTANT_OAUTH_AUDIENCE: props.oauthAudience ?? "",
+        MUTANT_DEV_MODE: props.devMode ? "true" : "false",
         MUTANT_UPGRADE_URL: props.upgradeUrl ?? "https://mutantgenomics.com/upgrade",
         MUTANT_ONBOARDING_URL: props.onboardingUrl ?? "https://mutantgenomics.com/onboarding",
         LOG_LEVEL: props.logLevel ?? "info",
