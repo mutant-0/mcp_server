@@ -1,41 +1,32 @@
-import { describe, it, expect } from "vitest";
-import { TOOL_ACCESS, TOOL_NAMES } from "../src/entitlements/access-policy.js";
+import { describe, expect, it } from "vitest";
+import { CONTRACT_VERSION, TOOL_NAMES } from "../src/contract.js";
 import { TOOL_DEFINITIONS } from "../src/tools/index.js";
-import { makeConfig, makeUser } from "./helpers.js";
+import { readOnlyAnnotations } from "../src/tools/types.js";
 
 describe("tool definitions", () => {
-  it("registers all seven tools with stable names", () => {
-    expect(TOOL_DEFINITIONS).toHaveLength(7);
-    expect(TOOL_DEFINITIONS.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
+  it("exposes exactly the six contract tools in order", () => {
+    expect(TOOL_DEFINITIONS.map((tool) => tool.name)).toEqual([...TOOL_NAMES]);
   });
 
-  it("matches the access tiers defined in the policy", () => {
-    for (const definition of TOOL_DEFINITIONS) {
-      expect(definition.accessTier).toBe(TOOL_ACCESS[definition.name]);
+  it("gives every tool a description, schemas, and read-only annotations", () => {
+    for (const tool of TOOL_DEFINITIONS) {
+      expect(tool.description.length).toBeGreaterThan(20);
+      expect(tool.inputSchema).toBeDefined();
+      expect(tool.outputSchema).toBeDefined();
+      expect(tool.annotations).toMatchObject(readOnlyAnnotations);
     }
   });
 
-  it("exposes input schema, output schema, and read-only annotations", () => {
-    for (const definition of TOOL_DEFINITIONS) {
-      expect(definition.inputSchema).toBeDefined();
-      expect(definition.outputSchema).toBeDefined();
-      expect(definition.title).toBeTruthy();
-      expect(definition.description).toBeTruthy();
-      expect(definition.annotations.readOnlyHint).toBe(true);
+  it("never exposes an analysis, account, or plan argument", () => {
+    const forbidden = ["analysis_id", "analysisId", "account_id", "accountId", "plan", "user_id"];
+    for (const tool of TOOL_DEFINITIONS) {
+      for (const key of forbidden) {
+        expect(Object.keys(tool.inputSchema)).not.toContain(key);
+      }
     }
   });
 
-  it("has four free tools and three paid tools", () => {
-    expect(TOOL_DEFINITIONS.filter((t) => t.accessTier === "free")).toHaveLength(4);
-    expect(TOOL_DEFINITIONS.filter((t) => t.accessTier === "paid")).toHaveLength(3);
-  });
-
-  it("handlers return not_implemented placeholders", async () => {
-    for (const definition of TOOL_DEFINITIONS) {
-      const result = await definition.handler({}, makeUser("paid"), makeConfig());
-      const structured = result.structuredContent as { status: string; tool: string };
-      expect(structured.status).toBe("not_implemented");
-      expect(structured.tool).toBe(definition.name);
-    }
+  it("uses contract version 1.0.0", () => {
+    expect(CONTRACT_VERSION).toBe("1.0.0");
   });
 });

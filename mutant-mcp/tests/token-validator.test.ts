@@ -11,11 +11,28 @@ import {
   DevTokenValidator,
   discoverRemoteKeySet,
   JwtTokenValidator,
+  TokenValidationError,
+  type ValidatorOptions,
 } from "../src/auth/token-validator.js";
 
 const ISSUER = "https://auth.mutantgenomics.com";
 const AUDIENCE = "mutant-mcp";
+const CLIENT_ID = "chatgpt-connector";
+const SCOPE = "mutant/analysis.read";
+const RESOURCE = "https://mcp.mutantgenomics.com/mcp";
 const KID = "test-key";
+
+function makeOptions(overrides: Partial<ValidatorOptions> = {}): ValidatorOptions {
+  return {
+    devMode: false,
+    issuer: ISSUER,
+    audience: AUDIENCE,
+    clientId: CLIENT_ID,
+    requiredScope: SCOPE,
+    resourceUri: RESOURCE,
+    ...overrides,
+  };
+}
 
 async function makeKeys(): Promise<{ publicJwk: JWK; privateKey: CryptoKey }> {
   const { publicKey, privateKey } = await generateKeyPair("RS256");
@@ -26,64 +43,61 @@ async function makeKeys(): Promise<{ publicJwk: JWK; privateKey: CryptoKey }> {
   return { publicJwk, privateKey };
 }
 
-function makeValidator(publicJwk: JWK): JwtTokenValidator {
+function makeValidator(publicJwk: JWK, options: Partial<ValidatorOptions> = {}): JwtTokenValidator {
   const keySet = createLocalJWKSet({ keys: [publicJwk] });
-  return new JwtTokenValidator({ issuer: ISSUER, audience: AUDIENCE }, keySet);
+  return new JwtTokenValidator(makeOptions(options), keySet);
 }
 
-async function sign(privateKey: CryptoKey, claims: Record<string, unknown>): Promise<string> {
+function baseClaims(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    sub: "user-123",
+    token_use: "access",
+    client_id: CLIENT_ID,
+    scope: SCOPE,
+    resource: RESOURCE,
+    ...overrides,
+  };
+}
+
+async function sign(
+  privateKey: CryptoKey,
+  claims: Record<string, unknown>,
+  options: { issuer?: string; audience?: string } = {},
+): Promise<string> {
   return new SignJWT(claims)
     .setProtectedHeader({ alg: "RS256", kid: KID })
-    .setIssuer(ISSUER)
-    .setAudience(AUDIENCE)
+    .setIssuer(options.issuer ?? ISSUER)
+    .setAudience(options.audience ?? AUDIENCE)
     .setIssuedAt()
     .setExpirationTime("1h")
     .sign(privateKey);
 }
 
 describe("JwtTokenValidator", () => {
-  it("validates a token and derives a paid user from the mutant:full scope", async () => {
+  it("accepts a valid access token and derives identity", async () => {
     const { publicJwk, privateKey } = await makeKeys();
-    const token = await sign(privateKey, { sub: "user-123", scope: "openid mutant:full" });
+    const token = await sign(privateKey, baseClaims());
     const context = await makeValidator(publicJwk).validate(token);
     expect(context.userId).toBe("user-123");
-    expect(context.accessLevel).toBe("paid");
-  });
-
-  it("derives a free user from an explicit access_level claim", async () => {
-    const { publicJwk, privateKey } = await makeKeys();
-    const token = await sign(privateKey, { sub: "user-456", access_level: "free" });
-    const context = await makeValidator(publicJwk).validate(token);
-    expect(context.accessLevel).toBe("free");
+    expect(context.clientId).toBe(CLIENT_ID);
+    expect(context.scopes).toContain(SCOPE);
   });
 
   it("rejects a token from the wrong issuer", async () => {
     const { publicJwk, privateKey } = await makeKeys();
-    const token = await new SignJWT({ sub: "user-1" })
-      .setProtectedHeader({ alg: "RS256", kid: KID })
-      .setIssuer("https://evil.example.com")
-      .setAudience(AUDIENCE)
-      .setIssuedAt()
-      .setExpirationTime("1h")
-      .sign(privateKey);
+    const token = await sign(privateKey, baseClaims(), { issuer: "https://evil.example.com" });
     await expect(makeValidator(publicJwk).validate(token)).rejects.toThrow();
   });
 
   it("rejects a token with the wrong audience", async () => {
     const { publicJwk, privateKey } = await makeKeys();
-    const token = await new SignJWT({ sub: "user-1" })
-      .setProtectedHeader({ alg: "RS256", kid: KID })
-      .setIssuer(ISSUER)
-      .setAudience("some-other-api")
-      .setIssuedAt()
-      .setExpirationTime("1h")
-      .sign(privateKey);
+    const token = await sign(privateKey, baseClaims(), { audience: "some-other-api" });
     await expect(makeValidator(publicJwk).validate(token)).rejects.toThrow();
   });
 
   it("rejects an expired token", async () => {
     const { publicJwk, privateKey } = await makeKeys();
-    const token = await new SignJWT({ sub: "user-1" })
+    const token = await new SignJWT(baseClaims())
       .setProtectedHeader({ alg: "RS256", kid: KID })
       .setIssuer(ISSUER)
       .setAudience(AUDIENCE)
@@ -93,11 +107,46 @@ describe("JwtTokenValidator", () => {
     await expect(makeValidator(publicJwk).validate(token)).rejects.toThrow();
   });
 
-  it("skips audience validation when no audience is configured", async () => {
+  it("rejects a token issued to a different client", async () => {
+    const { publicJwk, privateKey } = await makeKeys();
+    const token = await sign(privateKey, baseClaims({ client_id: "someone-else" }));
+    await expect(makeValidator(publicJwk).validate(token)).rejects.toMatchObject({
+      oauthError: "invalid_token",
+    });
+  });
+
+  it("rejects a token missing the required scope with insufficient_scope", async () => {
+    const { publicJwk, privateKey } = await makeKeys();
+    const token = await sign(privateKey, baseClaims({ scope: "openid" }));
+    await expect(makeValidator(publicJwk).validate(token)).rejects.toMatchObject({
+      oauthError: "insufficient_scope",
+    });
+  });
+
+  it("rejects an id token presented as an access token", async () => {
+    const { publicJwk, privateKey } = await makeKeys();
+    const token = await sign(privateKey, baseClaims({ token_use: "id" }));
+    await expect(makeValidator(publicJwk).validate(token)).rejects.toBeInstanceOf(
+      TokenValidationError,
+    );
+  });
+
+  it("rejects a token bound to a different resource", async () => {
+    const { publicJwk, privateKey } = await makeKeys();
+    const token = await sign(privateKey, baseClaims({ resource: "https://other.example/mcp" }));
+    await expect(makeValidator(publicJwk).validate(token)).rejects.toMatchObject({
+      oauthError: "invalid_token",
+    });
+  });
+
+  it("does not enforce absent optional checks", async () => {
     const { publicJwk, privateKey } = await makeKeys();
     const keySet = createLocalJWKSet({ keys: [publicJwk] });
-    const validator = new JwtTokenValidator({ issuer: ISSUER }, keySet);
-    const token = await new SignJWT({ sub: "user-1" })
+    const validator = new JwtTokenValidator(
+      makeOptions({ audience: "", clientId: "", requiredScope: "", resourceUri: "" }),
+      keySet,
+    );
+    const token = await new SignJWT({ sub: "user-1", token_use: "access" })
       .setProtectedHeader({ alg: "RS256", kid: KID })
       .setIssuer(ISSUER)
       .setIssuedAt()
@@ -110,36 +159,20 @@ describe("JwtTokenValidator", () => {
   it("rejects an unsigned/tampered token", async () => {
     const { publicJwk } = await makeKeys();
     const other = await generateKeyPair("RS256");
-    const token = await new SignJWT({ sub: "user-1" })
-      .setProtectedHeader({ alg: "RS256", kid: KID })
-      .setIssuer(ISSUER)
-      .setAudience(AUDIENCE)
-      .setIssuedAt()
-      .setExpirationTime("1h")
-      .sign(other.privateKey);
+    const token = await sign(other.privateKey, baseClaims());
     await expect(makeValidator(publicJwk).validate(token)).rejects.toThrow();
   });
 });
 
 describe("contextFromClaims", () => {
   it("throws when the token has no user identifier", () => {
-    expect(() => contextFromClaims({})).toThrow("missing a user identifier");
+    expect(() => contextFromClaims({}, makeOptions())).toThrow("missing a user identifier");
   });
 
-  it("falls back accountId to userId", () => {
-    const context = contextFromClaims({ sub: "user-1" });
-    expect(context.accountId).toBe("user-1");
-    expect(context.accessLevel).toBe("free");
-  });
-
-  it("reads account and analysis ids when present", () => {
-    const context = contextFromClaims({
-      sub: "user-1",
-      account_id: "account-9",
-      analysis_id: "analysis-4",
-    });
-    expect(context.accountId).toBe("account-9");
-    expect(context.analysisId).toBe("analysis-4");
+  it("throws insufficient_scope when scope is missing", () => {
+    expect(() => contextFromClaims({ sub: "user-1", scope: "openid" }, makeOptions())).toThrow(
+      TokenValidationError,
+    );
   });
 });
 
@@ -154,9 +187,7 @@ describe("discoverRemoteKeySet", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await discoverRemoteKeySet(
-      "https://cognito-idp.us-west-2.amazonaws.com/us-west-2_tgb5TJylh",
-    );
+    await discoverRemoteKeySet("https://cognito-idp.us-west-2.amazonaws.com/us-west-2_tgb5TJylh");
 
     const calledUrl = String(fetchMock.mock.calls[0]?.[0]);
     expect(calledUrl).toBe(
@@ -167,13 +198,14 @@ describe("discoverRemoteKeySet", () => {
 });
 
 describe("DevTokenValidator", () => {
-  it("maps dev-paid and dev-free tokens", async () => {
-    const validator = new DevTokenValidator();
-    expect((await validator.validate("dev-paid")).accessLevel).toBe("paid");
-    expect((await validator.validate("dev-free")).accessLevel).toBe("free");
+  it("maps dev tokens to a dev user with the required scope", async () => {
+    const validator = new DevTokenValidator(SCOPE);
+    const context = await validator.validate("dev-free");
+    expect(context.userId).toBe("dev-user");
+    expect(context.scopes).toContain(SCOPE);
   });
 
   it("rejects unknown dev tokens", async () => {
-    await expect(new DevTokenValidator().validate("nope")).rejects.toThrow();
+    await expect(new DevTokenValidator(SCOPE).validate("nope")).rejects.toThrow();
   });
 });

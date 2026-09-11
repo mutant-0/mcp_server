@@ -1,59 +1,123 @@
 import { z } from "zod";
 
 /**
- * Per-tool input schemas. Optional fields map to "use the user's latest analysis"
- * semantics; required fields must be supplied by the model.
+ * Per-tool input schemas. Every tool takes a JSON object (never a scalar) and
+ * rejects unknown properties. No tool accepts an analysis id, account, or plan.
  */
-export const getAnalysisStatusInputSchema = {
-  analysisId: z
-    .string()
-    .describe("Optional Mutant analysis ID. If omitted, the user's latest analysis is used.")
-    .optional(),
-};
 
-export const getGenomicOverviewInputSchema = {
-  analysisId: z
-    .string()
-    .describe("Optional Mutant analysis ID. If omitted, the user's latest analysis is used.")
-    .optional(),
-};
+const limitSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(50)
+  .describe("Maximum number of items to return (1-50).")
+  .optional();
 
-export const getGeneticContextInputSchema = {
-  context: z
+const cursorSchema = z
+  .string()
+  .max(4096)
+  .describe("Opaque pagination cursor returned by a previous call.")
+  .optional();
+
+const hypothesisIdSchema = z
+  .string()
+  .min(1)
+  .max(160)
+  .describe("Health hypothesis id from get_analysis_context or list_health_hypotheses.");
+
+export const getAnalysisStatusInputSchema = {};
+
+export const getAnalysisContextInputSchema = {};
+
+export const listHealthHypothesesInputSchema = {
+  query: z
     .string()
     .min(1)
-    .describe("Module or context identifier for the requested biological area."),
+    .max(120)
+    .describe("Optional catalog-topic keyword search across hypothesis names and summaries.")
+    .optional(),
+  module_id: z
+    .string()
+    .min(1)
+    .max(160)
+    .describe("Optional filter to hypotheses associated with a module id.")
+    .optional(),
+  limit: limitSchema,
+  cursor: cursorSchema,
 };
 
-export const getVariantContextInputSchema = {
-  variantId: z.string().min(1).describe("rsID or variant identifier to interpret."),
-};
-
-export const getRootCauseDetailsInputSchema = {
-  rootCauseId: z.string().min(1).describe("Identifier of the selected root cause."),
+export const getHypothesisDetailsInputSchema = {
+  hypothesis_id: hypothesisIdSchema,
 };
 
 export const getSupportingEvidenceInputSchema = {
-  findingId: z
+  hypothesis_id: hypothesisIdSchema,
+  kind: z
+    .enum(["patterns", "variants", "sources"])
+    .describe("Evidence kind to return. Defaults to 'patterns'.")
+    .optional(),
+  pattern_id: z
     .string()
     .min(1)
-    .describe("Root-cause or finding ID to retrieve supporting evidence for."),
+    .max(160)
+    .describe("Optional pattern id to restrict the evidence to a single matched pattern.")
+    .optional(),
+  limit: limitSchema,
+  cursor: cursorSchema,
 };
 
-export const getRelevantTestsInputSchema = {
-  rootCauseId: z.string().describe("Optional root-cause ID.").optional(),
-  context: z.string().describe("Optional context identifier.").optional(),
+export const getGeneticContextInputSchema = {
+  hypothesis_id: z
+    .string()
+    .min(1)
+    .max(160)
+    .describe(
+      "Hypothesis whose stored variant evidence should scope this call. Required for Free accounts.",
+    )
+    .optional(),
+  module_id: z
+    .string()
+    .min(1)
+    .max(160)
+    .describe("Module id to explore (Full accounts only).")
+    .optional(),
+  gene: z
+    .string()
+    .min(1)
+    .max(40)
+    .describe("Gene symbol to explore (Full accounts only).")
+    .optional(),
+  rsids: z
+    .array(z.string().regex(/^rs[0-9]+$/i))
+    .min(1)
+    .max(50)
+    .describe("Specific rsIDs to look up (Full accounts only).")
+    .optional(),
+  limit: limitSchema,
+  cursor: cursorSchema,
 };
 
 /**
- * Shared output envelope for every tool in the shell. Both placeholder and
- * upgrade responses validate against it. A `success` variant (with real `data`)
- * is added when business logic is wired in.
+ * Shared structured error shape returned inside the envelope.
  */
-export const toolResultOutputSchema = {
-  status: z.enum(["not_implemented", "upgrade_required"]),
-  tool: z.string().optional(),
+export const toolErrorOutputSchema = z.object({
+  code: z.string(),
   message: z.string(),
-  required_tier: z.enum(["free", "paid"]).optional(),
+  retryable: z.boolean(),
+  next_action: z.string().optional(),
+  required_plan: z.string().optional(),
   upgrade_url: z.string().optional(),
-};
+  retry_after_seconds: z.number().optional(),
+});
+
+/**
+ * Shared `ToolResponse` envelope. `data` is intentionally permissive: each tool
+ * returns a different object, while the envelope itself is uniform.
+ */
+export const toolResponseOutputSchema = z.object({
+  contract_version: z.string(),
+  analysis_version: z.string().nullable(),
+  ok: z.boolean(),
+  data: z.record(z.string(), z.unknown()).nullable(),
+  error: toolErrorOutputSchema.nullable(),
+});

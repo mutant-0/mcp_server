@@ -18,6 +18,13 @@ export interface MutantMcpStackProps extends StackProps {
   serviceLambdaArn?: string;
   oauthIssuer?: string;
   oauthAudience?: string;
+  oauthClientId?: string;
+  oauthScope?: string;
+  /** Canonical MCP resource URI (RFC 9728). Defaults from domain + apiMappingKey. */
+  mcpResourceUri?: string;
+  corsOrigins?: string;
+  requestTimeoutMs?: number;
+  maxResponseBytes?: number;
   /** When true, accepts dev-free/dev-paid tokens instead of validating against OIDC. */
   devMode?: boolean;
   upgradeUrl?: string;
@@ -34,6 +41,8 @@ export class MutantMcpStack extends Stack {
       props.serviceLambdaArn ??
       "arn:aws:lambda:us-east-1:000000000000:function:mutant-api:production";
 
+    const resourceUri = props.mcpResourceUri ?? defaultResourceUri(props);
+
     const fn = new DockerImageFunction(this, "McpFunction", {
       code: DockerImageCode.fromImageAsset(projectRoot()),
       architecture: Architecture.X86_64,
@@ -47,9 +56,16 @@ export class MutantMcpStack extends Stack {
         MUTANT_SERVICE_LAMBDA_ARN: serviceLambdaArn,
         MUTANT_OAUTH_ISSUER: props.oauthIssuer ?? "",
         MUTANT_OAUTH_AUDIENCE: props.oauthAudience ?? "",
+        MUTANT_OAUTH_CLIENT_ID: props.oauthClientId ?? "",
+        MUTANT_OAUTH_SCOPE: props.oauthScope ?? "mutant/analysis.read",
+        MUTANT_MCP_RESOURCE_URI: resourceUri,
+        MUTANT_CORS_ORIGINS:
+          props.corsOrigins ?? "https://chatgpt.com,https://chat.openai.com",
         MUTANT_DEV_MODE: props.devMode ? "true" : "false",
-        MUTANT_UPGRADE_URL: props.upgradeUrl ?? "https://mutantgenomics.com/upgrade",
+        MUTANT_UPGRADE_URL: props.upgradeUrl ?? "https://mutantgenomics.com/cart",
         MUTANT_ONBOARDING_URL: props.onboardingUrl ?? "https://mutantgenomics.com/onboarding",
+        MUTANT_REQUEST_TIMEOUT_MS: String(props.requestTimeoutMs ?? 20000),
+        MUTANT_MAX_RESPONSE_BYTES: String(props.maxResponseBytes ?? 512000),
         LOG_LEVEL: props.logLevel ?? "info",
       },
     });
@@ -104,4 +120,14 @@ function projectRoot(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   // infrastructure/dist (bundled) or infrastructure/lib (tsx) -> project root
   return path.resolve(here, "..", "..");
+}
+
+/**
+ * Derive the canonical MCP resource URI from the custom domain and mapping key.
+ * Falls back to an empty string (dev) when no domain is configured.
+ */
+function defaultResourceUri(props: MutantMcpStackProps): string {
+  if (!props.domainName) return "";
+  const key = props.apiMappingKey?.replace(/^\/+|\/+$/g, "");
+  return `https://${props.domainName}/${key && key.length > 0 ? key : "mcp"}`;
 }

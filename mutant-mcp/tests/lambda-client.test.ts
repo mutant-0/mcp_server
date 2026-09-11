@@ -1,42 +1,74 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  AwsMutantLambdaClient,
-  createMutantLambdaClient,
-  MockMutantLambdaClient,
+  buildBackendEvent,
+  MockMutantBackendClient,
+  parseBackendPayload,
+  serviceUnavailable,
 } from "../src/clients/mutant-lambda-client.js";
-import { makeConfig, makeUser } from "./helpers.js";
+import { CONTRACT_VERSION } from "../src/contract.js";
+import { makeErrorResponse, makeSuccessResponse, makeUser } from "./helpers.js";
 
-describe("MutantLambdaClient factory", () => {
-  it("returns a mock client when no target ARN is configured", () => {
-    expect(createMutantLambdaClient(makeConfig())).toBeInstanceOf(MockMutantLambdaClient);
-  });
-
-  it("returns an AWS client when a target ARN is configured", () => {
-    const client = createMutantLambdaClient(
-      makeConfig({
-        MUTANT_SERVICE_LAMBDA_ARN:
-          "arn:aws:lambda:us-east-1:123456789012:function:mutant-api:production",
-      }),
+describe("buildBackendEvent", () => {
+  it("emits the versioned internal contract with token-derived identity", () => {
+    const event = buildBackendEvent(
+      "get_hypothesis_details",
+      { hypothesis_id: "RC_A" },
+      makeUser({ userId: "sub-123" }),
+      "req-1",
     );
-    expect(client).toBeInstanceOf(AwsMutantLambdaClient);
+    expect(event).toEqual({
+      source: "mutant-mcp",
+      contract_version: CONTRACT_VERSION,
+      operation: "get_hypothesis_details",
+      identity: { user_id: "sub-123" },
+      arguments: { hypothesis_id: "RC_A" },
+      request_context: { request_id: "req-1" },
+    });
   });
 });
 
-describe("MockMutantLambdaClient", () => {
-  it("returns a response carrying the event contract", async () => {
-    const client = new MockMutantLambdaClient();
-    const result = await client.invoke(
-      "get_genomic_overview",
-      { analysisId: "a1" },
-      makeUser("paid"),
+describe("parseBackendPayload", () => {
+  it("accepts a well-formed success envelope", () => {
+    const response = makeSuccessResponse();
+    expect(parseBackendPayload(response)).toEqual(response);
+  });
+
+  it("accepts a well-formed error envelope", () => {
+    const response = makeErrorResponse("PLAN_ACCESS_REQUIRED");
+    expect(parseBackendPayload(response)).toEqual(response);
+  });
+
+  it("maps a non-envelope payload to DATA_INCOMPATIBLE", () => {
+    const parsed = parseBackendPayload({ status: "ok" });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error?.code).toBe("DATA_INCOMPATIBLE");
+  });
+
+  it("rejects a mismatched contract version", () => {
+    const parsed = parseBackendPayload({ ...makeSuccessResponse(), contract_version: "0.9.0" });
+    expect(parsed.error?.code).toBe("DATA_INCOMPATIBLE");
+  });
+});
+
+describe("serviceUnavailable", () => {
+  it("is retryable and never an empty success", () => {
+    const response = serviceUnavailable("down");
+    expect(response.ok).toBe(false);
+    expect(response.error?.code).toBe("SERVICE_UNAVAILABLE");
+    expect(response.error?.retryable).toBe(true);
+  });
+});
+
+describe("MockMutantBackendClient", () => {
+  it("returns a contract-shaped envelope for local development", async () => {
+    const client = new MockMutantBackendClient();
+    const response = await client.invoke(
+      "get_analysis_status",
+      {},
+      makeUser(),
       "req-1",
     );
-    expect(result).toMatchObject({
-      status: "ok",
-      mock: true,
-      operation: "get_genomic_overview",
-      request_id: "req-1",
-      identity: { user_id: "user-1" },
-    });
+    expect(response.contract_version).toBe(CONTRACT_VERSION);
+    expect(response.ok).toBe(true);
   });
 });

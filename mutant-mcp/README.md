@@ -1,32 +1,39 @@
-# mutant-mcp readme file
+# mutant-mcp
 
-A deployable, stateless MCP (Model Context Protocol) server for Mutant Genomics. It
-runs as an AWS Lambda behind API Gateway at a custom domain (e.g.
-`https://dev-api.mutantbiotech.com/mcp`),
-authenticates users via Mutant OAuth, registers all seven Mutant tools, enforces
-free/paid access, and invokes the existing Mutant REST Lambda synchronously.
+A deployable, stateless [Model Context Protocol](https://modelcontextprotocol.io)
+server for Mutant Genomics. It runs as an AWS Lambda behind API Gateway at a
+custom domain (e.g. `https://dev-api.mutantbiotech.com/mcp`), authenticates users
+with Mutant's Cognito OAuth (authorization code + PKCE S256), and exposes the
+**six-tool contract 1.0.0** backed by the existing `report-generator` Lambda.
 
-This is the **shell**: every tool is registered with a valid input/output schema but
-returns placeholder responses. No business logic is wired in yet.
+The MCP Lambda is a thin, authenticated transport. **All business rules live in
+the backend** (`back-end/report-generator/mcp`): current-snapshot resolution,
+account ownership, entitlement (`UserEntitlements`), the Free top-three policy,
+hypothesis/evidence retrieval, projection, filtering, pagination, and cursor
+validation. The MCP Lambda never reads entitlements and never accepts an
+analysis id, account, or plan from tool arguments.
 
 ## Architecture
 
 ```text
-ChatGPT / MCP client
-   |  MCP Streamable HTTP + OAuth bearer token
+ChatGPT connector
+   |  OAuth 2.1 PKCE S256 + Bearer token
+   |  (PRM + AS discovery served by this Lambda)
    v
-API Gateway HTTP API  $default (catch-all route)
-   |  Lambda Web Adapter (buffered)
+API Gateway HTTP API  $default (catch-all)
+   |
    v
-Mutant MCP Lambda (Node.js HTTP server on :8080)
-   |-- MCP protocol handling (stateless)
-   |-- OAuth token validation (jose / OIDC JWKS)
-   |-- Subscription entitlement
-   |-- 7 registered tools (placeholder handlers)
-   `-- Existing Lambda invocation adapter
+Mutant MCP Lambda (Node HTTP server on :8080)
+   |-- OAuth discovery + token validation (jose / OIDC JWKS)
+   |-- Six MCP tools (schemas, envelope, text mirror)
+   `-- Versioned internal contract 1.0.0 (direct InvokeCommand, IAM-scoped)
           |
           v
-   Existing Mutant REST Lambda
+Report-generator Lambda  (mcp package, read-only)
+   |-- Snapshot + entitlement resolution
+   |-- Free top-three / Full scope
+   |-- v3 projection, pagination, cursors
+   `-- ToolResponse envelope (ok/data/error, analysis_version, page)
 ```
 
 ## Layout
@@ -35,39 +42,50 @@ Mutant MCP Lambda (Node.js HTTP server on :8080)
 mutant-mcp/
 ├── src/
 │   ├── handler.ts                 # HTTP server entry (Lambda Web Adapter :8080)
-│   ├── http-handler.ts            # POST routing (any path), auth, transport wiring
-│   ├── server.ts                  # assembles McpServer + registers tools
+│   ├── http-handler.ts            # routing, OAuth discovery, 401 challenges
+│   ├── server.ts                  # McpServer + instructions
 │   ├── config.ts                  # env loading/validation (Zod)
-│   ├── logger.ts                  # pino, redacts tokens
+│   ├── contract.ts                # contract 1.0.0 constants + types
 │   ├── auth/
-│   │   ├── token-validator.ts     # jose JWT/JWKS validation
-│   │   └── user-context.ts        # MutantUserContext
-│   ├── entitlements/
-│   │   └── access-policy.ts       # TOOL_ACCESS + canAccess
-│   ├── tools/                     # 7 tool definitions + registration
-│   ├── schemas/                   # Zod input/output schemas
+│   │   ├── token-validator.ts     # JWT/JWKS + client/scope/resource checks
+│   │   ├── oauth-metadata.ts      # RFC 9728 PRM + AS metadata mirror
+│   │   └── user-context.ts        # MutantUserContext (userId + scopes)
+│   ├── tools/                     # six tool definitions + registration
+│   ├── schemas/                   # Zod input + shared envelope schemas
 │   ├── clients/
-│   │   └── mutant-lambda-client.ts# sync invoke + event contract
+│   │   └── mutant-lambda-client.ts# versioned internal contract + envelope parse
 │   └── responses/
-│       ├── errors.ts              # JSON-RPC error helpers
-│       └── tool-result.ts         # placeholder / upgrade_required builders
+│       ├── errors.ts              # JSON-RPC + WWW-Authenticate challenges
+│       └── tool-result.ts         # envelope -> CallToolResult + text mirror
+├── docs/
+│   ├── mcp-contract.md            # implemented schemas, semantics, error codes
+│   └── mcp-runbook.md             # Cognito/OAuth setup, linking, monitoring
 ├── tests/                         # Vitest
 ├── infrastructure/                # AWS CDK v2 (TypeScript)
-├── Dockerfile                     # Node 22 + Lambda Web Adapter
+├── Dockerfile
 ├── package.json
 └── tsconfig.json
 ```
 
-## Prerequisites
+## Tool catalog
 
-- Node.js 22+
-- Docker (only for `docker build` / `cdk deploy` of the image)
-- AWS CDK CLI + AWS credentials (for deployment)
+| Tool | Purpose |
+|---|---|
+| `get_analysis_status` | Current analysis status + effective plan and capabilities. |
+| `get_analysis_context` | **Start here.** Coverage, interpretation rules/limitations, top hypotheses. |
+| `list_health_hypotheses` | List/search hypotheses (Free: fixed top three; Full: whole set). |
+| `get_hypothesis_details` | Full interpretation: scoring, patterns, clinical correlation, guardrails. |
+| `get_supporting_evidence` | Stored patterns, variant contributions, or cited sources. |
+| `get_genetic_context` | Marker-level context by hypothesis (Free) or module/gene/rsIDs (Full). |
+
+The same tool definitions are exposed to Free and Full accounts; access limits
+are enforced in the backend and returned as structured errors
+(`PLAN_ACCESS_REQUIRED`, `HYPOTHESIS_SCOPE_REQUIRED`).
 
 ## Local development
 
-Run in dev mode, which accepts `dev-free` and `dev-paid` bearer tokens instead of
-requiring a live OIDC provider:
+Dev mode accepts `dev-free`, `dev-paid`, or `dev` bearer tokens instead of a
+live OIDC provider:
 
 ```bash
 npm install
@@ -76,7 +94,7 @@ MUTANT_DEV_MODE=true npm run dev
 
 The server listens on port `8080`.
 
-### Smoke test with MCP Inspector
+### Smoke test
 
 ```bash
 MUTANT_DEV_MODE=true npm run dev
@@ -84,9 +102,9 @@ MUTANT_DEV_MODE=true npm run dev
 npx @modelcontextprotocol/inspector
 ```
 
-Connect the Inspector to `http://localhost:8080/mcp` using `Bearer dev-paid` or
-`Bearer dev-free`. All seven tools are discoverable; free users receive
-`upgrade_required` for the three paid tools.
+Connect to `http://localhost:8080/mcp` with `Bearer dev-paid` or `Bearer dev-free`.
+All six tools are discoverable. See `docs/mcp-runbook.md` for linking the real
+ChatGPT dev connector.
 
 ## Testing
 
@@ -96,90 +114,72 @@ npm run typecheck # tsc --noEmit
 npm run lint      # eslint
 ```
 
+> **Windows note:** Vitest can fail to find its runner when the working
+> directory uses a different drive-letter case than Node's canonical path
+> (`cd /d c:\...` vs `C:\...`). Run the commands from PowerShell (or a canonical
+> `C:\...` path). CI runs on Linux and is unaffected.
+
 ## Environment variables
 
 | Variable | Purpose |
 |---|---|
-| `MUTANT_SERVICE_LAMBDA_ARN` | Existing Mutant REST Lambda alias. Empty uses a mock client. |
-| `MUTANT_OAUTH_ISSUER` | OIDC issuer URL (e.g. `https://cognito-idp.us-west-2.amazonaws.com/<user_pool_id>`). |
-| `MUTANT_OAUTH_AUDIENCE` | Optional. Expected `aud` claim. Leave empty for Cognito tokens without a resource server. |
-| `MUTANT_UPGRADE_URL` | URL returned in `upgrade_required` responses. |
-| `MUTANT_ONBOARDING_URL` | Onboarding URL (reserved for future tool responses). |
+| `MUTANT_SERVICE_LAMBDA_ARN` | report-generator Lambda alias invoked for all tools. Empty uses a mock client. |
+| `MUTANT_OAUTH_ISSUER` | OIDC issuer / Cognito user-pool URL. |
+| `MUTANT_OAUTH_AUDIENCE` | Optional. Expected `aud` claim; leave empty for Cognito without a resource server. |
+| `MUTANT_OAUTH_CLIENT_ID` | Predefined Cognito app client authorized for the ChatGPT redirect URI. |
+| `MUTANT_OAUTH_SCOPE` | Required access-token scope (default `mutant/analysis.read`). |
+| `MUTANT_MCP_RESOURCE_URI` | Canonical RFC 9728 resource id (used in PRM + challenges). |
+| `MUTANT_CORS_ORIGINS` | Comma-separated browser origin allowlist. |
+| `MUTANT_UPGRADE_URL` | Upgrade URL returned to Free accounts (default `/cart`). |
+| `MUTANT_ONBOARDING_URL` | Onboarding URL. |
+| `MUTANT_REQUEST_TIMEOUT_MS` | Backend invocation deadline (default `20000`). |
+| `MUTANT_MAX_RESPONSE_BYTES` | Serialized response cap (default `512000`). |
 | `MUTANT_DEV_MODE` | `true` accepts `dev-free` / `dev-paid` tokens. |
 | `LOG_LEVEL` | pino log level. |
 | `PORT` | HTTP port (default `8080`). |
 
-## Build & run the Docker image
+## Build & deploy
 
 ```bash
 npm run bundle            # esbuild -> dist/index.mjs
 docker build -t mutant-mcp .
 docker run --rm -p 8080:8080 -e MUTANT_DEV_MODE=true mutant-mcp
-```
 
-## Deploy with AWS CDK
-
-```bash
 npm run cdk:synth
 npm run cdk:deploy
 ```
 
-The stack provisions:
+The CDK stack provisions:
 
-- a Docker-based Lambda (Lambda Web Adapter, buffered invoke mode) with reserved
-  concurrency and a CloudWatch log group (1-month retention);
+- a Docker-based Lambda (Lambda Web Adapter, buffered invoke mode) with a
+  CloudWatch log group;
+- IAM scoped to `lambda:InvokeFunction` on the specific report-generator alias
+  (the MCP role intentionally has **no** `UserEntitlements` read permission);
 - an API Gateway HTTP API with a `$default` catch-all route;
-- an optional custom domain mapping to an existing API Gateway custom domain (set
-  `domainName`, e.g. `dev-api.mutantbiotech.com`, which reuses its certificate and
-  DNS; the stack only adds an API mapping, it never creates a cert/domain/record);
-- an optional API mapping key (set `apiMappingKey`, e.g. `mcp`) so the API can
-  share a domain whose root path is already mapped to another API. With
-  `apiMappingKey: "mcp"`, the endpoint is `https://<domain>/mcp`; leave it unset
-  to map the root path (`https://<domain>/`);
-- IAM scoped to `lambda:InvokeFunction` on the specific production alias;
+- an optional custom-domain mapping to an existing API Gateway custom domain;
 - error and latency CloudWatch alarms.
 
-The stack name is derived from the `environment` CDK context (or `ENVIRONMENT`
-env var), defaulting to `dev` — e.g. `mutant-mcp-prod`.
+`MUTANT_MCP_RESOURCE_URI` defaults to `https://<domain>/<apiMappingKey|mcp>` when
+a domain is configured.
 
 ## CI/CD (GitHub Actions)
 
-The workflow lives at the repo root: `.github/workflows/deploy.yml` (this
-project is a monorepo directory `mutant-mcp/` inside the `mcp_server` repo, so
-the workflow must be at the root, like the report-generator flow in `back-end`).
+The workflow lives at the repo root (`../.github/workflows/deploy.yml`). It runs
+on push to `main` touching `mutant-mcp/**` (targeting `dev`) and on manual
+`workflow_dispatch` (`dev` / `staging` / `prod`):
 
-It runs on push to `main` touching `mutant-mcp/**` (targeting `dev`) and on
-manual `workflow_dispatch` where you pick `dev`, `staging`, or `prod`. The
-pipeline mirrors the report-generator flow:
+1. `test` job: `npm ci`, typecheck, lint, `vitest`.
+2. `build-and-deploy` job: OIDC to AWS, CDK bootstrap, `cdk deploy`.
 
-1. `test` job: `npm ci`, typecheck, lint, and `vitest`.
-2. `build-and-deploy` job: authenticates to AWS via OIDC, bootstraps CDK
-   (idempotent), then runs `cdk deploy` which builds and pushes the Docker image
-   to ECR and updates the Lambda + API Gateway.
+Required GitHub **secrets**: `AWS_ROLE_ARN`, `MUTANT_SERVICE_LAMBDA_ARN`,
+`MUTANT_OAUTH_ISSUER`, `MUTANT_OAUTH_AUDIENCE`, `MUTANT_OAUTH_CLIENT_ID`,
+`MUTANT_DEV_MODE`, `MUTANT_DOMAIN_NAME`, `MUTANT_API_MAPPING_KEY`.
 
-Required GitHub secrets:
+Required GitHub **variables**: `MUTANT_OAUTH_SCOPE`, `MUTANT_MCP_RESOURCE_URI`,
+`MUTANT_CORS_ORIGINS`, `MUTANT_UPGRADE_URL`, `MUTANT_REQUEST_TIMEOUT_MS`,
+`MUTANT_MAX_RESPONSE_BYTES`.
 
-| Secret | Purpose |
-|---|---|
-| `AWS_ROLE_ARN` | OIDC role with ECR push and Lambda/API Gateway/Route53/CloudWatch/IAM deploy permissions. |
-| `MUTANT_SERVICE_LAMBDA_ARN` | Existing Mutant REST Lambda alias to invoke. |
-| `MUTANT_OAUTH_ISSUER` | OIDC issuer URL (Cognito user-pool URL). |
-| `MUTANT_OAUTH_AUDIENCE` | Optional. Expected `aud` claim; leave empty for Cognito without a resource server. |
-| `MUTANT_DEV_MODE` | Optional. `true` accepts `dev-free`/`dev-paid` tokens instead of real OAuth. Needed if issuer/audience are unset. |
-| `MUTANT_DOMAIN_NAME` | Optional. Enables the custom domain mapping. Must already exist as an API Gateway custom domain (reuses its cert + DNS). |
-| `MUTANT_API_MAPPING_KEY` | Optional. Path prefix for the custom domain (e.g. `mcp`). Set it when sharing a domain whose root path is already mapped. |
+## Documentation
 
-When `MUTANT_DOMAIN_NAME` is unset, the custom domain is skipped and the API
-Gateway auto-URL is used (typical for dev/staging).
-
-## Tool catalog
-
-| Tool | Tier |
-|---|---|
-| `get_analysis_status` | free |
-| `get_genomic_overview` | free |
-| `get_genetic_context` | free |
-| `get_variant_context` | free |
-| `get_root_cause_details` | paid |
-| `get_supporting_evidence` | paid |
-| `get_relevant_tests` | paid |
+- [`docs/mcp-contract.md`](docs/mcp-contract.md) — implemented schemas, semantics, and error codes.
+- [`docs/mcp-runbook.md`](docs/mcp-runbook.md) — Cognito/OAuth setup, ChatGPT linking/relinking, monitoring, rollback.

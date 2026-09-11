@@ -1,80 +1,107 @@
 import { describe, it, expect } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { MutantUserContext } from "../src/auth/user-context.js";
-import type { AppConfig } from "../src/config.js";
-import { createMcpServer } from "../src/server.js";
-import { makeConfig, makeUser } from "./helpers.js";
+import type { ToolResponse } from "../src/contract.js";
+import { SERVER_NAME, createMcpServer } from "../src/server.js";
+import { TOOL_NAMES } from "../src/contract.js";
+import {
+  makeConfig,
+  makeErrorResponse,
+  makeSuccessResponse,
+  makeUser,
+  StubBackendClient,
+} from "./helpers.js";
 
-async function connectServer(ctx: MutantUserContext, config: AppConfig) {
-  const server = createMcpServer(ctx, config);
+async function connectServer(responder: (operation: string) => ToolResponse) {
+  const backendClient = new StubBackendClient((operation) => responder(operation));
+  const server = createMcpServer(makeUser(), makeConfig(), "req-test", backendClient);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
   await client.connect(clientTransport);
-  return { server, client };
+  return { server, client, backendClient };
 }
 
-const ALL_TOOLS = [
-  "get_analysis_status",
-  "get_genomic_overview",
-  "get_genetic_context",
-  "get_variant_context",
-  "get_root_cause_details",
-  "get_supporting_evidence",
-  "get_relevant_tests",
-];
-
 describe("MCP server integration", () => {
-  it("lists all seven tools with valid schemas", async () => {
-    const { client } = await connectServer(makeUser("paid"), makeConfig());
+  it("lists the six contract tools with schemas", async () => {
+    const { client } = await connectServer(() => makeSuccessResponse());
     const result = await client.listTools();
-    expect(result.tools.map((t) => t.name).sort()).toEqual([...ALL_TOOLS].sort());
+    expect(result.tools.map((tool) => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
     for (const tool of result.tools) {
       expect(tool.inputSchema).toBeDefined();
       expect(tool.outputSchema).toBeDefined();
     }
   });
 
-  it("returns a placeholder for a free tool", async () => {
-    const { client } = await connectServer(makeUser("free"), makeConfig());
-    const result = await client.callTool({ name: "get_genomic_overview", arguments: {} });
-    const structured = result.structuredContent as { status: string; tool: string };
-    expect(structured.status).toBe("not_implemented");
-    expect(structured.tool).toBe("get_genomic_overview");
+  it("advertises per-tool OAuth security schemes", async () => {
+    const { client } = await connectServer(() => makeSuccessResponse());
+    const result = await client.listTools();
+    for (const tool of result.tools) {
+      const meta = tool._meta as { securitySchemes?: Array<{ scopes: string[] }> } | undefined;
+      expect(meta?.securitySchemes?.[0]?.scopes).toContain("mutant/analysis.read");
+    }
   });
 
-  it("returns upgrade_required when a free user calls a paid tool", async () => {
-    const { client } = await connectServer(makeUser("free"), makeConfig());
+  it("relays a success envelope into structuredContent", async () => {
+    const { client } = await connectServer(() =>
+      makeSuccessResponse({ analysis: { status: "ready" } }),
+    );
+    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    expect(result.isError).toBe(false);
+    const structured = result.structuredContent as { ok: boolean; data: unknown };
+    expect(structured.ok).toBe(true);
+    expect(structured.data).toEqual({ analysis: { status: "ready" } });
+  });
+
+  it("relays a structured error envelope and sets isError", async () => {
+    const { client } = await connectServer(() =>
+      makeErrorResponse("PLAN_ACCESS_REQUIRED", "locked", { required_plan: "mutant_full" }),
+    );
     const result = await client.callTool({
-      name: "get_root_cause_details",
-      arguments: { rootCauseId: "rc-1" },
+      name: "get_hypothesis_details",
+      arguments: { hypothesis_id: "RC_D" },
     });
-    const structured = result.structuredContent as {
-      status: string;
-      required_tier: string;
-      upgrade_url: string;
-    };
-    expect(structured.status).toBe("upgrade_required");
-    expect(structured.required_tier).toBe("paid");
-    expect(structured.upgrade_url).toBe("https://mutantgenomics.com/upgrade");
-  });
-
-  it("returns a placeholder when a paid user calls a paid tool", async () => {
-    const { client } = await connectServer(makeUser("paid"), makeConfig());
-    const result = await client.callTool({
-      name: "get_root_cause_details",
-      arguments: { rootCauseId: "rc-1" },
-    });
-    const structured = result.structuredContent as { status: string };
-    expect(structured.status).toBe("not_implemented");
-  });
-
-  it("returns a schema error for invalid arguments", async () => {
-    const { client } = await connectServer(makeUser("paid"), makeConfig());
-    const result = await client.callTool({ name: "get_variant_context", arguments: {} });
     expect(result.isError).toBe(true);
-    const content = result.content as Array<{ type: string }>;
-    expect(content[0]?.type).toBe("text");
+    const structured = result.structuredContent as { ok: boolean; error: { code: string } };
+    expect(structured.ok).toBe(false);
+    expect(structured.error.code).toBe("PLAN_ACCESS_REQUIRED");
+  });
+
+  it("adds a tool-level OAuth challenge for auth errors", async () => {
+    const { client } = await connectServer(() =>
+      makeErrorResponse("AUTHENTICATION_REQUIRED", "token expired"),
+    );
+    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    expect(result.isError).toBe(true);
+    const meta = result._meta as { "mcp/www_authenticate"?: string[] } | undefined;
+    const challenge = meta?.["mcp/www_authenticate"]?.[0];
+    expect(challenge).toContain("Bearer ");
+    expect(challenge).toContain('error="invalid_token"');
+    expect(challenge).toContain("/.well-known/oauth-protected-resource/mcp");
+  });
+
+  it("passes the operation, arguments, and token-derived identity to the backend", async () => {
+    const { client, backendClient } = await connectServer(() => makeSuccessResponse());
+    await client.callTool({
+      name: "get_supporting_evidence",
+      arguments: { hypothesis_id: "RC_A", kind: "variants" },
+    });
+    expect(backendClient.calls).toHaveLength(1);
+    expect(backendClient.calls[0]?.operation).toBe("get_supporting_evidence");
+    expect(backendClient.calls[0]?.arguments).toEqual({ hypothesis_id: "RC_A", kind: "variants" });
+    expect(backendClient.calls[0]?.userId).toBe("user-1");
+  });
+
+  it("rejects invalid arguments before calling the backend", async () => {
+    const { client, backendClient } = await connectServer(() => makeSuccessResponse());
+    const result = await client.callTool({ name: "get_hypothesis_details", arguments: {} });
+    expect(result.isError).toBe(true);
+    expect(backendClient.calls).toHaveLength(0);
+  });
+
+  it("uses the Mutant server name", async () => {
+    const { client } = await connectServer(() => makeSuccessResponse());
+    expect(SERVER_NAME).toBe("mutant-mcp");
+    expect(client).toBeDefined();
   });
 });

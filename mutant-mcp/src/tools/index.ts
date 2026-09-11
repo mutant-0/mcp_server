@@ -1,36 +1,39 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { MutantUserContext } from "../auth/user-context.js";
+import { createMutantBackendClient, type MutantBackendClient } from "../clients/mutant-lambda-client.js";
 import type { AppConfig } from "../config.js";
-import { canAccess } from "../entitlements/access-policy.js";
-import { upgradeRequiredResult } from "../responses/tool-result.js";
-import type { MutantToolDefinition, ToolArgs } from "./types.js";
+import { getAnalysisContextTool } from "./get-analysis-context.js";
 import { getAnalysisStatusTool } from "./get-analysis-status.js";
-import { getGenomicOverviewTool } from "./get-genomic-overview.js";
 import { getGeneticContextTool } from "./get-genetic-context.js";
-import { getVariantContextTool } from "./get-variant-context.js";
-import { getRootCauseDetailsTool } from "./get-root-cause-details.js";
+import { getHypothesisDetailsTool } from "./get-hypothesis-details.js";
 import { getSupportingEvidenceTool } from "./get-supporting-evidence.js";
-import { getRelevantTestsTool } from "./get-relevant-tests.js";
+import { listHealthHypothesesTool } from "./list-health-hypotheses.js";
+import type { MutantToolDefinition, ToolRuntime } from "./types.js";
 
 export const TOOL_DEFINITIONS: MutantToolDefinition[] = [
   getAnalysisStatusTool,
-  getGenomicOverviewTool,
-  getGeneticContextTool,
-  getVariantContextTool,
-  getRootCauseDetailsTool,
+  getAnalysisContextTool,
+  listHealthHypothesesTool,
+  getHypothesisDetailsTool,
   getSupportingEvidenceTool,
-  getRelevantTestsTool,
+  getGeneticContextTool,
 ];
 
 /**
- * Registers every tool on the given server. The user context is captured in the
- * callback closure so entitlement checks use trusted, server-derived identity.
+ * Registers every tool on the server. Identity is captured in the callback
+ * closure from the verified token; nothing about the account or plan is read
+ * from tool arguments. All entitlement and access decisions happen in the
+ * backend, so the same tool definitions are exposed to Free and Full accounts.
  */
 export function registerTools(
   server: McpServer,
   ctx: MutantUserContext,
   config: AppConfig,
+  client: MutantBackendClient = createMutantBackendClient(config),
+  requestId = "unknown",
 ): void {
+  const runtime: ToolRuntime = { user: ctx, config, client, requestId };
+
   for (const definition of TOOL_DEFINITIONS) {
     server.registerTool(
       definition.name,
@@ -40,13 +43,13 @@ export function registerTools(
         inputSchema: definition.inputSchema,
         outputSchema: definition.outputSchema,
         annotations: definition.annotations,
+        _meta: {
+          securitySchemes: [
+            { type: "oauth2", scopes: [config.MUTANT_OAUTH_SCOPE] },
+          ],
+        },
       },
-      async (args) => {
-        if (!canAccess(definition.name, ctx)) {
-          return upgradeRequiredResult(config);
-        }
-        return definition.handler(args as ToolArgs, ctx, config);
-      },
+      async (args) => definition.handler((args ?? {}) as Record<string, unknown>, runtime),
     );
   }
 }

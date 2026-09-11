@@ -1,45 +1,76 @@
 import type { CallToolResult, TextContent } from "@modelcontextprotocol/sdk/types.js";
-import type { AppConfig } from "../config.js";
+import type { ToolErrorPayload, ToolResponse } from "../contract.js";
 
 function textContent(text: string): TextContent {
   return { type: "text", text };
 }
 
-export interface NotImplementedPayload {
-  status: "not_implemented";
-  tool: string;
-  message: string;
+/**
+ * Build a single text content block mirroring the structured envelope. The
+ * structured envelope is authoritative; the text is a fallback for hosts that
+ * do not render `structuredContent`.
+ */
+export function textMirror(response: ToolResponse): string {
+  const header = [
+    `contract: ${response.contract_version}`,
+    `analysis_version: ${response.analysis_version ?? "null"}`,
+    `ok: ${response.ok}`,
+  ].join("\n");
+
+  if (response.ok) {
+    return `${header}\n\ndata:\n${JSON.stringify(response.data, null, 2)}`;
+  }
+  const error = response.error;
+  return `${header}\n\nerror: ${error?.code ?? "UNKNOWN"}\n${error?.message ?? "Unknown error"}`;
 }
 
-export interface UpgradeRequiredPayload {
-  status: "upgrade_required";
-  required_tier: "paid";
-  upgrade_url: string;
-  message: string;
+export interface ToolResultOptions {
+  /** Tool-level auth challenge for `_meta["mcp/www_authenticate"]`. */
+  challenge?: Record<string, unknown>;
 }
 
-export function notImplementedResult(tool: string): CallToolResult {
-  const payload: NotImplementedPayload = {
-    status: "not_implemented",
-    tool,
-    message:
-      "The tool is registered, but its Mutant data integration has not been implemented.",
+/**
+ * Convert a backend `ToolResponse` envelope into an MCP `CallToolResult`:
+ * mirrors the envelope into `structuredContent`, adds one text block, and sets
+ * `isError` from `ok`.
+ */
+export function toolResultFromResponse(
+  response: ToolResponse,
+  options: ToolResultOptions = {},
+): CallToolResult {
+  const result: CallToolResult = {
+    content: [textContent(textMirror(response))],
+    structuredContent: response as unknown as Record<string, unknown>,
+    isError: !response.ok,
   };
-  return {
-    content: [textContent(JSON.stringify(payload, null, 2))],
-    structuredContent: payload as unknown as Record<string, unknown>,
-  };
+  if (options.challenge) {
+    result._meta = options.challenge;
+  }
+  return result;
 }
 
-export function upgradeRequiredResult(config: AppConfig): CallToolResult {
-  const payload: UpgradeRequiredPayload = {
-    status: "upgrade_required",
-    required_tier: "paid",
-    upgrade_url: config.MUTANT_UPGRADE_URL,
-    message: "Detailed root-cause analysis is available with Mutant Full Access.",
-  };
-  return {
-    content: [textContent(JSON.stringify(payload, null, 2))],
-    structuredContent: payload as unknown as Record<string, unknown>,
-  };
+export function errorToolResult(
+  error: ToolErrorPayload,
+  analysisVersion: string | null = null,
+): CallToolResult {
+  return toolResultFromResponse({
+    contract_version: "1.0.0",
+    analysis_version: analysisVersion,
+    ok: false,
+    data: null,
+    error,
+  });
+}
+
+/** Convenience for transport failures (never silently returns an empty success). */
+export function serviceUnavailableResult(
+  message = "The Mutant analysis service is temporarily unavailable.",
+  retryAfterSeconds = 30,
+): CallToolResult {
+  return errorToolResult({
+    code: "SERVICE_UNAVAILABLE",
+    message,
+    retryable: true,
+    retry_after_seconds: retryAfterSeconds,
+  });
 }

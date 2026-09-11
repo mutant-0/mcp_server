@@ -1,16 +1,19 @@
-import type { MutantToolDefinition } from "./types.js";
-import { readOnlyAnnotations } from "./types.js";
-import { getAnalysisStatusInputSchema, toolResultOutputSchema } from "../schemas/index.js";
-import { notImplementedResult } from "../responses/tool-result.js";
+import { getAnalysisStatusInputSchema, toolResponseOutputSchema } from "../schemas/index.js";
+import { respond } from "./respond.js";
+import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
 
 export const getAnalysisStatusTool: MutantToolDefinition = {
   name: "get_analysis_status",
   title: "Get Analysis Status",
   description:
-    "Determine whether the user has uploaded a genome and whether processing is complete.",
+    "Return the connected account's current analysis status and effective access plan. " +
+    "Call this first to learn whether a saved analysis is ready. It returns no scores or findings.",
   inputSchema: getAnalysisStatusInputSchema,
-  outputSchema: toolResultOutputSchema,
+  outputSchema: toolResponseOutputSchema,
   annotations: readOnlyAnnotations,
-  accessTier: "free",
-  handler: async () => notImplementedResult("get_analysis_status"),
+  handler: async (args, runtime) =>
+    respond(
+      await runtime.client.invoke("get_analysis_status", args, runtime.user, runtime.requestId),
+      runtime,
+    ),
 };

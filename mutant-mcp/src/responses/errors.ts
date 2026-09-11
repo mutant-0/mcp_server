@@ -41,3 +41,54 @@ export function authenticationError(id: unknown = null): JsonRpcErrorPayload {
 export function invalidTokenError(id: unknown = null): JsonRpcErrorPayload {
   return jsonRpcErrorResponse(id, JsonRpcErrorCode.Unauthorized, "Invalid or expired token");
 }
+
+export function insufficientScopeError(id: unknown = null): JsonRpcErrorPayload {
+  return jsonRpcErrorResponse(
+    id,
+    JsonRpcErrorCode.Unauthorized,
+    "Insufficient scope for this resource",
+  );
+}
+
+/**
+ * URL of the RFC 9728 protected-resource metadata document for this resource.
+ */
+export function protectedResourceMetadataUrl(resourceUri: string): string {
+  const url = new URL(resourceUri);
+  return `${url.origin}/.well-known/oauth-protected-resource${url.pathname}`;
+}
+
+export interface WwwAuthenticateOptions {
+  resourceMetadataUrl: string;
+  error?: "invalid_token" | "insufficient_scope" | "invalid_request";
+  errorDescription?: string;
+  scope?: string;
+}
+
+/**
+ * Build a `WWW-Authenticate: Bearer ...` challenge for a protected resource.
+ */
+export function wwwAuthenticateHeader(options: WwwAuthenticateOptions): string {
+  const params: string[] = [`resource_metadata="${options.resourceMetadataUrl}"`];
+  if (options.error) {
+    params.push(`error="${options.error}"`);
+  }
+  if (options.errorDescription) {
+    params.push(`error_description="${options.errorDescription.replace(/"/g, "'")}"`);
+  }
+  if (options.scope) {
+    params.push(`scope="${options.scope}"`);
+  }
+  return `Bearer ${params.join(", ")}`;
+}
+
+/**
+ * Tool-level authentication challenge carried in `_meta["mcp/www_authenticate"]`.
+ * The MCP client surfaces this to trigger (re)authorization without a transport
+ * level 401.
+ */
+export function toolAuthChallenge(options: WwwAuthenticateOptions): Record<string, unknown> {
+  return {
+    "mcp/www_authenticate": [wwwAuthenticateHeader(options)],
+  };
+}
