@@ -44,8 +44,12 @@ export function corsOrigins(config: AppConfig): string[] {
 }
 
 /**
- * Resolve the canonical MCP resource URI. Falls back to a plausible default so
- * local development and tests do not require the variable.
+ * Resolve the canonical MCP resource URI for metadata. Falls back to a plausible
+ * local value so development and tests do not require the variable.
+ *
+ * Note: this fallback is for advertising metadata only. Token validation must use
+ * the raw `MUTANT_MCP_RESOURCE_URI` so an unset variable never rejects real
+ * tokens against `http://localhost:3000/mcp`.
  */
 export function resourceUri(config: AppConfig): string {
   if (config.MUTANT_MCP_RESOURCE_URI) return config.MUTANT_MCP_RESOURCE_URI;

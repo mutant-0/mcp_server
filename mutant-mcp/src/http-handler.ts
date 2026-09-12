@@ -84,7 +84,9 @@ export async function createHttpHandler(
       audience: config.MUTANT_OAUTH_AUDIENCE,
       clientId: config.MUTANT_OAUTH_CLIENT_ID,
       requiredScope: config.MUTANT_OAUTH_SCOPE,
-      resourceUri: resourceUri(config),
+      // Use the raw value (not the metadata fallback) so an unset variable does
+      // not reject valid tokens against the localhost placeholder.
+      resourceUri: config.MUTANT_MCP_RESOURCE_URI,
     }));
 
   return (req, res) => {
@@ -151,7 +153,14 @@ async function handleRequest(
     } catch (error) {
       if (error instanceof TokenValidationError) {
         const status = error.oauthError === "insufficient_scope" ? 403 : 401;
-        requestLogger.warn({ oauthError: error.oauthError }, "request token rejected");
+        requestLogger.warn(
+          {
+            oauthError: error.oauthError,
+            reason: error.reason,
+            description: error.message,
+          },
+          "request token rejected",
+        );
         challenge(res, config, error.oauthError, error.message, true);
         sendJson(
           res,

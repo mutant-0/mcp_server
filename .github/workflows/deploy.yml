@@ -53,6 +53,9 @@ jobs:
   build-and-deploy:
     needs: test
     runs-on: ubuntu-latest
+    # Environment-scoped secrets/variables are only resolved for jobs that declare
+    # an environment. Falls back to `dev` on push (the input is empty there).
+    environment: ${{ github.event.inputs.environment || 'dev' }}
     defaults:
       run:
         working-directory: mutant-mcp
@@ -104,9 +107,9 @@ jobs:
           MUTANT_UPGRADE_URL: ${{ vars.MUTANT_UPGRADE_URL }}
           MUTANT_REQUEST_TIMEOUT_MS: ${{ vars.MUTANT_REQUEST_TIMEOUT_MS }}
           MUTANT_MAX_RESPONSE_BYTES: ${{ vars.MUTANT_MAX_RESPONSE_BYTES }}
-          MUTANT_DEV_MODE: ${{ secrets.MUTANT_DEV_MODE }}
-          MUTANT_DOMAIN_NAME: ${{ secrets.MUTANT_DOMAIN_NAME }}
-          MUTANT_API_MAPPING_KEY: ${{ secrets.MUTANT_API_MAPPING_KEY }}
+          MUTANT_DEV_MODE: ${{ vars.MUTANT_DEV_MODE }}
+          MUTANT_DOMAIN_NAME: ${{ vars.MUTANT_DOMAIN_NAME }}
+          MUTANT_API_MAPPING_KEY: ${{ vars.MUTANT_API_MAPPING_KEY }}
         run: |
           npm run bundle:cdk
           npx cdk deploy \

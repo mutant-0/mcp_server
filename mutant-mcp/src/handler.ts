@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { loadConfig } from "./config.js";
+import { loadConfig, resourceUri } from "./config.js";
 import { createHttpHandler } from "./http-handler.js";
 import { createLogger } from "./logger.js";
 import { SERVER_NAME } from "./server.js";
@@ -7,6 +7,18 @@ import { SERVER_NAME } from "./server.js";
 async function start(): Promise<void> {
   const config = loadConfig();
   const logger = createLogger(config.LOG_LEVEL);
+  logger.info(
+    {
+      devMode: config.MUTANT_DEV_MODE,
+      issuer: config.MUTANT_OAUTH_ISSUER || "(unset)",
+      audienceConfigured: Boolean(config.MUTANT_OAUTH_AUDIENCE),
+      clientIdConfigured: Boolean(config.MUTANT_OAUTH_CLIENT_ID),
+      requiredScope: config.MUTANT_OAUTH_SCOPE || "(unset)",
+      resourceUriConfigured: Boolean(config.MUTANT_MCP_RESOURCE_URI),
+      resourceUri: resourceUri(config),
+    },
+    `${SERVER_NAME} oauth configuration`,
+  );
   const handler = await createHttpHandler(config, logger);
   const port = Number(process.env.PORT ?? 8080);
 
