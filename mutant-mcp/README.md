@@ -151,8 +151,8 @@ npm run cdk:deploy
 
 The CDK stack provisions:
 
-- a Docker-based Lambda (Lambda Web Adapter, buffered invoke mode) with a
-  CloudWatch log group;
+- a Docker-based Lambda named `mutant-mcp-<env>` (Lambda Web Adapter, buffered
+  invoke mode) logging to the conventional `/aws/lambda/mutant-mcp-<env>` group;
 - IAM scoped to `lambda:InvokeFunction` on the specific report-generator alias
   (the MCP role intentionally has **no** `UserEntitlements` read permission);
 - an API Gateway HTTP API with a `$default` catch-all route;

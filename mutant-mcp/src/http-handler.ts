@@ -71,6 +71,25 @@ function requestPath(req: IncomingMessage): string {
   }
 }
 
+const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
+const AUTHORIZATION_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server";
+
+/**
+ * Match a well-known route that may be preceded by a mount prefix (e.g.
+ * `/mcp/.well-known/oauth-protected-resource`) and/or followed by the resource
+ * path (e.g. `/.well-known/oauth-protected-resource/mcp`).
+ *
+ * API Gateway mapping keys strip their prefix before the request reaches the
+ * Lambda, so deployed requests arrive as the bare path while a local dev server
+ * sees the prefix. Both forms must resolve.
+ */
+function matchesWellKnown(path: string, wellKnownPath: string): boolean {
+  const index = path.indexOf(wellKnownPath);
+  if (index < 0) return false;
+  const end = index + wellKnownPath.length;
+  return end === path.length || path[end] === "/";
+}
+
 export async function createHttpHandler(
   config: AppConfig,
   logger: AppLogger,
@@ -115,13 +134,13 @@ async function handleRequest(
     }
 
     // OAuth discovery surface (RFC 9728 protected-resource metadata + AS metadata).
-    if (req.method === "GET" && path.startsWith("/.well-known/oauth-protected-resource")) {
+    if (req.method === "GET" && matchesWellKnown(path, PROTECTED_RESOURCE_METADATA_PATH)) {
       sendJson(res, 200, protectedResourceMetadata(config), {
         "Cache-Control": "public, max-age=300",
       });
       return;
     }
-    if (req.method === "GET" && path === "/.well-known/oauth-authorization-server") {
+    if (req.method === "GET" && matchesWellKnown(path, AUTHORIZATION_SERVER_METADATA_PATH)) {
       sendJson(res, 200, await authorizationServerMetadata(config, options.oauthFetch), {
         "Cache-Control": "public, max-age=300",
       });

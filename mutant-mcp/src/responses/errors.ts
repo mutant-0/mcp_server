@@ -52,10 +52,19 @@ export function insufficientScopeError(id: unknown = null): JsonRpcErrorPayload 
 
 /**
  * URL of the RFC 9728 protected-resource metadata document for this resource.
+ *
+ * The well-known segment is placed *after* the resource path rather than at the
+ * host root. This server is commonly mounted behind an API Gateway mapping key
+ * (e.g. `/mcp`), which strips the prefix before the Lambda sees the request.
+ * The canonical root form (`<origin>/.well-known/oauth-protected-resource/mcp`)
+ * therefore 404s, while `<origin>/mcp/.well-known/oauth-protected-resource` is
+ * what is actually reachable. Clients discover this exact URL from the
+ * `WWW-Authenticate: Bearer resource_metadata="…"` challenge.
  */
 export function protectedResourceMetadataUrl(resourceUri: string): string {
   const url = new URL(resourceUri);
-  return `${url.origin}/.well-known/oauth-protected-resource${url.pathname}`;
+  const basePath = url.pathname.replace(/\/+$/, "");
+  return `${url.origin}${basePath}/.well-known/oauth-protected-resource`;
 }
 
 export interface WwwAuthenticateOptions {

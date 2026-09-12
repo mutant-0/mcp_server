@@ -10,6 +10,8 @@ import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
 import type { Construct } from "constructs";
 
 export interface MutantMcpStackProps extends StackProps {
+  /** Explicit Lambda function name. Keeps logs at the conventional `/aws/lambda/<name>`. */
+  functionName?: string;
   /** Custom domain, e.g. api.mutantgenomics.com */
   domainName?: string;
   /** API mapping key (path prefix) for the custom domain, e.g. "mcp". Leave unset to map the root path. */
@@ -43,15 +45,23 @@ export class MutantMcpStack extends Stack {
 
     const resourceUri = props.mcpResourceUri ?? defaultResourceUri(props);
 
+    // Name the log group explicitly. Without this, `new LogGroup()` is
+    // auto-named (e.g. `mutant-mcp-dev-McpLogGroup7D3BF67E-…`) and the function
+    // logs there instead of the conventional `/aws/lambda/<function>` group,
+    // which makes operational lookups and dashboards miss the logs.
+    const logGroup = new LogGroup(this, "McpLogGroup", {
+      logGroupName: `/aws/lambda/${props.functionName ?? "mutant-mcp"}`,
+      retention: RetentionDays.ONE_MONTH,
+    });
+
     const fn = new DockerImageFunction(this, "McpFunction", {
       code: DockerImageCode.fromImageAsset(projectRoot()),
+      functionName: props.functionName,
       architecture: Architecture.X86_64,
       timeout: Duration.seconds(30),
       memorySize: 512,
       reservedConcurrentExecutions: props.reservedConcurrency,
-      logGroup: new LogGroup(this, "McpLogGroup", {
-        retention: RetentionDays.ONE_MONTH,
-      }),
+      logGroup,
       environment: {
         MUTANT_SERVICE_LAMBDA_ARN: serviceLambdaArn,
         MUTANT_OAUTH_ISSUER: props.oauthIssuer ?? "",

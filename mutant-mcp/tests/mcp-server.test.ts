@@ -77,7 +77,9 @@ describe("MCP server integration", () => {
     const challenge = meta?.["mcp/www_authenticate"]?.[0];
     expect(challenge).toContain("Bearer ");
     expect(challenge).toContain('error="invalid_token"');
-    expect(challenge).toContain("/.well-known/oauth-protected-resource/mcp");
+    expect(challenge).toContain(
+      "https://mcp.mutantgenomics.com/mcp/.well-known/oauth-protected-resource",
+    );
   });
 
   it("passes the operation, arguments, and token-derived identity to the backend", async () => {

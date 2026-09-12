@@ -54,13 +54,21 @@ report-generator Lambda:
 
 ## 3. Verifying discovery and auth
 
+The MCP API is mounted behind an API Gateway mapping key (`/mcp`), which strips
+the prefix before the Lambda. Discovery therefore lives under the mount, not at
+the host root, and the `401` challenge advertises exactly this URL:
+
 ```bash
-curl -s https://<mcp-host>/.well-known/oauth-protected-resource | jq
-curl -s https://<mcp-host>/.well-known/oauth-authorization-server | jq '.code_challenge_methods_supported'
-# Expect 401 + challenge without a token:
+curl -s https://<mcp-host>/mcp/.well-known/oauth-protected-resource | jq
+curl -s https://<mcp-host>/mcp/.well-known/oauth-authorization-server | jq '.code_challenge_methods_supported'
+# Expect 401 + challenge without a token (note the `resource_metadata` URL):
 curl -si https://<mcp-host>/mcp -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | grep -i www-authenticate
 ```
+
+Clients MUST fetch the `resource_metadata` URL from the challenge; the RFC 9728
+canonical root form (`https://<host>/.well-known/oauth-protected-resource/mcp`)
+is served by the domain's root API mapping and returns `404`.
 
 Checklist:
 

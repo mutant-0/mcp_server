@@ -12,6 +12,7 @@ new MutantMcpStack(app, "MutantMcpStack", {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION,
   },
+  functionName: `mutant-mcp-${environment}`,
   domainName: process.env.MUTANT_DOMAIN_NAME || undefined,
   apiMappingKey: process.env.MUTANT_API_MAPPING_KEY || undefined,
   serviceLambdaArn: process.env.MUTANT_SERVICE_LAMBDA_ARN || undefined,

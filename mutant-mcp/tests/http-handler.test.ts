@@ -52,6 +52,10 @@ describe("HTTP handler (dev mode)", () => {
     expect(challenge).toContain("Bearer");
     expect(challenge).toContain("resource_metadata=");
     expect(challenge).toContain("error=\"invalid_token\"");
+    // The advertised URL must be reachable behind the API Gateway mapping key.
+    expect(challenge).toContain(
+      "resource_metadata=\"https://mcp.mutantgenomics.com/mcp/.well-known/oauth-protected-resource\"",
+    );
   });
 
   it("rejects requests with an invalid bearer token", async () => {
@@ -84,6 +88,18 @@ describe("HTTP handler (dev mode)", () => {
 
   it("serves protected-resource metadata on the resource path variant", async () => {
     const response = await fetch(`${baseUrl}/.well-known/oauth-protected-resource/mcp`);
+    expect(response.status).toBe(200);
+  });
+
+  it("serves protected-resource metadata behind a mount prefix", async () => {
+    const response = await fetch(`${baseUrl}/mcp/.well-known/oauth-protected-resource`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { resource: string };
+    expect(body.resource).toBe("https://mcp.mutantgenomics.com/mcp");
+  });
+
+  it("serves authorization-server metadata behind a mount prefix", async () => {
+    const response = await fetch(`${baseUrl}/mcp/.well-known/oauth-authorization-server`);
     expect(response.status).toBe(200);
   });
 

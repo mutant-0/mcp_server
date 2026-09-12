@@ -9,8 +9,8 @@ authenticated transport.
 
 - MCP Streamable HTTP (JSON responses), stateless.
 - OAuth 2.1 authorization code with PKCE `S256`.
-- `GET /.well-known/oauth-protected-resource[/<path>]` — RFC 9728 protected-resource metadata.
-- `GET /.well-known/oauth-authorization-server` — mirrored authorization-server metadata (ensures `code_challenge_methods_supported: ["S256"]`).
+- `GET [<mount>]/.well-known/oauth-protected-resource[/<path>]` — RFC 9728 protected-resource metadata. When the API is mounted behind an API Gateway mapping key (e.g. `/mcp`), the prefix is stripped before the Lambda, so the reachable metadata URL is `<mount>/.well-known/oauth-protected-resource`; the `401` challenge advertises this exact URL.
+- `GET [<mount>]/.well-known/oauth-authorization-server` — mirrored authorization-server metadata (ensures `code_challenge_methods_supported: ["S256"]`).
 - Requests without a valid token receive `401` with a `WWW-Authenticate: Bearer resource_metadata="…", error="…", error_description="…"` challenge. A token missing the required scope receives `403` with `error="insufficient_scope"`.
 - Tokens are verified for signature, issuer, expiry, `token_use == "access"`, authorized `client_id`, required scope, and (when the issuer emits one) the resource indicator.
 - Identity is `sub` only. **No tool accepts an analysis id, account, or plan.**
