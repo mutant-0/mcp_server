@@ -38,7 +38,9 @@ describe("MCP server integration", () => {
     const result = await client.listTools();
     for (const tool of result.tools) {
       const meta = tool._meta as { securitySchemes?: Array<{ scopes: string[] }> } | undefined;
-      expect(meta?.securitySchemes?.[0]?.scopes).toContain("mutant/analysis.read");
+      expect(meta?.securitySchemes?.[0]?.scopes).toContain(
+        "https://mcp.mutantgenomics.com/mcp/analysis.read",
+      );
     }
   });
 

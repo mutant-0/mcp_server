@@ -17,7 +17,7 @@ beforeAll(async () => {
       authorization_endpoint: "https://auth.mutantgenomics.com/oauth2/authorize",
       token_endpoint: "https://auth.mutantgenomics.com/oauth2/token",
       jwks_uri: "https://auth.mutantgenomics.com/.well-known/jwks.json",
-      scopes_supported: ["openid", "mutant/analysis.read"],
+      scopes_supported: ["openid", "https://mcp.mutantgenomics.com/mcp/analysis.read"],
       response_types_supported: ["code", "token"],
       grant_types_supported: ["authorization_code", "refresh_token"],
     }),
@@ -79,13 +79,18 @@ describe("HTTP handler (dev mode)", () => {
       authorization_servers: string[];
       scopes_supported: string[];
       bearer_methods_supported: string[];
+      resource_name: string;
+      resource_documentation: string;
     };
     expect(body.resource).toBe("https://mcp.mutantgenomics.com/mcp");
     // Points at the origin serving the RFC 8414 document (this host), not Cognito:
     // Cognito's custom domain 404s /.well-known/oauth-authorization-server.
     expect(body.authorization_servers).toEqual(["https://mcp.mutantgenomics.com"]);
-    expect(body.scopes_supported).toContain("mutant/analysis.read");
+    // The scope mirrors the Cognito resource-server identifier (the resource URI).
+    expect(body.scopes_supported).toEqual(["https://mcp.mutantgenomics.com/mcp/analysis.read"]);
     expect(body.bearer_methods_supported).toContain("header");
+    expect(body.resource_name).toBe("Mutant Genomics Analysis");
+    expect(body.resource_documentation).toBe("https://mutantgenomics.com/mcp");
   });
 
   it("serves protected-resource metadata on the resource path variant", async () => {
@@ -135,7 +140,7 @@ describe("HTTP handler (dev mode)", () => {
     // The document is served from the MCP host, so that host is the issuer even
     // though the endpoints live on the Cognito custom domain.
     expect(body.issuer).toBe("https://mcp.mutantgenomics.com");
-    expect(body.scopes_supported).toEqual(["mutant/analysis.read"]);
+    expect(body.scopes_supported).toEqual(["https://mcp.mutantgenomics.com/mcp/analysis.read"]);
     expect(body.response_types_supported).toEqual(["code"]);
     expect(body.grant_types_supported).toEqual(["authorization_code", "refresh_token"]);
     expect(body.code_challenge_methods_supported).toEqual(["S256"]);

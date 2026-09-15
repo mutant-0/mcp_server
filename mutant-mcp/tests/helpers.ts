@@ -9,7 +9,9 @@ export function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     MUTANT_OAUTH_ISSUER: "https://auth.mutantgenomics.com",
     MUTANT_OAUTH_AUDIENCE: "",
     MUTANT_OAUTH_CLIENT_ID: "",
-    MUTANT_OAUTH_SCOPE: "mutant/analysis.read",
+    // Empty exercises the derived `<resource>/analysis.read` scope, matching
+    // production (where the Cognito resource-server identifier is the resource URI).
+    MUTANT_OAUTH_SCOPE: "",
     MUTANT_MCP_RESOURCE_URI: "https://mcp.mutantgenomics.com/mcp",
     MUTANT_CORS_ORIGINS: "https://chatgpt.com",
     MUTANT_UPGRADE_URL: "https://mutantgenomics.com/cart",
@@ -25,7 +27,7 @@ export function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 export function makeUser(overrides: Partial<MutantUserContext> = {}): MutantUserContext {
   return {
     userId: "user-1",
-    scopes: ["mutant/analysis.read"],
+    scopes: ["https://mcp.mutantgenomics.com/mcp/analysis.read"],
     ...overrides,
   };
 }

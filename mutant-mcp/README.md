@@ -127,8 +127,8 @@ npm run lint      # eslint
 | `MUTANT_OAUTH_ISSUER` | OIDC issuer / Cognito user-pool URL. |
 | `MUTANT_OAUTH_AUDIENCE` | Optional. Expected `aud` claim; leave empty for Cognito without a resource server. |
 | `MUTANT_OAUTH_CLIENT_ID` | Predefined Cognito app client authorized for the ChatGPT redirect URI. |
-| `MUTANT_OAUTH_SCOPE` | Required access-token scope (default `mutant/analysis.read`). |
-| `MUTANT_MCP_RESOURCE_URI` | Canonical RFC 9728 resource id (used in PRM + challenges). |
+| `MUTANT_OAUTH_SCOPE` | Required access-token scope. Empty (default) derives `<MUTANT_MCP_RESOURCE_URI>/analysis.read`, e.g. `https://dev-api.mutantbiotech.com/mcp/analysis.read`. Set explicitly only to override. |
+| `MUTANT_MCP_RESOURCE_URI` | Canonical RFC 9728 resource id (used in PRM + challenges, and as the scope's resource-server identifier). |
 | `MUTANT_CORS_ORIGINS` | Comma-separated browser origin allowlist. |
 | `MUTANT_UPGRADE_URL` | Upgrade URL returned to Free accounts (default `/cart`). |
 | `MUTANT_ONBOARDING_URL` | Onboarding URL. |
@@ -183,9 +183,13 @@ Required GitHub **secrets**: `AWS_ROLE_ARN`, `MUTANT_SERVICE_LAMBDA_ARN`,
 `MUTANT_OAUTH_ISSUER`, `MUTANT_OAUTH_AUDIENCE`, `MUTANT_OAUTH_CLIENT_ID`,
 `MUTANT_DEV_MODE`, `MUTANT_DOMAIN_NAME`, `MUTANT_API_MAPPING_KEY`.
 
-Required GitHub **variables**: `MUTANT_OAUTH_SCOPE`, `MUTANT_MCP_RESOURCE_URI`,
-`MUTANT_CORS_ORIGINS`, `MUTANT_UPGRADE_URL`, `MUTANT_REQUEST_TIMEOUT_MS`,
-`MUTANT_MAX_RESPONSE_BYTES`.
+Required GitHub **variables**: `MUTANT_MCP_RESOURCE_URI`, `MUTANT_CORS_ORIGINS`,
+`MUTANT_UPGRADE_URL`, `MUTANT_REQUEST_TIMEOUT_MS`, `MUTANT_MAX_RESPONSE_BYTES`.
+`MUTANT_OAUTH_SCOPE` is optional: leave it unset (or blank) to derive
+`<MUTANT_MCP_RESOURCE_URI>/analysis.read`; if it exists in the environment's
+variables, it must contain the full scope (e.g.
+`https://dev-api.mutantbiotech.com/mcp/analysis.read`) or it will win over the
+derived default.
 
 ## Documentation
 

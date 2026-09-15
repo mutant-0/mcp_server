@@ -8,13 +8,17 @@ linking, verification, monitoring, and rollback.
 The MCP Lambda is a protected resource; Cognito is the authorization server.
 One-time setup (Cognito console or CLI):
 
-1. **Resource server + scope.** Create a resource server with identifier
-   `mutant` and a custom scope `analysis.read`, giving the full scope string
-   `mutant/analysis.read`. This scope is required on every access token.
+1. **Resource server + scope.** Create a resource server whose identifier is the
+   MCP resource URI (`MUTANT_MCP_RESOURCE_URI`, e.g.
+   `https://dev-api.mutantbiotech.com/mcp`) with a custom scope `analysis.read`.
+   Cognito composes the two into the full scope
+   `https://dev-api.mutantbiotech.com/mcp/analysis.read`. The runtime derives the
+   required scope as `<MUTANT_MCP_RESOURCE_URI>/analysis.read`, so the identifier
+   **must** match `MUTANT_MCP_RESOURCE_URI` exactly (no trailing slash).
 2. **App client.** Use a predefined (non-secret) app client for ChatGPT:
    - OAuth flow: authorization code grant.
    - PKCE: required, `S256` only.
-   - Scopes: `openid`, `mutant/analysis.read`.
+   - Scopes: `openid`, `<MUTANT_MCP_RESOURCE_URI>/analysis.read`.
    - Allowed callback URLs: the ChatGPT connector callback
      (`https://chatgpt.com/connector_platform_oauth_redirect` — confirm the
      current value in the ChatGPT connector UI) and your dev callback.
@@ -32,11 +36,13 @@ One-time setup (Cognito console or CLI):
 
 Created 2026-09-12:
 
-- **Resource server** identifier `mutant`, scope `analysis.read`
-  (`mutant/analysis.read`).
+- **Resource server** identifier `https://dev-api.mutantbiotech.com/mcp` (the dev
+  `MUTANT_MCP_RESOURCE_URI`), scope `analysis.read`
+  (`https://dev-api.mutantbiotech.com/mcp/analysis.read`).
 - **App client** `Mutant MCP ChatGPT Connector`
   (`1hi6c97v6md1q68h91ld37tre4`): public (no secret), authorization code,
-  scopes `openid mutant/analysis.read`, IdPs `COGNITO Google`. Callbacks:
+  scopes `openid https://dev-api.mutantbiotech.com/mcp/analysis.read`, IdPs
+  `COGNITO Google`. Callbacks:
   `https://chatgpt.com/connector_platform_oauth_redirect` (connector) plus
   `https://oauth.pstmn.io/v1/callback` and
   `https://oauth.pstmn.io/v1/browser-callback` (Postman testing only; remove
@@ -66,7 +72,7 @@ MCP Lambda (`mutant-mcp`):
 | `MUTANT_SERVICE_LAMBDA_ARN` | report-generator alias ARN |
 | `MUTANT_OAUTH_ISSUER` | Cognito issuer |
 | `MUTANT_OAUTH_CLIENT_ID` | ChatGPT app client id |
-| `MUTANT_OAUTH_SCOPE` | `mutant/analysis.read` |
+| `MUTANT_OAUTH_SCOPE` | leave **empty** to derive `<MUTANT_MCP_RESOURCE_URI>/analysis.read`; set only to override |
 | `MUTANT_MCP_RESOURCE_URI` | e.g. `https://dev-api.mutantbiotech.com/mcp` |
 | `MUTANT_CORS_ORIGINS` | `https://chatgpt.com,https://chat.openai.com` |
 | `MUTANT_UPGRADE_URL` | `https://mutantgenomics.com/cart` |
@@ -110,7 +116,9 @@ Checklist:
 - AS metadata `issuer` equals the MCP host origin (e.g.
   `https://dev-api.mutantbiotech.com`), matching the origin serving the document;
   endpoints point at the Cognito custom domain (`https://login.mutantgenomics.com/oauth2/...`).
-- AS metadata `scopes_supported` is exactly `["mutant/analysis.read"]`, and it
+- AS metadata `scopes_supported` is exactly
+  `["https://dev-api.mutantbiotech.com/mcp/analysis.read"]` (i.e.
+  `<MUTANT_MCP_RESOURCE_URI>/analysis.read`), and it
   advertises `authorization_code`, `refresh_token`, and
   `code_challenge_methods_supported: ["S256"]`.
 - PRM `resource` equals `MUTANT_MCP_RESOURCE_URI`; `authorization_servers` is the
@@ -138,7 +146,8 @@ All six tools must be discoverable. Call `get_analysis_status`, then
    `https://<mcp-host>/mcp`.
 3. When it requests authorization, sign in through Cognito (the hosted UI). The
    client uses authorization code + PKCE S256 and requests
-   `mutant/analysis.read`.
+   `https://dev-api.mutantbiotech.com/mcp/analysis.read` (the scope advertised in
+   PRM).
 4. After linking, run the scenario prompts for a **sanitized** Free test account
    and then a **sanitized** Full test account:
    - "What does my Mutant analysis say about my health?"

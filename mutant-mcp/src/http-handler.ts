@@ -9,7 +9,7 @@ import {
   type TokenValidator,
 } from "./auth/token-validator.js";
 import type { MutantBackendClient } from "./clients/mutant-lambda-client.js";
-import { corsOrigins, resourceUri, type AppConfig } from "./config.js";
+import { corsOrigins, requiredScope, resourceUri, type AppConfig } from "./config.js";
 import type { AppLogger } from "./logger.js";
 import {
   authenticationError,
@@ -112,7 +112,7 @@ export async function createHttpHandler(
       issuer: config.MUTANT_OAUTH_ISSUER,
       audience: config.MUTANT_OAUTH_AUDIENCE,
       clientId: config.MUTANT_OAUTH_CLIENT_ID,
-      requiredScope: config.MUTANT_OAUTH_SCOPE,
+      requiredScope: requiredScope(config),
       // Use the raw value (not the metadata fallback) so an unset variable does
       // not reject valid tokens against the localhost placeholder.
       resourceUri: config.MUTANT_MCP_RESOURCE_URI,
@@ -250,7 +250,7 @@ function challenge(
       resourceMetadataUrl: protectedResourceMetadataUrl(resourceUri(config)),
       error: oauthError,
       errorDescription: description,
-      ...(includeScope ? { scope: config.MUTANT_OAUTH_SCOPE } : {}),
+      ...(includeScope ? { scope: requiredScope(config) } : {}),
     }),
   );
 }

@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { loadConfig, resourceUri } from "./config.js";
+import { loadConfig, requiredScope, resourceUri } from "./config.js";
 import { createHttpHandler } from "./http-handler.js";
 import { createLogger } from "./logger.js";
 import { SERVER_NAME } from "./server.js";
@@ -13,7 +13,7 @@ async function start(): Promise<void> {
       issuer: config.MUTANT_OAUTH_ISSUER || "(unset)",
       audienceConfigured: Boolean(config.MUTANT_OAUTH_AUDIENCE),
       clientIdConfigured: Boolean(config.MUTANT_OAUTH_CLIENT_ID),
-      requiredScope: config.MUTANT_OAUTH_SCOPE || "(unset)",
+      requiredScope: requiredScope(config),
       resourceUriConfigured: Boolean(config.MUTANT_MCP_RESOURCE_URI),
       resourceUri: resourceUri(config),
     },

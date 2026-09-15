@@ -75,7 +75,8 @@ export class MutantMcpStack extends Stack {
         MUTANT_OAUTH_ISSUER: props.oauthIssuer ?? "",
         MUTANT_OAUTH_AUDIENCE: props.oauthAudience ?? "",
         MUTANT_OAUTH_CLIENT_ID: props.oauthClientId ?? "",
-        MUTANT_OAUTH_SCOPE: props.oauthScope ?? "mutant/analysis.read",
+        // Empty lets the runtime derive `<MUTANT_MCP_RESOURCE_URI>/analysis.read`.
+        MUTANT_OAUTH_SCOPE: props.oauthScope ?? "",
         MUTANT_MCP_RESOURCE_URI: resourceUri,
         MUTANT_CORS_ORIGINS:
           props.corsOrigins ?? "https://chatgpt.com,https://chat.openai.com",

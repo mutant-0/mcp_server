@@ -1,4 +1,4 @@
-import { resourceUri } from "../config.js";
+import { requiredScope, resourceUri } from "../config.js";
 import type { ToolResponse } from "../contract.js";
 import { protectedResourceMetadataUrl, toolAuthChallenge } from "../responses/errors.js";
 import { toolResultFromResponse } from "../responses/tool-result.js";
@@ -17,7 +17,7 @@ export function respond(response: ToolResponse, runtime: ToolRuntime) {
         resourceMetadataUrl: protectedResourceMetadataUrl(resourceUri(runtime.config)),
         error: code === "INSUFFICIENT_SCOPE" ? "insufficient_scope" : "invalid_token",
         ...(response.error?.message ? { errorDescription: response.error.message } : {}),
-        scope: runtime.config.MUTANT_OAUTH_SCOPE,
+        scope: requiredScope(runtime.config),
       }),
     });
   }

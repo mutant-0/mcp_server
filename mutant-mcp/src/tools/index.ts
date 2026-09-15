@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { MutantUserContext } from "../auth/user-context.js";
 import { createMutantBackendClient, type MutantBackendClient } from "../clients/mutant-lambda-client.js";
-import type { AppConfig } from "../config.js";
+import { requiredScope, type AppConfig } from "../config.js";
 import { getAnalysisContextTool } from "./get-analysis-context.js";
 import { getAnalysisStatusTool } from "./get-analysis-status.js";
 import { getGeneticContextTool } from "./get-genetic-context.js";
@@ -45,7 +45,7 @@ export function registerTools(
         annotations: definition.annotations,
         _meta: {
           securitySchemes: [
-            { type: "oauth2", scopes: [config.MUTANT_OAUTH_SCOPE] },
+            { type: "oauth2", scopes: [requiredScope(config)] },
           ],
         },
       },
