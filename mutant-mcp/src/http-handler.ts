@@ -146,13 +146,13 @@ async function handleRequest(
     // OAuth discovery surface (RFC 9728 protected-resource metadata + AS metadata).
     if (req.method === "GET" && matchesWellKnown(path, PROTECTED_RESOURCE_METADATA_PATH)) {
       sendJson(res, 200, protectedResourceMetadata(config), {
-        "Cache-Control": "public, max-age=300",
+        "Cache-Control": "no-store, max-age=0",
       });
       return;
     }
     if (req.method === "GET" && matchesWellKnown(path, AUTHORIZATION_SERVER_METADATA_PATH)) {
       sendJson(res, 200, await authorizationServerMetadata(config, options.oauthFetch), {
-        "Cache-Control": "public, max-age=300",
+        "Cache-Control": "no-store, max-age=0",
       });
       return;
     }

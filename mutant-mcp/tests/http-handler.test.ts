@@ -77,6 +77,8 @@ describe("HTTP handler (dev mode)", () => {
   it("serves protected-resource metadata", async () => {
     const response = await fetch(`${baseUrl}/.well-known/oauth-protected-resource`);
     expect(response.status).toBe(200);
+    // Discovery documents must not be cached by clients or intermediaries.
+    expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
     const body = (await response.json()) as {
       resource: string;
       authorization_servers: string[];
@@ -116,6 +118,7 @@ describe("HTTP handler (dev mode)", () => {
   it("serves authorization-server metadata with PKCE S256", async () => {
     const response = await fetch(`${baseUrl}/.well-known/oauth-authorization-server`);
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
     const body = (await response.json()) as {
       code_challenge_methods_supported: string[];
       grant_types_supported: string[];
