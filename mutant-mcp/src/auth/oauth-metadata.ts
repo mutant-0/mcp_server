@@ -28,10 +28,46 @@ export interface AuthorizationServerMetadata {
 
 const DOCUMENTATION_URL = "https://mutantgenomics.com/mcp";
 
+/**
+ * Origin that serves this discovery document.
+ *
+ * Cognito's hosted UI does not expose RFC 8414 `/.well-known/oauth-authorization-server`
+ * (its custom domain 404s that path), so the MCP host mirrors the
+ * authorization-server metadata at its own origin and API Gateway routes the
+ * well-known path there. RFC 8414 §3.3 requires the returned `issuer` to match
+ * the origin the document is served from, so it is derived from the MCP resource
+ * URI rather than from `MUTANT_OAUTH_ISSUER` (the Cognito issuer that token
+ * `iss` claims are validated against).
+ */
+function publicIssuer(config: AppConfig): string {
+  if (config.MUTANT_MCP_RESOURCE_URI) {
+    try {
+      return new URL(config.MUTANT_MCP_RESOURCE_URI).origin;
+    } catch {
+      // Fall back to the configured OAuth issuer for an unparsable resource URI.
+    }
+  }
+  return config.MUTANT_OAUTH_ISSUER;
+}
+
+/**
+ * Authorization server identifiers advertised in RFC 9728 protected-resource
+ * metadata.
+ *
+ * This must be the origin that serves the RFC 8414 document (see
+ * {@link publicIssuer}): the Cognito custom domain 404s
+ * `/.well-known/oauth-authorization-server`, so listing the Cognito issuer here
+ * would send clients to a discovery URL that does not exist.
+ */
+function authorizationServers(config: AppConfig): string[] {
+  const issuer = publicIssuer(config);
+  return issuer ? [issuer] : [];
+}
+
 export function protectedResourceMetadata(config: AppConfig): ProtectedResourceMetadata {
   return {
     resource: resourceUri(config),
-    authorization_servers: config.MUTANT_OAUTH_ISSUER ? [config.MUTANT_OAUTH_ISSUER] : [],
+    authorization_servers: authorizationServers(config),
     scopes_supported: [config.MUTANT_OAUTH_SCOPE],
     bearer_methods_supported: ["header"],
     resource_name: "Mutant Genomics Analysis",
@@ -48,16 +84,13 @@ const AS_CACHE_TTL_MS = 10 * 60 * 1000;
 let asCache: CacheEntry | undefined;
 
 function normalize(doc: Record<string, unknown>, config: AppConfig): AuthorizationServerMetadata {
-  const scopes = new Set<string>([config.MUTANT_OAUTH_SCOPE]);
-  if (Array.isArray(doc.scopes_supported)) {
-    for (const scope of doc.scopes_supported) {
-      if (typeof scope === "string") scopes.add(scope);
-    }
-  }
-
   const metadata: AuthorizationServerMetadata = {
-    issuer: typeof doc.issuer === "string" ? doc.issuer : config.MUTANT_OAUTH_ISSUER,
-    scopes_supported: [...scopes],
+    // The document is served from the MCP host, so it must advertise that host as
+    // the issuer even though the endpoints live on the Cognito custom domain.
+    issuer: publicIssuer(config),
+    // Advertise only the scope this resource requires; it is the scope PRM
+    // requests and the only one the token validator enforces.
+    scopes_supported: config.MUTANT_OAUTH_SCOPE ? [config.MUTANT_OAUTH_SCOPE] : [],
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     token_endpoint_auth_methods_supported: ["none"],

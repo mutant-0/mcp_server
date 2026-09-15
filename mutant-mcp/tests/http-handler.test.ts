@@ -81,7 +81,9 @@ describe("HTTP handler (dev mode)", () => {
       bearer_methods_supported: string[];
     };
     expect(body.resource).toBe("https://mcp.mutantgenomics.com/mcp");
-    expect(body.authorization_servers).toContain("https://auth.mutantgenomics.com");
+    // Points at the origin serving the RFC 8414 document (this host), not Cognito:
+    // Cognito's custom domain 404s /.well-known/oauth-authorization-server.
+    expect(body.authorization_servers).toEqual(["https://mcp.mutantgenomics.com"]);
     expect(body.scopes_supported).toContain("mutant/analysis.read");
     expect(body.bearer_methods_supported).toContain("header");
   });
@@ -114,6 +116,38 @@ describe("HTTP handler (dev mode)", () => {
     expect(body.code_challenge_methods_supported).toEqual(["S256"]);
     expect(body.grant_types_supported).toContain("authorization_code");
     expect(body.authorization_endpoint).toContain("/oauth2/authorize");
+  });
+
+  it("serves authorization-server metadata on the mapping-key-stripped root path", async () => {
+    // The custom domain maps `.well-known` to this API, so API Gateway strips the
+    // prefix and the Lambda receives `/oauth-authorization-server`.
+    const response = await fetch(`${baseUrl}/oauth-authorization-server`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      issuer: string;
+      scopes_supported: string[];
+      response_types_supported: string[];
+      grant_types_supported: string[];
+      code_challenge_methods_supported: string[];
+      authorization_endpoint: string;
+      token_endpoint: string;
+    };
+    // The document is served from the MCP host, so that host is the issuer even
+    // though the endpoints live on the Cognito custom domain.
+    expect(body.issuer).toBe("https://mcp.mutantgenomics.com");
+    expect(body.scopes_supported).toEqual(["mutant/analysis.read"]);
+    expect(body.response_types_supported).toEqual(["code"]);
+    expect(body.grant_types_supported).toEqual(["authorization_code", "refresh_token"]);
+    expect(body.code_challenge_methods_supported).toEqual(["S256"]);
+    expect(body.authorization_endpoint).toBe("https://auth.mutantgenomics.com/oauth2/authorize");
+    expect(body.token_endpoint).toBe("https://auth.mutantgenomics.com/oauth2/token");
+  });
+
+  it("serves protected-resource metadata on the mapping-key-stripped root path", async () => {
+    const response = await fetch(`${baseUrl}/oauth-protected-resource`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { resource: string };
+    expect(body.resource).toBe("https://mcp.mutantgenomics.com/mcp");
   });
 
   it("handles MCP initialize with a valid dev token", async () => {

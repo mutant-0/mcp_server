@@ -2,12 +2,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Duration, Stack, type StackProps } from "aws-cdk-lib";
 import { Alarm, ComparisonOperator, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
-import { CfnDomainName, HttpApi } from "aws-cdk-lib/aws-apigatewayv2";
+import { CfnDomainName, ApiMapping, HttpApi, type IDomainNameRef } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Architecture, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
 import type { Construct } from "constructs";
+
+/** Mapping key that serves OAuth discovery at the custom domain's root. */
+const DEFAULT_WELL_KNOWN_MAPPING_KEY = ".well-known";
 
 export interface MutantMcpStackProps extends StackProps {
   /** Explicit Lambda function name. Keeps logs at the conventional `/aws/lambda/<name>`. */
@@ -16,6 +19,11 @@ export interface MutantMcpStackProps extends StackProps {
   domainName?: string;
   /** API mapping key (path prefix) for the custom domain, e.g. "mcp". Leave unset to map the root path. */
   apiMappingKey?: string;
+  /**
+   * Mapping key used to serve OAuth discovery at the custom domain's root.
+   * Defaults to `.well-known`.
+   */
+  wellKnownMappingKey?: string;
   /** Existing Mutant REST Lambda alias ARN */
   serviceLambdaArn?: string;
   oauthIssuer?: string;
@@ -89,12 +97,16 @@ export class MutantMcpStack extends Stack {
       }),
     );
 
-    const defaultDomainMapping = this.configureCustomDomain(props);
+    const importedDomain = this.importCustomDomain(props);
 
-    new HttpApi(this, "McpHttpApi", {
-      defaultDomainMapping,
+    const httpApi = new HttpApi(this, "McpHttpApi", {
+      defaultDomainMapping: importedDomain
+        ? { domainName: importedDomain, mappingKey: props.apiMappingKey }
+        : undefined,
       defaultIntegration: new HttpLambdaIntegration("McpIntegration", fn),
     });
+
+    this.configureWellKnownMapping(props, importedDomain, httpApi);
 
     new Alarm(this, "McpErrorAlarm", {
       metric: fn.metricErrors(),
@@ -113,16 +125,43 @@ export class MutantMcpStack extends Stack {
     });
   }
 
-  private configureCustomDomain(props: MutantMcpStackProps) {
+  private importCustomDomain(props: MutantMcpStackProps): IDomainNameRef | undefined {
     if (!props.domainName) {
       return undefined;
     }
     // Reuse an existing API Gateway custom domain (and its ACM cert + DNS). We only
-    // add an API mapping, so no new certificate, domain, or Route53 record is created.
-    return {
-      domainName: CfnDomainName.fromDomainName(this, "McpImportedDomain", props.domainName),
-      mappingKey: props.apiMappingKey,
-    };
+    // add API mappings, so no new certificate, domain, or Route53 record is created.
+    return CfnDomainName.fromDomainName(this, "McpImportedDomain", props.domainName);
+  }
+
+  /**
+   * Serve the OAuth discovery documents at the custom domain's *root* as well as
+   * under the API mapping key.
+   *
+   * RFC 8414 clients look for the authorization-server metadata at
+   * `<issuer>/.well-known/oauth-authorization-server`; RFC 9728 clients may look
+   * for `<origin>/.well-known/oauth-protected-resource`. On a shared custom
+   * domain the root path belongs to another API (the report-generator `mutant-api`),
+   * which 404s those paths, so this API claims the `.well-known` prefix instead.
+   *
+   * API Gateway strips the mapped prefix before invoking the Lambda, so these
+   * requests arrive as `/oauth-authorization-server` and
+   * `/oauth-protected-resource`; the handler accepts both forms. Skipped when
+   * this API already owns the root mapping, where the paths already resolve.
+   */
+  private configureWellKnownMapping(
+    props: MutantMcpStackProps,
+    domainName: IDomainNameRef | undefined,
+    api: HttpApi,
+  ): void {
+    if (!domainName || !props.apiMappingKey) {
+      return;
+    }
+    new ApiMapping(this, "OAuthWellKnownMapping", {
+      api,
+      domainName,
+      apiMappingKey: props.wellKnownMappingKey ?? DEFAULT_WELL_KNOWN_MAPPING_KEY,
+    });
   }
 }
 

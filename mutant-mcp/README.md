@@ -156,11 +156,19 @@ The CDK stack provisions:
 - IAM scoped to `lambda:InvokeFunction` on the specific report-generator alias
   (the MCP role intentionally has **no** `UserEntitlements` read permission);
 - an API Gateway HTTP API with a `$default` catch-all route;
-- an optional custom-domain mapping to an existing API Gateway custom domain;
+- two custom-domain mappings to an existing API Gateway custom domain when one is
+  configured: the MCP mount (`MUTANT_API_MAPPING_KEY`, e.g. `/mcp`) and
+  `.well-known`, which serves OAuth discovery at the host root so RFC 8414 / 9728
+  clients find it at the issuer origin;
 - error and latency CloudWatch alarms.
 
 `MUTANT_MCP_RESOURCE_URI` defaults to `https://<domain>/<apiMappingKey|mcp>` when
-a domain is configured.
+a domain is configured. That host's origin is advertised as the authorization
+server: the authorization-server metadata uses it as `issuer` (the origin
+actually serving the document), and protected-resource metadata lists it in
+`authorization_servers`. The `authorization_endpoint` / `token_endpoint` still
+point at Cognito's custom domain, and token `iss` claims are still validated
+against `MUTANT_OAUTH_ISSUER`.
 
 ## CI/CD (GitHub Actions)
 

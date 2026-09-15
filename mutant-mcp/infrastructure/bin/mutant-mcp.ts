@@ -15,6 +15,7 @@ new MutantMcpStack(app, "MutantMcpStack", {
   functionName: `mutant-mcp-${environment}`,
   domainName: process.env.MUTANT_DOMAIN_NAME || undefined,
   apiMappingKey: process.env.MUTANT_API_MAPPING_KEY || undefined,
+  wellKnownMappingKey: process.env.MUTANT_WELL_KNOWN_MAPPING_KEY || undefined,
   serviceLambdaArn: process.env.MUTANT_SERVICE_LAMBDA_ARN || undefined,
   oauthIssuer: process.env.MUTANT_OAUTH_ISSUER || undefined,
   oauthAudience: process.env.MUTANT_OAUTH_AUDIENCE || undefined,

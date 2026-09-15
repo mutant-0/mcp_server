@@ -75,19 +75,29 @@ const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource"
 const AUTHORIZATION_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server";
 
 /**
- * Match a well-known route that may be preceded by a mount prefix (e.g.
- * `/mcp/.well-known/oauth-protected-resource`) and/or followed by the resource
- * path (e.g. `/.well-known/oauth-protected-resource/mcp`).
+ * Match a well-known route in any of the shapes the deployment produces:
  *
- * API Gateway mapping keys strip their prefix before the request reaches the
- * Lambda, so deployed requests arrive as the bare path while a local dev server
- * sees the prefix. Both forms must resolve.
+ * - host root: `/.well-known/oauth-authorization-server` (the RFC 8414 form,
+ *   reachable because the custom domain maps the `.well-known` prefix here);
+ * - behind a mount prefix: `/mcp/.well-known/oauth-authorization-server` (what a
+ *   local dev server and the API mapping key form see);
+ * - mapping-key stripped: `/oauth-authorization-server` (API Gateway removes the
+ *   mapped `.well-known` prefix before invoking the Lambda).
+ *
+ * An optional resource-path suffix is also accepted, e.g.
+ * `/.well-known/oauth-protected-resource/mcp` (RFC 9728 canonical form).
  */
 function matchesWellKnown(path: string, wellKnownPath: string): boolean {
-  const index = path.indexOf(wellKnownPath);
-  if (index < 0) return false;
-  const end = index + wellKnownPath.length;
-  return end === path.length || path[end] === "/";
+  // The same document served without its `.well-known` segment, which is what
+  // arrives when the domain maps `.well-known` directly to this API.
+  const stripped = wellKnownPath.replace(/^\/\.well-known/, "");
+  for (const candidate of [wellKnownPath, stripped]) {
+    const index = path.indexOf(candidate);
+    if (index < 0) continue;
+    const end = index + candidate.length;
+    if (end === path.length || path[end] === "/") return true;
+  }
+  return false;
 }
 
 export async function createHttpHandler(

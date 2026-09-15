@@ -28,6 +28,35 @@ One-time setup (Cognito console or CLI):
    `https://<domain>.auth.<region>.amazoncognito.com` for the hosted UI, or
    `https://cognito-idp.<region>.amazonaws.com/<pool-id>`).
 
+### Provisioned in the shared pool (`us-west-2_tgb5TJylh`)
+
+Created 2026-09-12:
+
+- **Resource server** identifier `mutant`, scope `analysis.read`
+  (`mutant/analysis.read`).
+- **App client** `Mutant MCP ChatGPT Connector`
+  (`1hi6c97v6md1q68h91ld37tre4`): public (no secret), authorization code,
+  scopes `openid mutant/analysis.read`, IdPs `COGNITO Google`. Callbacks:
+  `https://chatgpt.com/connector_platform_oauth_redirect` (connector) plus
+  `https://oauth.pstmn.io/v1/callback` and
+  `https://oauth.pstmn.io/v1/browser-callback` (Postman testing only; remove
+  for prod clients).
+- `MUTANT_OAUTH_CLIENT_ID` must be that client id. It is supplied by the GitHub
+  **secret** `MUTANT_OAUTH_CLIENT_ID`, so editing only the Lambda environment
+  will be reverted by the next CDK deploy.
+
+Two token types meet here — do not mix them:
+
+- The **Portal** client (`7eosqbhf950il1k92itt2j7cu`) backs the report-generator
+  API. Its JWT authorizer configures `audience = <client id>`, which only
+  matches a Cognito **ID token** (`aud` present), so that path consumes ID
+  tokens.
+- MCP is an OAuth 2.1 protected resource and requires a Cognito **access
+  token** (`token_use=access`), which carries `scope` and `client_id`.
+  Cognito access tokens have no `aud`, so a portal ID token is rejected with
+  `reason: not_access_token`. Use the dedicated client and its access token.
+- The Portal client must not be granted the MCP scope; leave it untouched.
+
 ## 2. Environment
 
 MCP Lambda (`mutant-mcp`):
@@ -55,10 +84,16 @@ report-generator Lambda:
 ## 3. Verifying discovery and auth
 
 The MCP API is mounted behind an API Gateway mapping key (`/mcp`), which strips
-the prefix before the Lambda. Discovery therefore lives under the mount, not at
-the host root, and the `401` challenge advertises exactly this URL:
+the prefix before the Lambda. The same Lambda also serves OAuth discovery at the
+**host root**: the stack adds a second `.well-known` mapping to the custom domain
+so RFC 8414 / RFC 9728 clients can find the documents where they look, even
+though the root path otherwise belongs to the report-generator API.
 
 ```bash
+# Canonical root form (issuer origin) — what RFC 8414 clients fetch:
+curl -s https://<mcp-host>/.well-known/oauth-authorization-server | jq
+curl -s https://<mcp-host>/.well-known/oauth-protected-resource | jq
+# Mount form (also served, and what the 401 challenge advertises):
 curl -s https://<mcp-host>/mcp/.well-known/oauth-protected-resource | jq
 curl -s https://<mcp-host>/mcp/.well-known/oauth-authorization-server | jq '.code_challenge_methods_supported'
 # Expect 401 + challenge without a token (note the `resource_metadata` URL):
@@ -66,16 +101,22 @@ curl -si https://<mcp-host>/mcp -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | grep -i www-authenticate
 ```
 
-Clients MUST fetch the `resource_metadata` URL from the challenge; the RFC 9728
-canonical root form (`https://<host>/.well-known/oauth-protected-resource/mcp`)
-is served by the domain's root API mapping and returns `404`.
+The `.well-known` mapping means API Gateway strips that prefix too, so the Lambda
+receives `/oauth-authorization-server` and `/oauth-protected-resource`; the handler
+accepts the root, mount-prefixed, and prefix-stripped forms.
 
 Checklist:
 
-- PRM `resource` equals `MUTANT_MCP_RESOURCE_URI`; `authorization_servers`
-  includes the Cognito issuer; `scopes_supported` includes the required scope.
-- AS metadata advertises `authorization_code`, `refresh_token`, and
+- AS metadata `issuer` equals the MCP host origin (e.g.
+  `https://dev-api.mutantbiotech.com`), matching the origin serving the document;
+  endpoints point at the Cognito custom domain (`https://login.mutantgenomics.com/oauth2/...`).
+- AS metadata `scopes_supported` is exactly `["mutant/analysis.read"]`, and it
+  advertises `authorization_code`, `refresh_token`, and
   `code_challenge_methods_supported: ["S256"]`.
+- PRM `resource` equals `MUTANT_MCP_RESOURCE_URI`; `authorization_servers` is the
+  MCP host origin (where the RFC 8414 document is served), **not** the Cognito
+  issuer, whose custom domain 404s `/.well-known/oauth-authorization-server`;
+  `scopes_supported` includes the required scope.
 - Missing/invalid tokens yield `401` with `error="invalid_token"`; a token
   missing the scope yields `403` with `error="insufficient_scope"`.
 
