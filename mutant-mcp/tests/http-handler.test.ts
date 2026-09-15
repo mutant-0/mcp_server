@@ -52,10 +52,13 @@ describe("HTTP handler (dev mode)", () => {
     expect(challenge).toContain("Bearer");
     expect(challenge).toContain("resource_metadata=");
     expect(challenge).toContain("error=\"invalid_token\"");
-    // The advertised URL must be reachable behind the API Gateway mapping key.
+    // RFC 9728 places the well-known segment before the resource path, at the
+    // resource origin: <origin>/.well-known/oauth-protected-resource<path>.
     expect(challenge).toContain(
-      "resource_metadata=\"https://mcp.mutantgenomics.com/mcp/.well-known/oauth-protected-resource\"",
+      "resource_metadata=\"https://mcp.mutantgenomics.com/.well-known/oauth-protected-resource/mcp\"",
     );
+    // The canonical URI-form scope is advertised so a client knows what to request.
+    expect(challenge).toContain("scope=\"https://mcp.mutantgenomics.com/mcp/analysis.read\"");
   });
 
   it("rejects requests with an invalid bearer token", async () => {

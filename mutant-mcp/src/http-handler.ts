@@ -171,7 +171,7 @@ async function handleRequest(
     const token = extractBearerToken(req);
     if (!token) {
       requestLogger.warn("request missing bearer token");
-      challenge(res, config, "invalid_token", "Authentication required", false);
+      challenge(res, config, "invalid_token", "Authentication required");
       sendJson(res, 401, authenticationError());
       return;
     }
@@ -190,7 +190,7 @@ async function handleRequest(
           },
           "request token rejected",
         );
-        challenge(res, config, error.oauthError, error.message, true);
+        challenge(res, config, error.oauthError, error.message);
         sendJson(
           res,
           status,
@@ -201,7 +201,7 @@ async function handleRequest(
         return;
       }
       requestLogger.error({ err: error }, "token validation failed unexpectedly");
-      challenge(res, config, "invalid_token", "Invalid or expired token", true);
+      challenge(res, config, "invalid_token", "Invalid or expired token");
       sendJson(res, 401, invalidTokenError());
       return;
     }
@@ -242,7 +242,6 @@ function challenge(
   config: AppConfig,
   oauthError: "invalid_token" | "insufficient_scope" | "invalid_request",
   description: string,
-  includeScope: boolean,
 ): void {
   res.setHeader(
     "WWW-Authenticate",
@@ -250,7 +249,9 @@ function challenge(
       resourceMetadataUrl: protectedResourceMetadataUrl(resourceUri(config)),
       error: oauthError,
       errorDescription: description,
-      ...(includeScope ? { scope: requiredScope(config) } : {}),
+      // Always advertise the canonical URI-form scope so a client that has not
+      // yet obtained a token knows exactly what to request.
+      scope: requiredScope(config),
     }),
   );
 }

@@ -80,7 +80,7 @@ describe("MCP server integration", () => {
     expect(challenge).toContain("Bearer ");
     expect(challenge).toContain('error="invalid_token"');
     expect(challenge).toContain(
-      "https://mcp.mutantgenomics.com/mcp/.well-known/oauth-protected-resource",
+      "https://mcp.mutantgenomics.com/.well-known/oauth-protected-resource/mcp",
     );
   });
 

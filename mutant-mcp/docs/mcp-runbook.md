@@ -99,10 +99,12 @@ though the root path otherwise belongs to the report-generator API.
 # Canonical root form (issuer origin) — what RFC 8414 clients fetch:
 curl -s https://<mcp-host>/.well-known/oauth-authorization-server | jq
 curl -s https://<mcp-host>/.well-known/oauth-protected-resource | jq
-# Mount form (also served, and what the 401 challenge advertises):
+# RFC 9728 resource-path form — what the 401 challenge advertises:
+curl -s https://<mcp-host>/.well-known/oauth-protected-resource/mcp | jq
+# Mount form (also served):
 curl -s https://<mcp-host>/mcp/.well-known/oauth-protected-resource | jq
 curl -s https://<mcp-host>/mcp/.well-known/oauth-authorization-server | jq '.code_challenge_methods_supported'
-# Expect 401 + challenge without a token (note the `resource_metadata` URL):
+# Expect 401 + challenge without a token (note the `resource_metadata` and `scope` values):
 curl -si https://<mcp-host>/mcp -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | grep -i www-authenticate
 ```
@@ -110,6 +112,12 @@ curl -si https://<mcp-host>/mcp -H 'content-type: application/json' \
 The `.well-known` mapping means API Gateway strips that prefix too, so the Lambda
 receives `/oauth-authorization-server` and `/oauth-protected-resource`; the handler
 accepts the root, mount-prefixed, and prefix-stripped forms.
+
+`resource_metadata` is built as
+`<origin>/.well-known/oauth-protected-resource<resource-path>` (the well-known
+segment goes before the resource path, never suffixed onto the resource URI), and
+the challenge advertises the canonical URI-form scope
+`https://dev-api.mutantbiotech.com/mcp/analysis.read`.
 
 Checklist:
 
