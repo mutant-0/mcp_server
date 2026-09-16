@@ -392,27 +392,66 @@ describe("transport size caps", () => {
 });
 
 describe("get_analysis_status", () => {
-  it("reports dna_status missing when no analysis exists", async () => {
+  it("points at show_dna_import when no analysis exists", async () => {
     const { client } = await connect({
       responder: () => ok({ data: { analysis: { status: "none" } }, analysis_version: null }),
     });
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
-    expect((structured(result).data as { dna_status?: string }).dna_status).toBe("missing");
+    const data = structured(result).data as Record<string, unknown>;
+    expect(data.dna_status).toBe("missing");
+    expect(data.analysis_status).toBe("not_started");
+    expect(data.next_action).toEqual({
+      tool: "show_dna_import",
+      reason: "DNA data is required before an analysis can be generated.",
+    });
   });
 
-  it("reports dna_status available when an analysis exists", async () => {
+  it("reports a ready analysis and points at the analysis tools", async () => {
     const { client } = await connect({
-      responder: () => ok({ data: { analysis: { status: "ready" } } }),
+      responder: () =>
+        ok({ data: { analysis: { status: "ready" }, entitlement: { plan: "mutant_free" } } }),
     });
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
-    expect((structured(result).data as { dna_status?: string }).dna_status).toBe("available");
+    const data = structured(result).data as Record<string, unknown>;
+    expect(data.dna_status).toBe("available");
+    expect(data.analysis_status).toBe("ready");
+    expect(data.plan).toBe("Mutant Free");
+    expect((data.next_action as { tool?: string }).tool).toBe("get_analysis_context");
   });
 
-  it("prefers a backend-provided dna_status over the derived shim", async () => {
+  it("asks the model to check again while an analysis is processing", async () => {
     const { client } = await connect({
-      responder: () => ok({ data: { analysis: { status: "ready" }, dna_status: "missing" } }),
+      responder: () => ok({ data: { analysis: { status: "processing" } } }),
     });
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
-    expect((structured(result).data as { dna_status?: string }).dna_status).toBe("missing");
+    const data = structured(result).data as Record<string, unknown>;
+    expect(data.dna_status).toBe("available");
+    expect(data.analysis_status).toBe("processing");
+    expect((data.next_action as { tool?: string }).tool).toBe("get_analysis_status");
+  });
+
+  it("prefers backend-provided routing fields over the derived shim", async () => {
+    const providedNextAction = {
+      tool: "show_dna_import",
+      reason: "DNA data is required before an analysis can be generated.",
+    };
+    const { client } = await connect({
+      responder: () =>
+        ok({
+          data: {
+            analysis: { status: "ready" },
+            dna_status: "missing",
+            analysis_status: "processing",
+            plan: "Mutant Full",
+            next_action: providedNextAction,
+          },
+        }),
+    });
+    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    const data = structured(result).data as Record<string, unknown>;
+    expect(data.dna_status).toBe("missing");
+    expect(data.analysis_status).toBe("processing");
+    expect(data.plan).toBe("Mutant Full");
+    expect(data.next_action).toEqual(providedNextAction);
   });
 });

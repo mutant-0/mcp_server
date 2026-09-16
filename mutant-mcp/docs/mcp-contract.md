@@ -102,7 +102,14 @@ Input: `{}`.
 
 ```json
 {
-  "analysis": { "status": "ready", "generated_at": "2026-01-01", "refresh_status": "processing" },
+  "dna_status": "missing",
+  "analysis_status": "not_started",
+  "plan": "Mutant Free",
+  "next_action": {
+    "tool": "show_dna_import",
+    "reason": "DNA data is required before an analysis can be generated."
+  },
+  "analysis": { "status": "none", "generated_at": null, "refresh_status": null },
   "entitlement": {
     "plan": "mutant_free",
     "hypothesis_scope": "top_3",
@@ -120,15 +127,28 @@ Input: `{}`.
 }
 ```
 
-`analysis.status` is `none | processing | ready | failed`. Status is a successful
-call even with no analysis. `accessible_hypothesis_ids` is present for Free only.
-`access_expires_at` is populated only when access is scheduled to end (never a
-renewal date); otherwise it is `null`. `dna_status` is `missing | available` and
-backs the routing rule in `SERVER_INSTRUCTIONS`: when no analysis exists and
-`dna_status` is `missing`, the model calls `show_dna_import` instead of the
-analysis tools. Until the backend reports it authoritatively, the MCP layer
-derives it from `analysis.status === "none"`; when it does report
-`dna_status`, that value wins.
+Status is a successful call even with no analysis. `analysis.status` is
+`none | processing | ready | failed`.
+
+The four routing fields are the contract the model acts on:
+
+- `dna_status` is `missing | available`; `missing` means no DNA data has been
+  received, so `show_dna_import` is the next action.
+- `analysis_status` is `not_started | processing | ready | failed` (`none` maps
+  to `not_started`).
+- `plan` is the human-readable effective plan (for example `Mutant Free`),
+  derived from `entitlement.plan`.
+- `next_action` names the tool to call next and why. It is
+  `show_dna_import` when `dna_status` is `missing`, `get_analysis_context` when
+  the analysis is `ready`, and `get_analysis_status` while an analysis is still
+  `processing`.
+
+Until the backend reports these fields authoritatively, the MCP layer derives
+them from the raw status payload; a backend-provided value always wins.
+
+`accessible_hypothesis_ids` is present for Free only. `access_expires_at` is
+populated only when access is scheduled to end (never a renewal date); otherwise
+it is `null`.
 
 ### `get_analysis_context`
 
@@ -219,6 +239,10 @@ returns a narrowed response.
 ### `show_dna_import`
 
 Input: `{}`. Scope `dna.import`. No backend call.
+
+The model calls this immediately whenever `get_analysis_status` reports
+`dna_status="missing"` — it renders the import UI rather than describing it, so
+the model must not tell the user to upload DNA without invoking it.
 
 Visibility `["model", "app"]`. Returns minimal routing state only — no genetic
 data and no account state beyond "connected":

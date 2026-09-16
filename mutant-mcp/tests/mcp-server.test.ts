@@ -60,8 +60,17 @@ describe("MCP server integration", () => {
     expect(result.isError).toBe(false);
     const structured = result.structuredContent as { ok: boolean; data: unknown };
     expect(structured.ok).toBe(true);
-    // `dna_status` is derived in the MCP layer until the backend sends it.
-    expect(structured.data).toEqual({ analysis: { status: "ready" }, dna_status: "available" });
+    // The routing fields are derived in the MCP layer until the backend sends them.
+    expect(structured.data).toEqual({
+      analysis: { status: "ready" },
+      dna_status: "available",
+      analysis_status: "ready",
+      plan: "unknown",
+      next_action: {
+        tool: "get_analysis_context",
+        reason: "The analysis is ready; start with the analysis context.",
+      },
+    });
   });
 
   it("relays a structured error envelope and sets isError", async () => {

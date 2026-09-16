@@ -16,10 +16,10 @@ export const showDnaImportTool: MutantToolDefinition = {
   name: "show_dna_import",
   title: "Show DNA Import",
   description:
-    "Displays the Mutant DNA import interface for an authenticated user who needs to add DNA " +
-    "data before a genomic analysis can be generated. Call this when get_analysis_status " +
-    "reports dna_status 'missing'. The user uploads their raw DNA file inside the panel, where " +
-    "it is processed locally; no DNA data passes through this conversation.",
+    "Render the Mutant DNA import UI.\n\n" +
+    'Call this tool immediately whenever get_analysis_status returns dna_status="missing".\n' +
+    "Do not merely tell the user to upload DNA; invoke this tool so the upload interface is " +
+    "shown.",
   scope: "dna.import",
   uiVisibility: ["model", "app"],
   uiResourceUri: DNA_IMPORT_UI_URI,

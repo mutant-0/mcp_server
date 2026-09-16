@@ -110,7 +110,7 @@ mutant-mcp/
 
 | Tool | Scope | Purpose |
 |---|---|---|
-| `get_analysis_status` | `analysis.read` | Current analysis status + effective plan, capabilities, and `dna_status`. |
+| `get_analysis_status` | `analysis.read` | Routing gate: `dna_status`, `analysis_status`, `plan`, and an explicit `next_action`. |
 | `get_analysis_context` | `analysis.read` | **Start here.** Coverage, interpretation rules/limitations, top hypotheses. |
 | `list_health_hypotheses` | `analysis.read` | List/search hypotheses (Free: fixed top three; Full: whole set). |
 | `get_hypothesis_details` | `analysis.read` | Full interpretation: scoring, patterns, clinical correlation, guardrails. |

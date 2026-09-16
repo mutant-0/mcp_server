@@ -11,7 +11,7 @@ export const SERVER_VERSION = "1.0.0";
 
 export const SERVER_INSTRUCTIONS = [
   "Mutant Genomics MCP server for the connected account's current saved analysis.",
-  "Routing: call get_analysis_status first. When it reports dna_status 'missing' (no analysis yet), call show_dna_import so the user can add their DNA data; the import runs inside that panel and its raw file is never uploaded. Once an analysis exists, use the analysis tools below.",
+  "Routing: call get_analysis_status first and follow the next_action it returns. When it reports dna_status 'missing', immediately call show_dna_import in the same turn so the user can add their DNA data; never just tell the user to upload DNA. The import runs inside that panel and its raw file is never uploaded. Once analysis_status is 'ready', use the analysis tools below.",
   "Start with get_analysis_context: it returns coverage, interpretation rules and limitations, and the leading health hypotheses.",
   "Never ask the user for an analysis ID; the current analysis is resolved from the connection.",
   "Never ask the user to paste DNA data, genotypes, or file contents into the conversation, and never repeat genotypes back to them.",
