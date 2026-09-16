@@ -1,0 +1,7 @@
+# The vendored DNA processor and the generated UI artifacts are hashed (by
+# scripts/sync-genomics.mjs and its drift guard in tests/genomics-parity.test.ts)
+# and embedded into the Apps SDK document, so their bytes must be identical on
+# every platform. Without this, git's core.autocrlf rewrites them to CRLF on
+# Windows and the same commit produces different bytes than the ubuntu-latest CI
+# checkout. Pin the whole UI tree to LF and let the scripts own the content.
+src/ui/** text eol=lf

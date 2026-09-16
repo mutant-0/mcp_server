@@ -284,6 +284,14 @@ the portal's `parseInWorker.js` / `parse.worker.js` are intentionally excluded
 (they fetch a catalog over the portal session, and this component injects the one
 `get_snp_catalog` returned).
 
+If `check:genomics` reports *every* module as modified, it is not drift: it is
+line endings. The manifest hashes the module body with LF endings and
+`mutant-mcp/.gitattributes` pins `src/ui/*` to LF, because git would otherwise
+hand Windows a CRLF working tree and CI an LF one — the same commit passing in one
+place and failing in the other. Re-run `npm run sync:genomics`, which writes LF
+copies and rewrites the manifest, and check that `.gitattributes` is still there.
+A genuine hand edit reports exactly the module that was edited.
+
 **Worker vs main-thread divergence.** The worker path and the fallback path must
 produce identical output; `tests/parse-parity.test.ts` parses every fixture both
 ways and fails on any difference. If that test is failing, the two entries have

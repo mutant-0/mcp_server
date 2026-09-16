@@ -1,9 +1,11 @@
-import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync, strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
+// The manifest contract is shared with the sync script, so the drift guard cannot
+// disagree with `npm run check:genomics` about the header or the hashing rules.
+import { GENERATED_HEADER, normalizeNewlines, sha256 } from "../scripts/genomics-manifest.mjs";
 import { parseDnaFile } from "../src/ui/dna-import/parseFile.js";
 import { fetchSnpCatalog } from "../src/ui/api.js";
 import { concatBytes, fakeFile } from "./genomics-fixtures.js";
@@ -27,11 +29,6 @@ const GENOMICS_DIR = path.resolve(HERE, "..", "src", "ui", "genomics");
 const API_SHIM = path.resolve(HERE, "..", "src", "ui", "api.js");
 const MANIFEST = path.join(GENOMICS_DIR, "sync-manifest.json");
 
-const GENERATED_HEADER = `// GENERATED FILE - DO NOT EDIT.
-// Vendored from front-end-web/src/genomics by scripts/sync-genomics.mjs.
-// Edit the upstream module (and re-run sync:genomics) instead.
-`;
-
 interface Manifest {
   source: string;
   modules: Record<string, string>;
@@ -39,10 +36,6 @@ interface Manifest {
 
 async function readManifest(): Promise<Manifest> {
   return JSON.parse(await readFile(MANIFEST, "utf8")) as Manifest;
-}
-
-function sha256(text: string): string {
-  return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
 /** Shared fixture catalog: three markers, one alias, one WGS capture target. */
@@ -122,10 +115,12 @@ describe("vendored processor drift guard", () => {
     expect(manifest.source).toBe("front-end-web/src/genomics");
   });
 
-  it("keeps every vendored module byte-identical to its manifest hash", async () => {
+  it("keeps every vendored module identical to its manifest hash", async () => {
     const manifest = await readManifest();
     for (const [name, expected] of Object.entries(manifest.modules)) {
-      const raw = await readFile(path.join(GENOMICS_DIR, name), "utf8");
+      // Normalised first: git hands this file to Windows as CRLF and to CI as LF,
+      // and the manifest hash must not depend on which.
+      const raw = normalizeNewlines(await readFile(path.join(GENOMICS_DIR, name), "utf8"));
       expect(raw.startsWith(GENERATED_HEADER), `${name} must keep the generated header`).toBe(true);
       const body = raw.slice(GENERATED_HEADER.length);
       expect(sha256(body), `${name} drifted from the manifest; run npm run sync:genomics`).toBe(

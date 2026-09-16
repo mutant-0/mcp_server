@@ -17,10 +17,18 @@
  * copies against the manifest and *additionally* validates upstream parity when
  * the source directory is present.
  */
-import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  GENERATED_HEADER as HEADER,
+  MANIFEST_NOTE,
+  MODULES,
+  SOURCE,
+  normalizeNewlines,
+  readVendoredBody,
+  sha256,
+} from "./genomics-manifest.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(HERE, "..");
@@ -31,47 +39,14 @@ const TARGET_DIR = path.join(PROJECT_ROOT, "src", "ui", "genomics");
 const MANIFEST_PATH = path.join(TARGET_DIR, "sync-manifest.json");
 const API_SHIM_PATH = path.join(PROJECT_ROOT, "src", "ui", "api.js");
 
-/**
- * The shared processing surface. Kept in sync deliberately: every module here is
- * byte-identical to its upstream counterpart apart from the generated header.
- *
- * The upstream `parseInWorker.js` / `parse.worker.js` are deliberately NOT
- * vendored. They belong to the portal's own upload flow: the client fetches a
- * catalog from the portal over HTTP (workers cannot read the portal session), and
- * the worker returns a result shape the component does not use. The component
- * runs the same `parse.js` / `stream.js` / `catalog.js` through its own worker
- * entry (`src/ui/dna-import/workerEntry.js`) with an injected catalog, so keeping
- * the portal's copies would only add a second, divergent code path.
- */
-const MODULES = [
-  "catalog.js",
-  "detect.js",
-  "normalize.js",
-  "parse.js",
-  "parse23andMe.js",
-  "parseAncestry.js",
-  "parseVcf.js",
-  "stream.js",
-];
-
-const HEADER = `// GENERATED FILE - DO NOT EDIT.
-// Vendored from front-end-web/src/genomics by scripts/sync-genomics.mjs.
-// Edit the upstream module (and re-run sync:genomics) instead.
-`;
-
-const MANIFEST_NOTE = "Hashes are of the upstream module body (without the generated header).";
-
-function sha256(text) {
-  return createHash("sha256").update(text, "utf8").digest("hex");
-}
-
 async function readUpstream(name) {
-  return readFile(path.join(SOURCE_DIR, name), "utf8");
+  // Normalised so the manifest (and the vendored copy written from it) is
+  // identical whichever platform runs the sync.
+  return normalizeNewlines(await readFile(path.join(SOURCE_DIR, name), "utf8"));
 }
 
 async function readVendored(name) {
-  const raw = await readFile(path.join(TARGET_DIR, name), "utf8");
-  return raw.startsWith(HEADER) ? raw.slice(HEADER.length) : raw;
+  return readVendoredBody(await readFile(path.join(TARGET_DIR, name), "utf8"));
 }
 
 async function readManifest() {
@@ -88,7 +63,7 @@ async function buildManifest() {
     modules[name] = sha256(await readUpstream(name));
   }
   return {
-    source: "front-end-web/src/genomics",
+    source: SOURCE,
     note: MANIFEST_NOTE,
     modules,
   };
@@ -97,6 +72,8 @@ async function buildManifest() {
 async function write() {
   await mkdir(TARGET_DIR, { recursive: true });
   const manifest = await buildManifest();
+  // `readUpstream` normalises newlines, so the vendored copy lands as LF on every
+  // platform and matches the hash the manifest just recorded.
   for (const name of MODULES) {
     await writeFile(path.join(TARGET_DIR, name), HEADER + (await readUpstream(name)), "utf8");
   }
@@ -141,7 +118,9 @@ async function check() {
 
   const failures = [];
 
-  // 1. The vendored copies must match the manifest (works without the portal checkout).
+  // 1. The vendored copies must match the manifest. This is the half that runs in
+  //    CI, where only this repository is checked out. Both sides are hashed with
+  //    LF endings, so the result does not depend on the checkout's line endings.
   for (const name of MODULES) {
     let body;
     try {

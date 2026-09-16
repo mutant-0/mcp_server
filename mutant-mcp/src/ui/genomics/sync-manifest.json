@@ -1,14 +1,14 @@
 {
   "source": "front-end-web/src/genomics",
-  "note": "Hashes are of the upstream module body (without the generated header).",
+  "note": "Hashes are of the upstream module body (without the generated header), with line endings normalized to LF.",
   "modules": {
-    "catalog.js": "0c199eadbd94d26f592ccb579a65d8118ab7d99a136a892ca807e56383e2e15e",
-    "detect.js": "a9ae7d2715046b79b0f5d8e3e861b97e2b49ea23e9bcc7b34099104caf32f5e5",
-    "normalize.js": "5692a346f4ebacfbbdec5eebdfaf254469f6e0a4b47336f1ae34bc19bc78eb84",
-    "parse.js": "5ddccfb8c583327985b1068fba4b76c892cd297222d218e8d43568e406f1a3e4",
-    "parse23andMe.js": "61903d0402eebbd20a2dd069d23db0e7478dca790281b865efa73a21038354eb",
-    "parseAncestry.js": "4388edf8063695a0d1304e7f1d7114ce03e6d072eff8da54548b9369c21dd7ca",
-    "parseVcf.js": "64381b93cfeee4294f40c7f69a71ec0604f5e1e75eab83ad3ad289b17663df9a",
-    "stream.js": "c5eef1255ab828e6627e0d9c041ff6b43e4db8062861d983b288c4e3890d7119"
+    "catalog.js": "c068146ddd17af467d790fd69b5a583b9de43ddb0edc6f0d124a60f162fc4e5d",
+    "detect.js": "79f9ce0dfdc53992e596d630b86c7883ec34fc75291af031665abeb722877729",
+    "normalize.js": "214b654f9e504d73efc4d66d66cba283a19189a65070f11fa39e29cdf98a4dd2",
+    "parse.js": "ea1f978bb9faea2963533603996d4075b8bc1f5634036929bac2cefed3777105",
+    "parse23andMe.js": "7e2a3ba7d07090639ff4ed01fccecb998a4ee28a7ca62d99ecd810a85b434633",
+    "parseAncestry.js": "865a9bae82ad36baef9d2ed94d7716e0f198518993f3c7c9876011f578debc46",
+    "parseVcf.js": "b2f98a757a862cb8bef18a6c8568bf12bcf2c39cd0b6228a612c1737fe5c0d36",
+    "stream.js": "08f7ba94dbbb1e651dc81b26f5880419b75a1109e37283aeecf6fd7975057bf7"
   }
 }
