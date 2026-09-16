@@ -1,7 +1,8 @@
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import type { MutantUserContext } from "../auth/user-context.js";
-import type { AppConfig } from "../config.js";
+import { DEFAULT_MUTANT_MAX_REQUEST_BYTES, type AppConfig } from "../config.js";
 import {
+  APP_ERROR_CODES,
   CONTRACT_VERSION,
   ErrorCode,
   isToolResponse,
@@ -47,7 +48,16 @@ export function buildBackendEvent(
   };
 }
 
-function fieldError(code: string, message: string, retryable = false): ToolResponse {
+export function byteLength(value: string): number {
+  return Buffer.byteLength(value, "utf-8");
+}
+
+function fieldError(
+  code: string,
+  message: string,
+  retryable = false,
+  extra: Partial<ToolResponse["error"]> = {},
+): ToolResponse {
   return {
     contract_version: CONTRACT_VERSION,
     analysis_version: null,
@@ -58,12 +68,78 @@ function fieldError(code: string, message: string, retryable = false): ToolRespo
       message,
       retryable,
       ...(retryable ? { retry_after_seconds: 30 } : {}),
+      ...extra,
     },
   };
 }
 
 export function serviceUnavailable(message: string): ToolResponse {
   return fieldError(ErrorCode.SERVICE_UNAVAILABLE, message, true);
+}
+
+/** The `PAYLOAD_TOO_LARGE` envelope, shared by the request cap and the tools. */
+export function payloadTooLarge(): ToolResponse {
+  return fieldError(
+    ErrorCode.PAYLOAD_TOO_LARGE,
+    "The processed DNA data is too large to submit in one request.",
+    false,
+    { app_code: APP_ERROR_CODES.payload_too_large },
+  );
+}
+
+/**
+ * Response cap for an operation. `get_snp_catalog` returns application data for
+ * the DNA import component rather than model context, so it is allowed the
+ * (larger) catalog cap; every other tool uses the general response cap.
+ */
+export function responseCap(
+  operation: ToolName,
+  maxResponseBytes: number,
+  snpCatalogMaxBytes: number,
+): number {
+  if (operation === "get_snp_catalog") {
+    return Math.max(snpCatalogMaxBytes, maxResponseBytes);
+  }
+  return maxResponseBytes;
+}
+
+export function responseCapFor(config: AppConfig, operation: ToolName): number {
+  return responseCap(
+    operation,
+    config.MUTANT_MAX_RESPONSE_BYTES,
+    config.MUTANT_SNP_CATALOG_MAX_BYTES,
+  );
+}
+
+/**
+ * Reject a request whose serialized arguments exceed the cap.
+ *
+ * This guards the synchronous `lambda:InvokeFunction` payload ceiling, which is
+ * the binding limit for a normalized WGS import payload. Returns `null` when the
+ * request fits.
+ */
+export function enforceRequestCap(
+  args: Record<string, unknown>,
+  maxRequestBytes: number,
+): ToolResponse | null {
+  const size = byteLength(JSON.stringify(args ?? {}));
+  if (size <= maxRequestBytes) return null;
+  return payloadTooLarge();
+}
+
+/**
+ * Reject a response that exceeds the cap *before* parsing it, so an oversized
+ * upstream body never becomes structured content the model could see.
+ */
+export function enforceResponseCap(rawBody: string, capBytes: number): ToolResponse | null {
+  const size = byteLength(rawBody);
+  if (size <= capBytes) return null;
+  return fieldError(
+    ErrorCode.RESPONSE_TOO_LARGE,
+    "The analysis service returned more data than this tool can safely deliver.",
+    false,
+    { app_code: APP_ERROR_CODES.payload_too_large },
+  );
 }
 
 function regionFromArn(arn: string): string {
@@ -84,6 +160,9 @@ export class AwsMutantBackendClient implements MutantBackendClient {
     ctx: MutantUserContext,
     requestId: string,
   ): Promise<ToolResponse> {
+    const oversized = enforceRequestCap(args, this.config.MUTANT_MAX_REQUEST_BYTES);
+    if (oversized) return oversized;
+
     const event = buildBackendEvent(operation, args, ctx, requestId);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.MUTANT_REQUEST_TIMEOUT_MS);
@@ -116,6 +195,9 @@ export class AwsMutantBackendClient implements MutantBackendClient {
     }
 
     const body = Buffer.from(response.Payload).toString("utf-8");
+    const tooLarge = enforceResponseCap(body, responseCapFor(this.config, operation));
+    if (tooLarge) return tooLarge;
+
     if (response.FunctionError) {
       return serviceUnavailable("The analysis service failed to handle the request.");
     }
@@ -155,14 +237,115 @@ export function parseBackendPayload(parsed: unknown): ToolResponse {
   return parsed;
 }
 
+/**
+ * Minimal synthetic catalog used by dev mode. It is deliberately tiny: the real
+ * catalog comes from the backend, and the component only needs a well-formed
+ * shape to exercise the local parse + submit path.
+ */
+export const MOCK_SNP_CATALOG = {
+  version: 1,
+  snp_count: 3,
+  snps: {
+    rs4680: {
+      rsID: "rs4680",
+      chromosome: "22",
+      position_GRCh37: 19951271,
+      position_GRCh38: 19963748,
+      risk_allele: "A",
+    },
+    rs328: {
+      rsID: "rs328",
+      chromosome: "8",
+      position_GRCh37: 19819724,
+      position_GRCh38: 19962213,
+      risk_allele: "G",
+    },
+    rs1801133: {
+      rsID: "rs1801133",
+      chromosome: "1",
+      position_GRCh37: 11856378,
+      position_GRCh38: 11796321,
+      risk_allele: "A",
+    },
+  },
+  aliases: { rs4680: ["rs1000000"] },
+  reference_alleles: {
+    rs4680: { GRCh37: "G", GRCh38: "G" },
+    rs328: { GRCh37: "C", GRCh38: "C" },
+  },
+} as const;
+
+/** Caps the dev-mode mock enforces, mirroring the real client. */
+export interface MockClientCaps {
+  maxRequestBytes?: number;
+  maxResponseBytes?: number;
+  snpCatalogMaxBytes?: number;
+}
+
 /** Used when no target ARN is configured, so local development stays self-contained. */
 export class MockMutantBackendClient implements MutantBackendClient {
+  private readonly maxRequestBytes: number;
+  private readonly maxResponseBytes: number;
+  private readonly snpCatalogMaxBytes: number;
+
+  constructor(caps: MockClientCaps = {}) {
+    this.maxRequestBytes = caps.maxRequestBytes ?? DEFAULT_MUTANT_MAX_REQUEST_BYTES;
+    this.maxResponseBytes = caps.maxResponseBytes ?? 512000;
+    this.snpCatalogMaxBytes = caps.snpCatalogMaxBytes ?? 2000000;
+  }
+
   async invoke(
     operation: ToolName,
     args: Record<string, unknown>,
     ctx: MutantUserContext,
     requestId: string,
   ): Promise<ToolResponse> {
+    // The mock enforces the same transport caps as the real client so dev mode
+    // exercises the oversize paths instead of silently accepting anything.
+    const oversized = enforceRequestCap(args, this.maxRequestBytes);
+    if (oversized) return oversized;
+
+    const response = this.respond(operation, args, ctx, requestId);
+    const tooLarge = enforceResponseCap(
+      JSON.stringify(response),
+      responseCap(operation, this.maxResponseBytes, this.snpCatalogMaxBytes),
+    );
+    return tooLarge ?? response;
+  }
+
+  private respond(
+    operation: ToolName,
+    args: Record<string, unknown>,
+    ctx: MutantUserContext,
+    requestId: string,
+  ): ToolResponse {
+    if (operation === "get_snp_catalog") {
+      return {
+        contract_version: CONTRACT_VERSION,
+        analysis_version: null,
+        ok: true,
+        // `data` is the catalog itself, mirroring the reports-generator
+        // `/snp-catalog` body the portal processor already consumes.
+        data: MOCK_SNP_CATALOG as unknown as Record<string, unknown>,
+        error: null,
+      };
+    }
+
+    if (operation === "create_report") {
+      const importRequestId =
+        typeof args.import_request_id === "string" ? args.import_request_id : "unknown";
+      return {
+        contract_version: CONTRACT_VERSION,
+        analysis_version: null,
+        ok: true,
+        data: {
+          analysis_id: `analysis_mock_${importRequestId.slice(0, 8)}`,
+          status: "processing",
+        },
+        error: null,
+      };
+    }
+
     return {
       contract_version: CONTRACT_VERSION,
       analysis_version: "mock",
@@ -172,7 +355,9 @@ export class MockMutantBackendClient implements MutantBackendClient {
         operation,
         identity: { user_id: ctx.userId },
         request_id: requestId,
-        arguments_received: args,
+        // Key names only: echoing arguments would put submitted genotypes (and
+        // any future sensitive field) into a mock tool result.
+        argument_keys: Object.keys(args ?? {}),
       },
       error: null,
     };
@@ -181,7 +366,11 @@ export class MockMutantBackendClient implements MutantBackendClient {
 
 export function createMutantBackendClient(config: AppConfig): MutantBackendClient {
   if (!config.MUTANT_SERVICE_LAMBDA_ARN) {
-    return new MockMutantBackendClient();
+    return new MockMutantBackendClient({
+      maxRequestBytes: config.MUTANT_MAX_REQUEST_BYTES,
+      maxResponseBytes: config.MUTANT_MAX_RESPONSE_BYTES,
+      snpCatalogMaxBytes: config.MUTANT_SNP_CATALOG_MAX_BYTES,
+    });
   }
   return new AwsMutantBackendClient(config);
 }

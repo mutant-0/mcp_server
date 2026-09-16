@@ -11,9 +11,29 @@ authenticated transport.
 - OAuth 2.1 authorization code with PKCE `S256`.
 - `GET /.well-known/oauth-protected-resource[/<resource-path>]` and `GET [<mount>]/.well-known/oauth-protected-resource[/<resource-path>]` — RFC 9728 protected-resource metadata. The custom domain maps `.well-known` to this API, so the document resolves at the host root as well as under the mount key. RFC 9728 locates the document at the resource origin, not by suffixing the resource URI: for resource `https://dev-api.mutantbiotech.com/mcp` the canonical URL is `https://dev-api.mutantbiotech.com/.well-known/oauth-protected-resource/mcp`, and that is the exact URL the `401` challenge advertises. `authorization_servers` lists the MCP host origin — the origin that serves the RFC 8414 document — **not** the Cognito issuer, whose custom domain `404`s the well-known path.
 - `GET /.well-known/oauth-authorization-server` and `GET [<mount>]/.well-known/oauth-authorization-server` — authorization-server metadata mirrored from the Cognito OIDC discovery document (ensures `code_challenge_methods_supported: ["S256"]`). Its `issuer` is the MCP host origin, matching the origin serving the document; `authorization_endpoint`/`token_endpoint` remain on the Cognito custom domain, and token `iss` claims are still validated against `MUTANT_OAUTH_ISSUER`.
-- Requests without a valid token receive `401` with a `WWW-Authenticate: Bearer resource_metadata="…", error="…", error_description="…"` challenge. A token missing the required scope receives `403` with `error="insufficient_scope"`.
+- Requests without a valid token receive `401` with a `WWW-Authenticate: Bearer resource_metadata="…", error="…", error_description="…"` challenge. A token missing the scope a tool requires receives `403` with `error="insufficient_scope"`.
 - Tokens are verified for signature, issuer, expiry, `token_use == "access"`, authorized `client_id`, required scope, and (when the issuer emits one) the resource indicator.
 - Identity is `sub` only. **No tool accepts an analysis id, account, or plan.**
+
+### Scopes
+
+One bearer token authorizes one connection, and the connection serves both the
+analysis tools and the DNA import flow. Two scopes are supported, and **scope
+authorization happens per tool** (see `src/tools/scope-guard.ts`):
+
+| Scope | Granted tools |
+|---|---|
+| `<resource>/analysis.read` | the six analysis tools |
+| `<resource>/dna.import` | `show_dna_import`, `get_snp_catalog`, `create_report` |
+
+Both are advertised in protected-resource metadata, authorization-server
+metadata, every `WWW-Authenticate` challenge, and each tool's
+`_meta.securitySchemes`. A token must carry at least one of them to reach the MCP
+endpoint; calling a tool whose scope is absent returns `INSUFFICIENT_SCOPE` with
+`error.required_scope` set, and the tool-level `_meta["mcp/www_authenticate"]`
+challenge advertises that scope so the host re-consents instead of failing
+opaquely. `dna.import` is deliberately separate from `analysis.read` because
+importing DNA creates user data.
 
 ## Envelope
 
@@ -45,6 +65,30 @@ content block mirroring it. `isError` is set from `ok`.
   }
 }
 ```
+
+Scope denials add two fields so the host can re-consent and the Apps SDK
+component can pick a stable branch:
+
+```json
+{
+  "contract_version": "1.0.0",
+  "analysis_version": null,
+  "ok": false,
+  "data": null,
+  "error": {
+    "code": "INSUFFICIENT_SCOPE",
+    "message": "Importing DNA requires the 'https://…/mcp/dna.import' scope. Reconnect Mutant in ChatGPT to grant DNA import access.",
+    "retryable": false,
+    "next_action": "reauthorize",
+    "required_scope": "https://…/mcp/dna.import",
+    "app_code": "insufficient_scope"
+  }
+}
+```
+
+`app_code` is the component-facing code (see `APP_ERROR_CODES`). The component
+maps the uppercase contract codes onto its own lowercase branches so a host that
+ignores `_meta` still gets a usable text fallback.
 
 `analysis_version` is opaque. It changes when returned content changes
 (account cache revision + scoring config version). Clients that cache must
@@ -79,7 +123,12 @@ Input: `{}`.
 `analysis.status` is `none | processing | ready | failed`. Status is a successful
 call even with no analysis. `accessible_hypothesis_ids` is present for Free only.
 `access_expires_at` is populated only when access is scheduled to end (never a
-renewal date); otherwise it is `null`.
+renewal date); otherwise it is `null`. `dna_status` is `missing | available` and
+backs the routing rule in `SERVER_INSTRUCTIONS`: when no analysis exists and
+`dna_status` is `missing`, the model calls `show_dna_import` instead of the
+analysis tools. Until the backend reports it authoritatively, the MCP layer
+derives it from `analysis.status === "none"`; when it does report
+`dna_status`, that value wins.
 
 ### `get_analysis_context`
 
@@ -160,7 +209,99 @@ Input: `{ hypothesis_id?, module_id?, gene?, rsids?, limit?, cursor? }`.
 - Returns `items[]`, `modules[]` (`score_state: scored | not_scored | retired`,
   `score` null when not scored), and `page`.
 
-## Pagination
+## DNA import
+
+Three tools and one UI resource. The raw DNA file is parsed in the user's browser;
+only catalog-matched variants are submitted. The MCP layer adds no genetics: it
+validates shape and size, forwards the payload with a server-derived identity, and
+returns a narrowed response.
+
+### `show_dna_import`
+
+Input: `{}`. Scope `dna.import`. No backend call.
+
+Visibility `["model", "app"]`. Returns minimal routing state only — no genetic
+data and no account state beyond "connected":
+
+```json
+{ "account_status": "connected", "dna_status": "missing", "status": "awaiting_file" }
+```
+
+The result and the tool descriptor both carry the UI descriptor, so a host can
+mount the component from either:
+
+```json
+{
+  "ui": { "resourceUri": "ui://mutant/dna-import/v1.html", "visibility": ["model", "app"] },
+  "ui/resourceUri": "ui://mutant/dna-import/v1.html",
+  "openai/outputTemplate": "ui://mutant/dna-import/v1.html"
+}
+```
+
+### `get_snp_catalog`
+
+Input: `{}`. Scope `dna.import`. Visibility `["app"]` only — it is callable from
+the component but hidden from the model's tool list, because the catalog is
+application data, not model context. Proxies `operation: "get_snp_catalog"` and
+returns the catalog **unchanged** under `data` (no summarizing, no filtering).
+
+The catalog is allowed a larger response than the default cap
+(`MUTANT_SNP_CATALOG_MAX_BYTES`, default 2 MB). Oversize responses map to
+`RESPONSE_TOO_LARGE`; upstream transport failures map to `CATALOG_UNAVAILABLE`
+(`app_code: "catalog_unavailable"`, `retryable` carried over). Logs record
+version, byte size, and marker count — never catalog contents.
+
+### `create_report`
+
+Input: `{ snps, wgs_variant_calls?, upload_meta?, report_id?, import_request_id }`.
+Scope `dna.import`. Visibility `["app"]`. Write annotations
+(`readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: true`).
+
+The schema uses `z.strictObject` so identity-bearing or scoping fields
+(`account_id`, `user_id`, `email`, `sub`, `analysis_id`) are **rejected** as
+`INVALID_ARGUMENT` rather than silently ignored. Identity always comes from the
+verified token.
+
+- `snps`: `{ "^rs\\d+$": "^[ACGT]{2}$" }`, at most 20 000 entries.
+- `wgs_variant_calls`: `{ rsID: { schema_version, source_format, genome_build, records[] } }`, at most 500 entries, at most 1 000 records each. Records stay opaque: no variant semantics are re-implemented here.
+- `upload_meta`: `{ provider, file_name, file_size_bytes }` — provenance only.
+- `report_id`: optional report selector slug; omit to target the account's primary report. Not an identity claim.
+- `import_request_id`: 8–128 character idempotency key, generated once per import attempt. The backend enforces idempotency on `(user_id, import_request_id)`, so a retry returns the existing analysis instead of creating another.
+
+Handlers run in this order: request-size cap (`MUTANT_MAX_REQUEST_BYTES`, default
+5 MiB — below the 6 MiB synchronous `lambda:InvokeFunction` ceiling) →
+`PAYLOAD_TOO_LARGE`; then `operation: "create_report"`; then a response narrowed
+to `{ analysis_id, status }`. Genotypes are never echoed back. Logs record counts,
+byte sizes, `import_request_id`, `analysis_id`, upstream status, and duration —
+never the payload.
+
+Upstream failures are remapped to the component-facing codes below so the UI does
+not parse backend messages.
+
+### UI resource `ui://mutant/dna-import/v1.html`
+
+Served by `resources/read` as a single self-contained `text/html;profile=mcp-app`
+document, identical for every authenticated account. Its `_meta.ui.csp` is
+**empty**: the component has no document origin to load assets from and reaches
+the server only through the host bridge (`tools/call`), so it declares neither
+`connectDomains` nor `resourceDomains`. The raw DNA file never leaves the iframe.
+
+The component (`src/ui/dna-import/main.tsx` mounts `app.tsx`) calls
+`get_snp_catalog` on mount, parses the selected file with the vendored shared
+processor (`src/ui/genomics/*`, synced from `front-end-web/src/genomics`), filters
+to catalog-matched variants, and submits via `create_report` with one
+`crypto.randomUUID()` per attempt. It applies the host's theme and CSS variables
+(`useHostStyles`) and reads the `show_dna_import` result to open in the
+`account_status` / `dna_status` state the host asked for.
+
+Because `_meta.ui.csp` cannot declare `worker-src`, parsing prefers a Web Worker
+started from a `blob:` URL and falls back to the same parser on the main thread if
+the host's composed `script-src` blocks it. The document is therefore built in two
+esbuild passes (`scripts/build-ui.mjs`): the worker as its own IIFE, inlined into
+the component as a string. No CSP domain is added for either path, and the
+document stays self-contained at roughly 650 KB (of which ~14 KB is the worker).
+
+
 
 `page = { limit, has_more, next_cursor }`. Cursors are HMAC-signed and bound to
 the account, analysis version, tool, normalized selectors, page size, effective
@@ -183,6 +324,18 @@ access scope, and an expiry. They never contain raw account ids or findings.
 | `INVALID_ARGUMENT`, `INVALID_CURSOR` | Bad input / cursor. |
 | `RATE_LIMITED`, `SERVICE_UNAVAILABLE` | Retryable (`retry_after_seconds`). |
 | `DATA_INCOMPATIBLE`, `RESPONSE_TOO_LARGE` | Saved data cannot be safely projected / response cap hit. |
+| `PAYLOAD_TOO_LARGE` | `create_report` payload exceeded `MUTANT_MAX_REQUEST_BYTES`. |
+| `CATALOG_UNAVAILABLE` | `get_snp_catalog` could not reach the backend; retryable. |
+| `INVALID_DNA_PAYLOAD` | Submitted variants failed backend validation. |
+| `UNSUPPORTED_FORMAT` | The backend does not accept the submitted source format. |
+| `UNSUPPORTED_GENOME_BUILD` | Sequencing input used a build the backend cannot place. |
+| `REPORT_GENERATION_FAILED` | Analysis creation failed after the payload was accepted. |
+
+The component-facing codes (`error.app_code`, from `APP_ERROR_CODES`) map onto
+these with stable lowercase names: `unauthorized`, `insufficient_scope`,
+`payload_too_large`, `catalog_unavailable`, `invalid_dna_payload`,
+`unsupported_format`, `unsupported_genome_build`, `report_generation_failed`, and
+`service_unavailable` (the fallback).
 
 ## Vocabulary mapping
 

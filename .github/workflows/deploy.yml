@@ -47,6 +47,17 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Bundles src/ui/dna-import/main.tsx into src/ui/dna-import/generated/html.ts.
+      # `npm test` rebuilds it too (via pretest); doing it explicitly keeps the
+      # logs readable when the component fails to compile.
+      - name: Build Apps SDK UI
+        run: npm run build:ui
+
+      # Fails if src/ui/genomics was edited by hand or if the vendored copies
+      # drifted from front-end-web/src/genomics.
+      - name: Verify vendored DNA processor
+        run: npm run check:genomics
+
       - name: Test
         run: npm test
 
@@ -102,11 +113,14 @@ jobs:
           MUTANT_OAUTH_AUDIENCE: ${{ secrets.MUTANT_OAUTH_AUDIENCE }}
           MUTANT_OAUTH_CLIENT_ID: ${{ secrets.MUTANT_OAUTH_CLIENT_ID }}
           MUTANT_OAUTH_SCOPE: ${{ vars.MUTANT_OAUTH_SCOPE }}
+          MUTANT_OAUTH_SCOPE_DNA_IMPORT: ${{ vars.MUTANT_OAUTH_SCOPE_DNA_IMPORT }}
           MUTANT_MCP_RESOURCE_URI: ${{ vars.MUTANT_MCP_RESOURCE_URI }}
           MUTANT_CORS_ORIGINS: ${{ vars.MUTANT_CORS_ORIGINS }}
           MUTANT_UPGRADE_URL: ${{ vars.MUTANT_UPGRADE_URL }}
           MUTANT_REQUEST_TIMEOUT_MS: ${{ vars.MUTANT_REQUEST_TIMEOUT_MS }}
           MUTANT_MAX_RESPONSE_BYTES: ${{ vars.MUTANT_MAX_RESPONSE_BYTES }}
+          MUTANT_SNP_CATALOG_MAX_BYTES: ${{ vars.MUTANT_SNP_CATALOG_MAX_BYTES }}
+          MUTANT_MAX_REQUEST_BYTES: ${{ vars.MUTANT_MAX_REQUEST_BYTES }}
           MUTANT_DEV_MODE: ${{ vars.MUTANT_DEV_MODE }}
           MUTANT_DOMAIN_NAME: ${{ vars.MUTANT_DOMAIN_NAME }}
           MUTANT_API_MAPPING_KEY: ${{ vars.MUTANT_API_MAPPING_KEY }}

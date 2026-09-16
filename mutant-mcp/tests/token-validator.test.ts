@@ -19,6 +19,7 @@ const ISSUER = "https://auth.mutantgenomics.com";
 const AUDIENCE = "mutant-mcp";
 const CLIENT_ID = "chatgpt-connector";
 const SCOPE = "mutant/analysis.read";
+const DNA_SCOPE = "mutant/dna.import";
 const RESOURCE = "https://mcp.mutantgenomics.com/mcp";
 const KID = "test-key";
 
@@ -28,7 +29,8 @@ function makeOptions(overrides: Partial<ValidatorOptions> = {}): ValidatorOption
     issuer: ISSUER,
     audience: AUDIENCE,
     clientId: CLIENT_ID,
-    requiredScope: SCOPE,
+    analysisReadScope: SCOPE,
+    dnaImportScope: DNA_SCOPE,
     resourceUri: RESOURCE,
     ...overrides,
   };
@@ -115,12 +117,39 @@ describe("JwtTokenValidator", () => {
     });
   });
 
-  it("rejects a token missing the required scope with insufficient_scope", async () => {
+  it("rejects a token missing every supported scope with insufficient_scope", async () => {
     const { publicJwk, privateKey } = await makeKeys();
     const token = await sign(privateKey, baseClaims({ scope: "openid" }));
     await expect(makeValidator(publicJwk).validate(token)).rejects.toMatchObject({
       oauthError: "insufficient_scope",
     });
+  });
+
+  it("names every accepted scope in the insufficient_scope message", () => {
+    try {
+      contextFromClaims(
+        { sub: "user-1", client_id: CLIENT_ID, scope: "openid" },
+        makeOptions(),
+      );
+      throw new Error("expected a scope rejection");
+    } catch (error) {
+      expect((error as Error).message).toContain(SCOPE);
+      expect((error as Error).message).toContain(DNA_SCOPE);
+    }
+  });
+
+  it("accepts a token carrying only the DNA import scope", async () => {
+    const { publicJwk, privateKey } = await makeKeys();
+    const token = await sign(privateKey, baseClaims({ scope: DNA_SCOPE }));
+    const context = await makeValidator(publicJwk).validate(token);
+    expect(context.scopes).toContain(DNA_SCOPE);
+  });
+
+  it("accepts a token carrying both supported scopes", async () => {
+    const { publicJwk, privateKey } = await makeKeys();
+    const token = await sign(privateKey, baseClaims({ scope: `${SCOPE} ${DNA_SCOPE}` }));
+    const context = await makeValidator(publicJwk).validate(token);
+    expect(context.scopes).toEqual(expect.arrayContaining([SCOPE, DNA_SCOPE]));
   });
 
   it("rejects an id token presented as an access token", async () => {
@@ -143,7 +172,13 @@ describe("JwtTokenValidator", () => {
     const { publicJwk, privateKey } = await makeKeys();
     const keySet = createLocalJWKSet({ keys: [publicJwk] });
     const validator = new JwtTokenValidator(
-      makeOptions({ audience: "", clientId: "", requiredScope: "", resourceUri: "" }),
+      makeOptions({
+        audience: "",
+        clientId: "",
+        analysisReadScope: "",
+        dnaImportScope: "",
+        resourceUri: "",
+      }),
       keySet,
     );
     const token = await new SignJWT({ sub: "user-1", token_use: "access" })
@@ -198,14 +233,27 @@ describe("discoverRemoteKeySet", () => {
 });
 
 describe("DevTokenValidator", () => {
-  it("maps dev tokens to a dev user with the required scope", async () => {
-    const validator = new DevTokenValidator(SCOPE);
-    const context = await validator.validate("dev-free");
-    expect(context.userId).toBe("dev-user");
+  it("grants both scopes to dev-free and dev-paid", async () => {
+    for (const token of ["dev", "dev-free", "dev-paid"]) {
+      const context = await new DevTokenValidator(SCOPE, DNA_SCOPE).validate(token);
+      expect(context.userId).toBe("dev-user");
+      expect(context.scopes).toEqual(expect.arrayContaining([SCOPE, DNA_SCOPE]));
+    }
+  });
+
+  it("grants only the read scope to dev-readonly so scope denial is testable", async () => {
+    const context = await new DevTokenValidator(SCOPE, DNA_SCOPE).validate("dev-readonly");
     expect(context.scopes).toContain(SCOPE);
+    expect(context.scopes).not.toContain(DNA_SCOPE);
+  });
+
+  it("grants only the DNA import scope to dev-dna", async () => {
+    const context = await new DevTokenValidator(SCOPE, DNA_SCOPE).validate("dev-dna");
+    expect(context.scopes).toContain(DNA_SCOPE);
+    expect(context.scopes).not.toContain(SCOPE);
   });
 
   it("rejects unknown dev tokens", async () => {
-    await expect(new DevTokenValidator(SCOPE).validate("nope")).rejects.toThrow();
+    await expect(new DevTokenValidator(SCOPE, DNA_SCOPE).validate("nope")).rejects.toThrow();
   });
 });

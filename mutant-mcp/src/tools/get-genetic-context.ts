@@ -9,6 +9,7 @@ export const getGeneticContextTool: MutantToolDefinition = {
     "Explore marker-level genetic context: call status, module scoring status, and pattern roles. " +
     "Full accounts can query by module, gene, or specific rsIDs across the analyzed marker set. " +
     "Free accounts must pass a hypothesis they can access and are limited to its evidence.",
+  scope: "analysis.read",
   inputSchema: getGeneticContextInputSchema,
   outputSchema: toolResponseOutputSchema,
   annotations: readOnlyAnnotations,

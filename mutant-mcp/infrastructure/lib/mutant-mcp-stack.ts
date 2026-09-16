@@ -30,11 +30,17 @@ export interface MutantMcpStackProps extends StackProps {
   oauthAudience?: string;
   oauthClientId?: string;
   oauthScope?: string;
+  /** Scope required by the DNA import tools. Defaults to derived `dna.import`. */
+  oauthScopeDnaImport?: string;
   /** Canonical MCP resource URI (RFC 9728). Defaults from domain + apiMappingKey. */
   mcpResourceUri?: string;
   corsOrigins?: string;
   requestTimeoutMs?: number;
   maxResponseBytes?: number;
+  /** Per-tool response cap for get_snp_catalog (bytes). */
+  snpCatalogMaxBytes?: number;
+  /** Cap on a serialized tool request (bytes), for create_report payloads. */
+  maxRequestBytes?: number;
   /** When true, accepts dev-free/dev-paid tokens instead of validating against OIDC. */
   devMode?: boolean;
   upgradeUrl?: string;
@@ -77,6 +83,8 @@ export class MutantMcpStack extends Stack {
         MUTANT_OAUTH_CLIENT_ID: props.oauthClientId ?? "",
         // Empty lets the runtime derive `<MUTANT_MCP_RESOURCE_URI>/analysis.read`.
         MUTANT_OAUTH_SCOPE: props.oauthScope ?? "",
+        // Empty lets the runtime derive `<MUTANT_MCP_RESOURCE_URI>/dna.import`.
+        MUTANT_OAUTH_SCOPE_DNA_IMPORT: props.oauthScopeDnaImport ?? "",
         MUTANT_MCP_RESOURCE_URI: resourceUri,
         MUTANT_CORS_ORIGINS:
           props.corsOrigins ?? "https://chatgpt.com,https://chat.openai.com",
@@ -85,6 +93,9 @@ export class MutantMcpStack extends Stack {
         MUTANT_ONBOARDING_URL: props.onboardingUrl ?? "https://mutantgenomics.com/onboarding",
         MUTANT_REQUEST_TIMEOUT_MS: String(props.requestTimeoutMs ?? 20000),
         MUTANT_MAX_RESPONSE_BYTES: String(props.maxResponseBytes ?? 512000),
+        MUTANT_SNP_CATALOG_MAX_BYTES: String(props.snpCatalogMaxBytes ?? 2000000),
+        // Defaults below the 6 MiB synchronous lambda:InvokeFunction limit.
+        MUTANT_MAX_REQUEST_BYTES: String(props.maxRequestBytes ?? 5 * 1024 * 1024),
         LOG_LEVEL: props.logLevel ?? "info",
       },
     });

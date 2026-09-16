@@ -9,6 +9,7 @@ export const getHypothesisDetailsTool: MutantToolDefinition = {
     "Return the full stored interpretation of one health hypothesis: scoring, matched patterns, " +
     "clinical correlation and suggested tests, cofactors, subtypes, and interpretation " +
     "guardrails. The correlation is general catalog guidance, not a report of the user's records.",
+  scope: "analysis.read",
   inputSchema: getHypothesisDetailsInputSchema,
   outputSchema: toolResponseOutputSchema,
   annotations: readOnlyAnnotations,

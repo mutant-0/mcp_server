@@ -3,12 +3,21 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ES2022"],
+    // The DNA import Apps SDK component (src/ui/dna-import) is a browser bundle
+    // that ships with the Lambda artifact, so the project type-checks against DOM
+    // and JSX once. The Lambda entry (src/handler.ts) never imports the component;
+    // only its prebuilt HTML module is reachable from the server graph.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
     "types": ["node"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "isolatedModules": true,
+    // The vendored shared DNA processor (src/ui/genomics) is plain JavaScript
+    // synced from front-end-web by scripts/sync-genomics.mjs. It is not checked
+    // (checkJs is off) but must resolve so the component can import it.
+    "allowJs": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,

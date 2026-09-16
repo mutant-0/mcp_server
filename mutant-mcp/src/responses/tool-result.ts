@@ -27,6 +27,11 @@ export function textMirror(response: ToolResponse): string {
 export interface ToolResultOptions {
   /** Tool-level auth challenge for `_meta["mcp/www_authenticate"]`. */
   challenge?: Record<string, unknown>;
+  /**
+   * Extra `_meta` merged into the result. Used to attach the Apps SDK UI
+   * descriptors and security schemes a host needs to render the component.
+   */
+  meta?: Record<string, unknown>;
 }
 
 /**
@@ -45,6 +50,9 @@ export function toolResultFromResponse(
   };
   if (options.challenge) {
     result._meta = options.challenge;
+  }
+  if (options.meta) {
+    result._meta = { ...(result._meta ?? {}), ...options.meta };
   }
   return result;
 }

@@ -1,5 +1,5 @@
 import type { AppConfig } from "../config.js";
-import { requiredScope, resourceUri } from "../config.js";
+import { resourceUri, supportedScopes } from "../config.js";
 
 export interface ProtectedResourceMetadata {
   resource: string;
@@ -68,7 +68,7 @@ export function protectedResourceMetadata(config: AppConfig): ProtectedResourceM
   return {
     resource: resourceUri(config),
     authorization_servers: authorizationServers(config),
-    scopes_supported: [requiredScope(config)],
+    scopes_supported: supportedScopes(config),
     bearer_methods_supported: ["header"],
     resource_name: "Mutant Genomics Analysis",
     resource_documentation: DOCUMENTATION_URL,
@@ -88,9 +88,9 @@ function normalize(doc: Record<string, unknown>, config: AppConfig): Authorizati
     // The document is served from the MCP host, so it must advertise that host as
     // the issuer even though the endpoints live on the Cognito custom domain.
     issuer: publicIssuer(config),
-    // Advertise only the scope this resource requires; it is the scope PRM
-    // requests and the only one the token validator enforces.
-    scopes_supported: [requiredScope(config)],
+    // Advertise every scope this resource supports; these are the scopes PRM
+    // requests and the scopes the token validator accepts.
+    scopes_supported: supportedScopes(config),
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     token_endpoint_auth_methods_supported: ["none"],

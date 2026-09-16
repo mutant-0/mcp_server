@@ -1,8 +1,10 @@
 import { z } from "zod";
 
 /**
- * Per-tool input schemas. Every tool takes a JSON object (never a scalar) and
- * rejects unknown properties. No tool accepts an analysis id, account, or plan.
+ * Per-tool input schemas. Every tool takes a JSON object (never a scalar).
+ * No tool accepts an analysis id, account, or plan, and the DNA import tools
+ * reject unknown top-level properties outright so a client can never smuggle a
+ * claim that the MCP layer would otherwise pass through to the backend.
  */
 
 const limitSchema = z
@@ -97,6 +99,97 @@ export const getGeneticContextInputSchema = {
   cursor: cursorSchema,
 };
 
+// ---------------------------------------------------------------------------
+// DNA import
+// ---------------------------------------------------------------------------
+
+/** No arguments: the component renders from the tool result alone. */
+export const showDnaImportInputSchema = {};
+
+/** No arguments: the component needs the whole catalog or none of it. */
+export const getSnpCatalogInputSchema = {};
+
+const RSID_PATTERN = /^rs[0-9]+$/i;
+const GENOTYPE_PATTERN = /^[ACGT]{2}$/;
+/** Report selector slug, mirroring the reports-generator `id` field. */
+const REPORT_ID_PATTERN = /^[a-z0-9_]{1,64}$/;
+
+/**
+ * Ceilings on submitted entries. These are transport guards against a runaway
+ * payload, not biological validation: the reports-generator remains the only
+ * authority on rsIDs, genotypes, builds, and report eligibility.
+ */
+export const MAX_SNP_ENTRIES = 20000;
+export const MAX_WGS_VARIANT_CALLS = 500;
+export const MAX_WGS_RECORDS_PER_CALL = 1000;
+
+const snpsSchema = z
+  .record(
+    z.string().regex(RSID_PATTERN, "Keys must be rsIDs, for example 'rs4680'."),
+    z.string().regex(GENOTYPE_PATTERN, "Genotype must be two of A/C/G/T, for example 'AG'."),
+  )
+  .refine((snps) => Object.keys(snps).length <= MAX_SNP_ENTRIES, {
+    message: `snps must contain at most ${MAX_SNP_ENTRIES} entries.`,
+  })
+  .describe("Flat map of catalog rsID to normalized two-base genotype, exactly as read locally.");
+
+/**
+ * A captured non-SNV VCF record set for one target. Only the shape the
+ * reports-generator contract requires is described here; individual records stay
+ * opaque so no variant semantics are re-implemented in the MCP layer.
+ */
+const wgsVariantCallSchema = z
+  .object({
+    schema_version: z.number().int().min(1).max(10),
+    source_format: z.string().min(1).max(32),
+    genome_build: z.string().min(1).max(32),
+    records: z.array(z.record(z.string(), z.unknown())).max(MAX_WGS_RECORDS_PER_CALL),
+  })
+  .describe("Captured non-SNV VCF records for one catalog target.");
+
+const wgsVariantCallsSchema = z
+  .record(
+    z.string().regex(RSID_PATTERN, "Keys must be rsIDs, for example 'rs28362491'."),
+    wgsVariantCallSchema,
+  )
+  .refine((calls) => Object.keys(calls).length <= MAX_WGS_VARIANT_CALLS, {
+    message: `wgs_variant_calls must contain at most ${MAX_WGS_VARIANT_CALLS} entries.`,
+  })
+  .describe("Optional, additive map of non-SNV capture targets to their VCF records.");
+
+const uploadMetaSchema = z
+  .object({
+    provider: z.string().min(1).max(64).describe("Detected source, e.g. '23andMe' or 'WGS'."),
+    file_name: z.string().min(1).max(512).describe("Original file name, for the user's records."),
+    file_size_bytes: z.number().int().nonnegative(),
+  })
+  .describe("Non-sensitive provenance for the import; never includes file contents.");
+
+/**
+ * Strict so that identity-bearing or scoping fields (`account_id`, `user_id`,
+ * `email`, `sub`, `analysis_id`) are rejected as invalid arguments rather than
+ * silently ignored. Identity is always derived from the verified token.
+ */
+export const createReportInputSchema = z.strictObject({
+  snps: snpsSchema,
+  wgs_variant_calls: wgsVariantCallsSchema.optional(),
+  upload_meta: uploadMetaSchema.optional(),
+  report_id: z
+    .string()
+    .regex(REPORT_ID_PATTERN, "report_id must be a lowercase slug, for example 'core_systems'.")
+    .describe(
+      "Optional report selector. Omit to let the backend target the account's primary report; this is not an identity or account claim.",
+    )
+    .optional(),
+  import_request_id: z
+    .string()
+    .min(8)
+    .max(128)
+    .describe(
+      "Idempotency key, generated once per import attempt by the caller. A retry with the same key returns the existing result instead of creating another analysis.",
+    ),
+});
+
 /**
  * Shared structured error shape returned inside the envelope.
  */
@@ -108,6 +201,8 @@ export const toolErrorOutputSchema = z.object({
   required_plan: z.string().optional(),
   upgrade_url: z.string().optional(),
   retry_after_seconds: z.number().optional(),
+  required_scope: z.string().optional(),
+  app_code: z.string().optional(),
 });
 
 /**

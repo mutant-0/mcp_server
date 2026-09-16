@@ -1,0 +1,14 @@
+{
+  "source": "front-end-web/src/genomics",
+  "note": "Hashes are of the upstream module body (without the generated header).",
+  "modules": {
+    "catalog.js": "0c199eadbd94d26f592ccb579a65d8118ab7d99a136a892ca807e56383e2e15e",
+    "detect.js": "a9ae7d2715046b79b0f5d8e3e861b97e2b49ea23e9bcc7b34099104caf32f5e5",
+    "normalize.js": "5692a346f4ebacfbbdec5eebdfaf254469f6e0a4b47336f1ae34bc19bc78eb84",
+    "parse.js": "5ddccfb8c583327985b1068fba4b76c892cd297222d218e8d43568e406f1a3e4",
+    "parse23andMe.js": "61903d0402eebbd20a2dd069d23db0e7478dca790281b865efa73a21038354eb",
+    "parseAncestry.js": "4388edf8063695a0d1304e7f1d7114ce03e6d072eff8da54548b9369c21dd7ca",
+    "parseVcf.js": "64381b93cfeee4294f40c7f69a71ec0604f5e1e75eab83ad3ad289b17663df9a",
+    "stream.js": "c5eef1255ab828e6627e0d9c041ff6b43e4db8062861d983b288c4e3890d7119"
+  }
+}

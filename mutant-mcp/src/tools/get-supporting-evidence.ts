@@ -9,6 +9,7 @@ export const getSupportingEvidenceTool: MutantToolDefinition = {
     "Return the stored evidence behind one health hypothesis: matched patterns and their resolved " +
     "score contribution, per-marker variant evidence, or the curated literature sources. " +
     "Evidence for a hypothesis is never expanded with data from other hypotheses.",
+  scope: "analysis.read",
   inputSchema: getSupportingEvidenceInputSchema,
   outputSchema: toolResponseOutputSchema,
   annotations: readOnlyAnnotations,

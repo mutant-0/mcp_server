@@ -1,0 +1,105 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { describe, expect, it } from "vitest";
+import { createMcpServer } from "../src/server.js";
+import { DNA_IMPORT_UI_URI } from "../src/ui/dna-import/resource.js";
+import { makeConfig, makeUser, StubBackendClient } from "./helpers.js";
+
+/** Mime type the MCP Apps spec requires for an app resource document. */
+const APP_MIME_TYPE = "text/html;profile=mcp-app";
+
+async function connect() {
+  const server = createMcpServer(
+    makeUser(),
+    makeConfig(),
+    "req-ui",
+    new StubBackendClient(() => {
+      throw new Error("the UI resource must not call the backend");
+    }),
+  );
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+  await client.connect(clientTransport);
+  return client;
+}
+
+describe("DNA import UI resource", () => {
+  it("is listed with the app mime type", async () => {
+    const client = await connect();
+    const { resources } = await client.listResources();
+    const resource = resources.find((entry) => entry.uri === DNA_IMPORT_UI_URI);
+    expect(resource).toBeDefined();
+    expect(resource?.mimeType).toBe(APP_MIME_TYPE);
+  });
+
+  it("reads back a self-contained HTML document", async () => {
+    const client = await connect();
+    const { contents } = await client.readResource({ uri: DNA_IMPORT_UI_URI });
+    expect(contents).toHaveLength(1);
+
+    const content = contents[0] as { mimeType?: string; text?: string };
+    expect(content.mimeType).toBe(APP_MIME_TYPE);
+    expect(content.text).toBeTypeOf("string");
+
+    const html = content.text ?? "";
+    expect(html).toContain("<!DOCTYPE html>");
+    // The host bridge is the component's only transport.
+    expect(html).toContain("ui/initialize");
+    expect(html).toContain("tools/call");
+    expect(html).toContain("postMessage");
+  });
+
+  it("inlines the parser worker and starts it from an object URL", async () => {
+    const client = await connect();
+    const { contents } = await client.readResource({ uri: DNA_IMPORT_UI_URI });
+    const html = (contents[0] as { text?: string }).text ?? "";
+
+    // The worker is bundled into the same document: an app resource is served
+    // inline, so it has no origin to fetch a sibling script from.
+    expect(html).toContain("createObjectURL");
+    expect(html).toContain("revokeObjectURL");
+    // A marker only the worker bundle carries, so this fails if the two esbuild
+    // passes ever stop being wired together.
+    expect(html).toContain("No file received by the DNA parser worker.");
+    // The worker's own startup handshake is what the component waits for.
+    expect(html).toContain("worker never completed its startup handshake");
+  });
+
+  it("declares no CSP domains, because the component only uses the host bridge", async () => {
+    const client = await connect();
+    const { contents } = await client.readResource({ uri: DNA_IMPORT_UI_URI });
+    const meta = (contents[0] as { _meta?: { ui?: { csp?: Record<string, unknown> } } })._meta;
+    expect(meta?.ui?.csp).toEqual({});
+  });
+
+  it("carries no portal auth, storage, or direct network access", async () => {
+    const client = await connect();
+    const { contents } = await client.readResource({ uri: DNA_IMPORT_UI_URI });
+    const html = (contents[0] as { text?: string }).text ?? "";
+
+    // The portal component this was ported from depended on all of these; the
+    // Apps SDK component must be free of them so it can run in a sandboxed
+    // iframe with an empty CSP.
+    for (const forbidden of [
+      "localStorage",
+      "sessionStorage",
+      "document.cookie",
+      "Authorization",
+      "Bearer",
+      "dev-api.mutantbiotech",
+      "XMLHttpRequest",
+      "fetch(",
+    ]) {
+      expect(html, `component must not reference ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it("never reaches the backend to render the document", async () => {
+    // The stub client throws on any invoke; a successful read proves the
+    // resource is static and identical for every authenticated account.
+    const client = await connect();
+    const { contents } = await client.readResource({ uri: DNA_IMPORT_UI_URI });
+    expect(contents).toHaveLength(1);
+  });
+});

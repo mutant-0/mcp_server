@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { loadConfig, requiredScope, resourceUri } from "./config.js";
+import { loadConfig, analysisReadScope, dnaImportScope, resourceUri } from "./config.js";
 import { createHttpHandler } from "./http-handler.js";
 import { createLogger } from "./logger.js";
 import { SERVER_NAME } from "./server.js";
@@ -13,9 +13,11 @@ async function start(): Promise<void> {
       issuer: config.MUTANT_OAUTH_ISSUER || "(unset)",
       audienceConfigured: Boolean(config.MUTANT_OAUTH_AUDIENCE),
       clientIdConfigured: Boolean(config.MUTANT_OAUTH_CLIENT_ID),
-      requiredScope: requiredScope(config),
+      scopesSupported: [analysisReadScope(config), dnaImportScope(config)],
       resourceUriConfigured: Boolean(config.MUTANT_MCP_RESOURCE_URI),
       resourceUri: resourceUri(config),
+      maxRequestBytes: config.MUTANT_MAX_REQUEST_BYTES,
+      snpCatalogMaxBytes: config.MUTANT_SNP_CATALOG_MAX_BYTES,
     },
     `${SERVER_NAME} oauth configuration`,
   );

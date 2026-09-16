@@ -9,7 +9,7 @@ import {
   type TokenValidator,
 } from "./auth/token-validator.js";
 import type { MutantBackendClient } from "./clients/mutant-lambda-client.js";
-import { corsOrigins, requiredScope, resourceUri, type AppConfig } from "./config.js";
+import { corsOrigins, analysisReadScope, dnaImportScope, supportedScopes, resourceUri, type AppConfig } from "./config.js";
 import type { AppLogger } from "./logger.js";
 import {
   authenticationError,
@@ -112,7 +112,8 @@ export async function createHttpHandler(
       issuer: config.MUTANT_OAUTH_ISSUER,
       audience: config.MUTANT_OAUTH_AUDIENCE,
       clientId: config.MUTANT_OAUTH_CLIENT_ID,
-      requiredScope: requiredScope(config),
+      analysisReadScope: analysisReadScope(config),
+      dnaImportScope: dnaImportScope(config),
       // Use the raw value (not the metadata fallback) so an unset variable does
       // not reject valid tokens against the localhost placeholder.
       resourceUri: config.MUTANT_MCP_RESOURCE_URI,
@@ -207,7 +208,7 @@ async function handleRequest(
     }
 
     res.setHeader("Cache-Control", "no-store");
-    const server = createMcpServer(userContext, config, requestId, options.backendClient);
+    const server = createMcpServer(userContext, config, requestId, options.backendClient, requestLogger);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
@@ -249,9 +250,10 @@ function challenge(
       resourceMetadataUrl: protectedResourceMetadataUrl(resourceUri(config)),
       error: oauthError,
       errorDescription: description,
-      // Always advertise the canonical URI-form scope so a client that has not
-      // yet obtained a token knows exactly what to request.
-      scope: requiredScope(config),
+      // Always advertise every supported URI-form scope so a client that has not
+      // yet obtained a token knows exactly what to request. A client only needs
+      // the subset covering the tools it intends to call.
+      scope: supportedScopes(config).join(" "),
     }),
   );
 }

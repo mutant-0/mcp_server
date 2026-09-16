@@ -4,7 +4,11 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
+COPY scripts ./scripts
 COPY src ./src
+# `npm run bundle` first bundles the Apps SDK component (src/ui/dna-import/main.tsx)
+# into src/ui/dna-import/generated/html.ts, which is not checked in, so the
+# Lambda artifact always carries a freshly built document.
 RUN npm run bundle
 
 # ---- runtime stage: minimal image + Lambda Web Adapter ----

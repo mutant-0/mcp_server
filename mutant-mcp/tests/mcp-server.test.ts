@@ -5,6 +5,8 @@ import type { ToolResponse } from "../src/contract.js";
 import { SERVER_NAME, createMcpServer } from "../src/server.js";
 import { TOOL_NAMES } from "../src/contract.js";
 import {
+  ANALYSIS_SCOPE,
+  DNA_SCOPE,
   makeConfig,
   makeErrorResponse,
   makeSuccessResponse,
@@ -23,25 +25,31 @@ async function connectServer(responder: (operation: string) => ToolResponse) {
 }
 
 describe("MCP server integration", () => {
-  it("lists the six contract tools with schemas", async () => {
+  it("lists the nine contract tools with schemas", async () => {
     const { client } = await connectServer(() => makeSuccessResponse());
     const result = await client.listTools();
     expect(result.tools.map((tool) => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
+    expect(result.tools).toHaveLength(9);
     for (const tool of result.tools) {
       expect(tool.inputSchema).toBeDefined();
       expect(tool.outputSchema).toBeDefined();
     }
   });
 
-  it("advertises per-tool OAuth security schemes", async () => {
+  it("advertises each tool's own OAuth scope", async () => {
     const { client } = await connectServer(() => makeSuccessResponse());
     const result = await client.listTools();
+    const dnaTools = new Set(["show_dna_import", "get_snp_catalog", "create_report"]);
     for (const tool of result.tools) {
       const meta = tool._meta as { securitySchemes?: Array<{ scopes: string[] }> } | undefined;
-      expect(meta?.securitySchemes?.[0]?.scopes).toContain(
-        "https://mcp.mutantgenomics.com/mcp/analysis.read",
-      );
+      const expected = dnaTools.has(tool.name) ? DNA_SCOPE : ANALYSIS_SCOPE;
+      expect(meta?.securitySchemes?.[0]?.scopes).toEqual([expected]);
     }
+  });
+
+  it("advertises the resources capability for the Apps SDK component", async () => {
+    const { client } = await connectServer(() => makeSuccessResponse());
+    expect(client.getServerCapabilities()?.resources).toBeDefined();
   });
 
   it("relays a success envelope into structuredContent", async () => {
@@ -52,7 +60,8 @@ describe("MCP server integration", () => {
     expect(result.isError).toBe(false);
     const structured = result.structuredContent as { ok: boolean; data: unknown };
     expect(structured.ok).toBe(true);
-    expect(structured.data).toEqual({ analysis: { status: "ready" } });
+    // `dna_status` is derived in the MCP layer until the backend sends it.
+    expect(structured.data).toEqual({ analysis: { status: "ready" }, dna_status: "available" });
   });
 
   it("relays a structured error envelope and sets isError", async () => {

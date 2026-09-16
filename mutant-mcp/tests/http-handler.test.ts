@@ -57,8 +57,10 @@ describe("HTTP handler (dev mode)", () => {
     expect(challenge).toContain(
       "resource_metadata=\"https://mcp.mutantgenomics.com/.well-known/oauth-protected-resource/mcp\"",
     );
-    // The canonical URI-form scope is advertised so a client knows what to request.
-    expect(challenge).toContain("scope=\"https://mcp.mutantgenomics.com/mcp/analysis.read\"");
+    // Every supported URI-form scope is advertised so a client knows what to
+    // request; it only needs the subset covering the tools it intends to call.
+    expect(challenge).toContain('scope="https://mcp.mutantgenomics.com/mcp/analysis.read');
+    expect(challenge).toContain("https://mcp.mutantgenomics.com/mcp/dna.import\"");
   });
 
   it("rejects requests with an invalid bearer token", async () => {
@@ -91,8 +93,11 @@ describe("HTTP handler (dev mode)", () => {
     // Points at the origin serving the RFC 8414 document (this host), not Cognito:
     // Cognito's custom domain 404s /.well-known/oauth-authorization-server.
     expect(body.authorization_servers).toEqual(["https://mcp.mutantgenomics.com"]);
-    // The scope mirrors the Cognito resource-server identifier (the resource URI).
-    expect(body.scopes_supported).toEqual(["https://mcp.mutantgenomics.com/mcp/analysis.read"]);
+    // Both scopes mirror the Cognito resource-server identifier (the resource URI).
+    expect(body.scopes_supported).toEqual([
+      "https://mcp.mutantgenomics.com/mcp/analysis.read",
+      "https://mcp.mutantgenomics.com/mcp/dna.import",
+    ]);
     expect(body.bearer_methods_supported).toContain("header");
     expect(body.resource_name).toBe("Mutant Genomics Analysis");
     expect(body.resource_documentation).toBe("https://mutantgenomics.com/mcp");
@@ -146,7 +151,10 @@ describe("HTTP handler (dev mode)", () => {
     // The document is served from the MCP host, so that host is the issuer even
     // though the endpoints live on the Cognito custom domain.
     expect(body.issuer).toBe("https://mcp.mutantgenomics.com");
-    expect(body.scopes_supported).toEqual(["https://mcp.mutantgenomics.com/mcp/analysis.read"]);
+    expect(body.scopes_supported).toEqual([
+      "https://mcp.mutantgenomics.com/mcp/analysis.read",
+      "https://mcp.mutantgenomics.com/mcp/dna.import",
+    ]);
     expect(body.response_types_supported).toEqual(["code"]);
     expect(body.grant_types_supported).toEqual(["authorization_code", "refresh_token"]);
     expect(body.code_challenge_methods_supported).toEqual(["S256"]);
@@ -181,14 +189,14 @@ describe("HTTP handler (dev mode)", () => {
     expect(body.result.serverInfo.name).toBe("mutant-mcp");
   });
 
-  it("lists six tools over HTTP with a valid dev token", async () => {
+  it("lists nine tools over HTTP with a valid dev token", async () => {
     const response = await post(
       { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
       { Authorization: "Bearer dev-free", Accept: "application/json, text/event-stream" },
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as { result: { tools: Array<{ name: string }> } };
-    expect(body.result.tools).toHaveLength(6);
+    expect(body.result.tools).toHaveLength(9);
   });
 
   it("answers CORS preflight for an allowed origin", async () => {

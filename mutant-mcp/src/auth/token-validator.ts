@@ -15,8 +15,19 @@ export interface ValidatorOptions {
   issuer: string;
   audience: string;
   clientId: string;
-  requiredScope: string;
+  /** Scope required by the six model-facing analysis tools. */
+  analysisReadScope: string;
+  /** Scope required by the three DNA import tools. */
+  dnaImportScope: string;
   resourceUri: string;
+}
+
+/**
+ * Every scope that may legitimately appear on an access token for this resource.
+ * A token needs at least one; per-tool authorization then narrows the grant.
+ */
+export function acceptedScopes(config: ValidatorOptions): string[] {
+  return [config.analysisReadScope, config.dnaImportScope].filter(Boolean);
 }
 
 /**
@@ -136,23 +147,43 @@ export class JwtTokenValidator implements TokenValidator {
 
 /**
  * Development-only validator: accepts fixed tokens, no cryptography.
- * `dev-free`/`dev-paid` are accepted for ChatGPT dev-linking smoke tests.
+ * `dev-free`/`dev-paid` are accepted for ChatGPT dev-linking smoke tests;
+ * `dev-readonly` and `dev-dna` grant a single scope so per-tool authorization
+ * can be exercised locally.
  */
 export class DevTokenValidator implements TokenValidator {
-  constructor(private readonly requiredScope: string) {}
+  private readonly bothScopes: string[];
+  private readonly grants: Record<string, string[]>;
+
+  constructor(
+    private readonly analysisReadScope: string,
+    private readonly dnaImportScope: string,
+  ) {
+    this.bothScopes = [analysisReadScope, dnaImportScope].filter(Boolean);
+    // `dev`/`dev-free`/`dev-paid` accept everything. `dev-readonly` and
+    // `dev-dna` hold a single scope so the per-tool boundary is testable locally.
+    this.grants = {
+      dev: this.bothScopes,
+      "dev-free": this.bothScopes,
+      "dev-paid": this.bothScopes,
+      "dev-readonly": analysisReadScope ? [analysisReadScope] : [],
+      "dev-dna": dnaImportScope ? [dnaImportScope] : [],
+    };
+  }
 
   async validate(token: string): Promise<MutantUserContext> {
-    if (["dev", "dev-free", "dev-paid"].includes(token)) {
+    const scopes = this.grants[token];
+    if (scopes) {
       return {
         userId: "dev-user",
         clientId: "dev-client",
-        scopes: [this.requiredScope],
+        scopes,
         isDev: true,
       };
     }
     throw new TokenValidationError(
       "invalid_token",
-      "Invalid dev token. Use `dev-free` or `dev-paid`.",
+      "Invalid dev token. Use `dev-free`, `dev-paid`, `dev-readonly`, or `dev-dna`.",
       "dev_token_required",
     );
   }
@@ -160,7 +191,7 @@ export class DevTokenValidator implements TokenValidator {
 
 export async function createTokenValidator(options: ValidatorOptions): Promise<TokenValidator> {
   if (options.devMode) {
-    return new DevTokenValidator(options.requiredScope);
+    return new DevTokenValidator(options.analysisReadScope, options.dnaImportScope);
   }
   if (!options.issuer) {
     throw new Error("MUTANT_OAUTH_ISSUER must be set (or enable MUTANT_DEV_MODE)");
@@ -202,10 +233,13 @@ export function contextFromClaims(payload: JWTPayload, config: ValidatorOptions)
   }
 
   const scopes = extractScopes(payload);
-  if (config.requiredScope && !scopes.includes(config.requiredScope)) {
+  const accepted = acceptedScopes(config);
+  if (accepted.length > 0 && !scopes.some((scope) => accepted.includes(scope))) {
     throw new TokenValidationError(
       "insufficient_scope",
-      `Token is missing the required scope '${config.requiredScope}' (got: ${scopes.join(" ") || "none"}).`,
+      `Token is missing a supported scope (expected one of: ${accepted.join(", ")}; got: ${
+        scopes.join(" ") || "none"
+      }).`,
       "scope_mismatch",
     );
   }
