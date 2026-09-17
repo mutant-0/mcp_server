@@ -4,10 +4,13 @@
  *
  * The component talks to the server exclusively through the host bridge, so these
  * tests stand up a fake host on the same `window` the app posts to: it answers
- * `ui/initialize`, records every `tools/call`, and can push a tool result the way
- * a host does when `show_dna_import` returns. That keeps the whole component
- * state machine - catalog load, parse, review, submit, and every error branch -
- * under test without a browser or a real host.
+ * `ui/initialize`, records every `tools/call`, `ui/message`, and
+ * `ui/update-model-context`, and can push a tool result the way a host does.
+ *
+ * The component now owns the whole lifecycle - it reads `get_analysis_status` on
+ * mount, polls it after `create_report`, and paints the completion card - so the
+ * fake host answers the analysis reads too, and every test renders with a short
+ * poll interval so polling settles inside the test rather than after 7 seconds.
  */
 import "./setup-ui";
 
@@ -16,10 +19,12 @@ import {
   McpUiInitializeResultSchema,
   McpUiToolResultNotificationSchema,
 } from "@modelcontextprotocol/ext-apps";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { DnaImportApp } from "../src/ui/dna-import/app";
+import { DnaImportApp, type DnaImportAppProps } from "../src/ui/dna-import/app";
 import { makeErrorResponse, makeSuccessResponse } from "./helpers.js";
+
+type ToolResponse = ReturnType<typeof makeSuccessResponse>;
 
 /** The exact result the fake host returns for `ui/initialize`. */
 const INITIALIZE_RESULT = {
@@ -42,7 +47,7 @@ function deliverToApp(data: unknown): void {
 }
 
 /** The tool-result notification shape the host pushes after a tool returns. */
-function toolResultNotification(structured: ReturnType<typeof makeSuccessResponse>) {
+function toolResultNotification(structured: ToolResponse) {
   return {
     method: "ui/notifications/tool-result",
     params: {
@@ -74,6 +79,40 @@ const CATALOG = makeSuccessResponse({
   },
 });
 
+/** No DNA on file yet: the state the file picker opens in. */
+const STATUS_MISSING = makeSuccessResponse({
+  dna_status: "missing",
+  analysis_status: "not_started",
+  analysis: { status: "none", created_at: null },
+  plan: "Mutant Free",
+  entitlement: { plan: "mutant_free", hypothesis_scope: "top_3" },
+});
+
+function statusResponse(
+  status: "not_started" | "processing" | "ready" | "failed",
+  overrides: Record<string, unknown> = {},
+): ToolResponse {
+  return makeSuccessResponse({
+    dna_status: "available",
+    analysis_status: status,
+    analysis_id: "analysis_1",
+    created_at: new Date(Date.now() - 30_000).toISOString(),
+    analysis: { status },
+    plan: "Mutant Free",
+    entitlement: { plan: "mutant_free", hypothesis_scope: "top_3" },
+    ...overrides,
+  });
+}
+
+const FINDINGS = makeSuccessResponse({
+  items: [
+    { id: "HYP_A", rank: 1, title: "Alpha finding", summary: "First summary." },
+    { id: "HYP_B", rank: 2, title: "Beta finding", summary: "Second summary." },
+    { id: "HYP_C", rank: 3, title: "Gamma finding", summary: "Third summary." },
+  ],
+  page: { has_more: false },
+});
+
 const MICROARRAY_BODY = [
   "# rsid\tchromosome\tposition\tgenotype",
   "rs328\t8\t19819724\tAA",
@@ -86,16 +125,29 @@ interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
-type ToolResponder = (
-  name: string,
-  args: Record<string, unknown>,
-) => ReturnType<typeof makeSuccessResponse>;
+/** Per-tool answers: either fixed, or a function of the call number. */
+type Responders = Record<
+  string,
+  ToolResponse | ((args: Record<string, unknown>, call: number) => ToolResponse)
+>;
+
+/** The parts of the lifecycle a test does not care about. */
+function defaultRespond(name: string): ToolResponse {
+  if (name === "get_snp_catalog") return CATALOG;
+  if (name === "get_analysis_status") return STATUS_MISSING;
+  if (name === "list_health_hypotheses") return FINDINGS;
+  if (name === "create_report") {
+    return makeSuccessResponse({ analysis_id: "analysis_1", status: "processing" });
+  }
+  return makeSuccessResponse({ ok: true });
+}
 
 interface HostBridge {
   toolCalls: ToolCall[];
   modelContextUpdates: unknown[];
+  messages: Array<Record<string, unknown>>;
   callsTo(name: string): ToolCall[];
-  sendToolResult(structured: ReturnType<typeof makeSuccessResponse>): void;
+  sendToolResult(structured: ToolResponse): void;
   /** Detach the listener, so a finished test cannot answer the next one's calls. */
   stop(): void;
 }
@@ -103,9 +155,20 @@ interface HostBridge {
 let activeBridge: HostBridge | null = null;
 
 /** Stand up a fake host on `window` and answer bridge requests from it. */
-function installHostBridge(respond: ToolResponder): HostBridge {
+function installHostBridge(responders: Responders = {}): HostBridge {
   const toolCalls: ToolCall[] = [];
   const modelContextUpdates: unknown[] = [];
+  const messages: Array<Record<string, unknown>> = [];
+  const calls = new Map<string, number>();
+
+  function answer(name: string, args: Record<string, unknown>): ToolResponse {
+    const call = (calls.get(name) ?? 0) + 1;
+    calls.set(name, call);
+    const entry = responders[name];
+    if (typeof entry === "function") return entry(args, call);
+    if (entry) return entry;
+    return defaultRespond(name);
+  }
 
   function reply(id: number, result: unknown): void {
     deliverToApp({ jsonrpc: "2.0", id, result });
@@ -130,7 +193,7 @@ function installHostBridge(respond: ToolResponder): HostBridge {
       const name = String(message.params?.name ?? "");
       const args = message.params?.arguments ?? {};
       toolCalls.push({ name, arguments: args });
-      const envelope = respond(name, args);
+      const envelope = answer(name, args);
       reply(message.id, {
         content: [{ type: "text", text: JSON.stringify(envelope) }],
         structuredContent: envelope,
@@ -140,6 +203,11 @@ function installHostBridge(respond: ToolResponder): HostBridge {
     }
     if (message.method === "ui/update-model-context") {
       modelContextUpdates.push(event.data);
+      reply(message.id, {});
+      return;
+    }
+    if (message.method === "ui/message") {
+      messages.push({ params: message.params } as unknown as Record<string, unknown>);
       reply(message.id, {});
       return;
     }
@@ -153,6 +221,7 @@ function installHostBridge(respond: ToolResponder): HostBridge {
   const bridge: HostBridge = {
     toolCalls,
     modelContextUpdates,
+    messages,
     callsTo: (name) => toolCalls.filter((call) => call.name === name),
     sendToolResult: (structured) => {
       deliverToApp({ jsonrpc: "2.0", ...toolResultNotification(structured) });
@@ -160,6 +229,53 @@ function installHostBridge(respond: ToolResponder): HostBridge {
     stop: () => window.removeEventListener("message", onMessage),
   };
   activeBridge = bridge;
+  return bridge;
+}
+
+/** Short polling so the lifecycle settles inside a test. */
+const FAST_POLL: DnaImportAppProps = {
+  pollIntervalMs: 10,
+  // Long enough that only the tests which ask for it hit the ceiling.
+  maxPollingMs: 60_000,
+  maxPollFailures: 2,
+};
+
+/**
+ * The processing card heading, anchored so it does not also match the body copy
+ * ("We're generating your analysis now.") or the pre-import expectation line.
+ */
+const PROCESSING_HEADING = /^Generating your analysis$/;
+
+/** Render the app without waiting for any particular stage. */
+function renderWith(responders: Responders = {}, props: DnaImportAppProps = {}): HostBridge {
+  const bridge = installHostBridge(responders);
+  render(<DnaImportApp {...FAST_POLL} {...props} />);
+  return bridge;
+}
+
+/** Render the app and wait until the catalog has loaded and it is interactive. */
+async function renderApp(responders: Responders = {}, props: DnaImportAppProps = {}): Promise<HostBridge> {
+  const bridge = renderWith(responders, props);
+  await screen.findByText(/Drag and drop your DNA file here/i);
+  return bridge;
+}
+
+/** Render, select a file, and wait for the review screen. */
+async function renderToReview(
+  responders: Responders = {},
+  file = microarrayFile(),
+): Promise<HostBridge> {
+  const bridge = await renderApp(responders);
+  selectFile(file);
+  await screen.findByText(/Ready to submit/i);
+  return bridge;
+}
+
+/** Render, select a file, and submit it, waiting for the processing card. */
+async function renderToProcessing(responders: Responders = {}): Promise<HostBridge> {
+  const bridge = await renderToReview(responders);
+  fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+  await screen.findByText(PROCESSING_HEADING);
   return bridge;
 }
 
@@ -171,25 +287,6 @@ function selectFile(file: File): void {
 
 function microarrayFile(body: string = MICROARRAY_BODY): File {
   return new File([body], "23andme.txt", { type: "text/plain" });
-}
-
-/** Render the app and wait until the catalog has loaded and it is interactive. */
-async function renderApp(respond: ToolResponder): Promise<HostBridge> {
-  const bridge = installHostBridge(respond);
-  render(<DnaImportApp />);
-  await screen.findByText(/Drag and drop your DNA file here/i);
-  return bridge;
-}
-
-/** Render, select a file, and wait for the review screen. */
-async function renderToReview(
-  respond: ToolResponder,
-  file = microarrayFile(),
-): Promise<HostBridge> {
-  const bridge = await renderApp(respond);
-  selectFile(file);
-  await screen.findByText(/Ready to submit/i);
-  return bridge;
 }
 
 afterEach(() => {
@@ -208,26 +305,40 @@ describe("DNA import component", () => {
     expect(McpUiToolResultNotificationSchema.safeParse(notification).success).toBe(true);
   });
 
-  it("loads the catalog over the bridge and offers the file picker", async () => {
-    const bridge = await renderApp(() => CATALOG);
+  it("checks the account status on mount and loads the catalog", async () => {
+    const bridge = await renderApp();
 
+    expect(bridge.callsTo("get_analysis_status")).toHaveLength(1);
+    expect(bridge.callsTo("get_analysis_status")[0]?.arguments).toEqual({});
     expect(bridge.callsTo("get_snp_catalog")).toHaveLength(1);
-    expect(bridge.toolCalls[0]?.arguments).toEqual({});
+    expect(bridge.callsTo("get_snp_catalog")[0]?.arguments).toEqual({});
+    // Nothing is created just by opening the panel.
+    expect(bridge.callsTo("create_report")).toHaveLength(0);
+  });
+
+  it("sets the 2-3 minute expectation before a file is chosen", async () => {
+    await renderApp();
+
+    expect(screen.getByText(/Generating your analysis usually takes about 2.3 minutes/i)).toBeDefined();
     expect(screen.getByRole("button", { name: /choose dna file/i })).toBeDefined();
     // The marker count comes from the catalog, so it proves the catalog was used.
     expect(screen.getByText(/2 markers in the Mutant panel/)).toBeDefined();
+    // No countdown or percentage is promised anywhere.
+    expect(screen.queryByText(/remaining/i)).toBeNull();
+    expect(screen.queryByText(/%/)).toBeNull();
   });
 
   it("shows a retryable catalog error and recovers on retry", async () => {
     let failing = true;
-    const bridge = installHostBridge((name) =>
-      name !== "get_snp_catalog" || !failing
-        ? CATALOG
-        : makeErrorResponse("CATALOG_UNAVAILABLE", "no catalog", {
-            app_code: "catalog_unavailable",
-          }),
-    );
-    render(<DnaImportApp />);
+    installHostBridge({
+      get_snp_catalog: () =>
+        !failing
+          ? CATALOG
+          : makeErrorResponse("CATALOG_UNAVAILABLE", "no catalog", {
+              app_code: "catalog_unavailable",
+            }),
+    });
+    render(<DnaImportApp {...FAST_POLL} />);
 
     await screen.findByText(/could not prepare the variant catalog/i);
 
@@ -235,44 +346,31 @@ describe("DNA import component", () => {
     fireEvent.click(screen.getByRole("button", { name: /try again/i }));
 
     await screen.findByText(/Drag and drop your DNA file here/i);
-    expect(bridge.callsTo("get_snp_catalog")).toHaveLength(2);
+    expect(activeBridge?.callsTo("get_snp_catalog")).toHaveLength(2);
   });
 
-  it("opens in the state show_dna_import asked for", async () => {
-    const bridge = await renderApp(() => CATALOG);
-
-    bridge.sendToolResult(
-      makeSuccessResponse({
-        account_status: "unlinked",
-        dna_status: "missing",
-        status: "awaiting_file",
-      }),
-    );
+  it("reports an unlinked account without offering the dropzone", async () => {
+    renderWith({
+      get_analysis_status: makeErrorResponse("ACCOUNT_NOT_AVAILABLE", "no account"),
+    });
 
     await screen.findByText(/Connect your Mutant account first/i);
-    // An unlinked account cannot import, so the dropzone is withheld.
     expect(screen.queryByText(/Drag and drop your DNA file here/i)).toBeNull();
   });
 
   it("says when DNA data is already on file without blocking a re-import", async () => {
-    const bridge = await renderApp(() => CATALOG);
-
-    bridge.sendToolResult(
-      makeSuccessResponse({
-        account_status: "connected",
-        dna_status: "available",
-        status: "awaiting_file",
-      }),
-    );
+    renderWith({
+      get_analysis_status: statusResponse("not_started"),
+    });
 
     await screen.findByText(/DNA data is already on file/i);
     expect(screen.getByText(/Drag and drop your DNA file here/i)).toBeDefined();
   });
 
-  it("ignores a tool result that is not the import routing state", async () => {
-    const bridge = await renderApp(() => CATALOG);
+  it("ignores the show_dna_import result, which carries no routing state", async () => {
+    const bridge = await renderApp();
 
-    bridge.sendToolResult(makeSuccessResponse({ analyses: [] }));
+    bridge.sendToolResult(makeSuccessResponse({ ui_rendered: true }));
 
     // Nothing changes: the dropzone is still there and no notice appeared.
     expect(screen.getByText(/Drag and drop your DNA file here/i)).toBeDefined();
@@ -280,11 +378,7 @@ describe("DNA import component", () => {
   });
 
   it("parses locally, reviews the summary, and submits only relevant variants", async () => {
-    const bridge = await renderToReview((name) =>
-      name === "get_snp_catalog"
-        ? CATALOG
-        : makeSuccessResponse({ analysis_id: "a-1", status: "queued" }),
-    );
+    const bridge = await renderToReview();
 
     // Local coverage: one of the two markers was found (rs4680 is not in the panel).
     expect(screen.getByText("1 of 2")).toBeDefined();
@@ -292,8 +386,7 @@ describe("DNA import component", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
 
-    await screen.findByText(/DNA data added/i);
-    expect(screen.getByText("a-1")).toBeDefined();
+    await screen.findByText(PROCESSING_HEADING);
 
     const submit = bridge.callsTo("create_report")[0];
     expect(submit?.arguments.snps).toEqual({ rs328: "AA" });
@@ -309,28 +402,246 @@ describe("DNA import component", () => {
       "snps",
       "upload_meta",
     ]);
-    // The model is told the analysis exists so it can continue with the analysis
-    // tools.
+  });
+
+  it("shows a truthful processing card without internal identifiers", async () => {
+    renderWith({ get_analysis_status: statusResponse("processing") });
+
+    await screen.findByText(PROCESSING_HEADING);
+
+    expect(screen.getByText(/Your DNA was imported successfully/i)).toBeDefined();
+    expect(screen.getByText(/DNA file processed/i)).toBeDefined();
+    expect(screen.getByText(/Relevant variants imported/i)).toBeDefined();
+    expect(screen.getByText(/Analyzing genetic patterns and health hypotheses/i)).toBeDefined();
+    expect(screen.getByText(/This usually takes about 2.3 minutes/i)).toBeDefined();
+    expect(screen.getByText(/Elapsed: \d+:\d\d/)).toBeDefined();
+
+    // Backend-shaped values never reach the user.
+    expect(screen.queryByText(/analysis_1/)).toBeNull();
+    expect(screen.queryByText(/core_systems/)).toBeNull();
+    expect(screen.queryByText(/^processing$/i)).toBeNull();
+    // No re-import control while an analysis is running.
+    expect(screen.queryByRole("button", { name: /replace dna data/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /import another file/i })).toBeNull();
+  });
+
+  it("resumes an in-flight analysis on mount and polls it to ready", async () => {
+    let ready = false;
+    const bridge = renderWith({
+      get_analysis_status: () => statusResponse(ready ? "ready" : "processing"),
+    });
+
+    await screen.findByText(PROCESSING_HEADING);
+    // Resuming never re-imports and never re-creates the report.
+    expect(bridge.callsTo("create_report")).toHaveLength(0);
+
+    ready = true;
+    await screen.findByText(/Analysis ready/i);
+
+    expect(bridge.callsTo("get_analysis_status").length).toBeGreaterThan(1);
+    expect(bridge.callsTo("create_report")).toHaveLength(0);
+  });
+
+  it("opens directly on the ready card when the analysis is already complete", async () => {
+    renderWith({ get_analysis_status: statusResponse("ready") });
+
+    await screen.findByText(/Analysis ready/i);
+    expect(screen.getByText(/Your DNA analysis is complete/i)).toBeDefined();
+    expect(screen.getByRole("button", { name: /view my top 3 findings/i })).toBeDefined();
+    // Nothing is fetched until the user asks for it.
+    expect(activeBridge?.callsTo("list_health_hypotheses")).toHaveLength(0);
+  });
+
+  it("polls automatically after submitting, without another prompt", async () => {
+    let status: "processing" | "ready" = "processing";
+    const bridge = await renderToProcessing({
+      // The mount check opens on the picker; every later read reports the
+      // analysis this component just created.
+      get_analysis_status: (_args, call) =>
+        call === 1 ? STATUS_MISSING : statusResponse(status),
+    });
+
+    expect(bridge.callsTo("create_report")).toHaveLength(1);
+    // The model is told the component owns this state.
     expect(bridge.modelContextUpdates).toHaveLength(1);
+    expect(JSON.stringify(bridge.modelContextUpdates[0])).toMatch(/do not restate/i);
+
+    status = "ready";
+    await screen.findByText(/Analysis ready/i);
+
+    expect(bridge.callsTo("create_report")).toHaveLength(1);
+    expect(JSON.stringify(bridge.modelContextUpdates[1])).toMatch(/ready/i);
+  });
+
+  it("advances the elapsed timer once per second", async () => {
+    renderWith({
+      get_analysis_status: statusResponse("processing", {
+        created_at: new Date(Date.now() - 30_000).toISOString(),
+      }),
+    });
+
+    await screen.findByText(/Elapsed: 0:30/);
+    await screen.findByText(/Elapsed: 0:31/, undefined, { timeout: 3000 });
+  });
+
+  it("changes the message when the analysis runs long", async () => {
+    renderWith({
+      get_analysis_status: statusResponse("processing", {
+        created_at: new Date(Date.now() - 4 * 60_000).toISOString(),
+      }),
+    });
+    await screen.findByText(/Still working on your analysis/i);
+    // Past the expected range the 2-3 minute promise is dropped rather than kept.
+    expect(screen.queryByText(/usually takes about 2.3 minutes/i)).toBeNull();
+    // Running long is not an error.
+    expect(screen.queryByText(/Something went wrong/i)).toBeNull();
+
+    cleanup();
+    activeBridge?.stop();
+    activeBridge = null;
+
+    renderWith({
+      get_analysis_status: statusResponse("processing", {
+        created_at: new Date(Date.now() - 6 * 60_000).toISOString(),
+      }),
+    });
+    await screen.findByText(/You can leave this conversation and return later/i);
+  });
+
+  it("offers a recoverable state when the polling ceiling is reached", async () => {
+    let ready = false;
+    const bridge = renderWith(
+      { get_analysis_status: () => statusResponse(ready ? "ready" : "processing") },
+      // The interval is short and the ceiling is a small multiple of it, so both
+      // the exhausted state and the resumed read land well inside the window.
+      { pollIntervalMs: 5, maxPollingMs: 40 },
+    );
+
+    await screen.findByText(/stopped checking automatically/i);
+    const before = bridge.callsTo("get_analysis_status").length;
+    // Exceeding the expected range is not an error.
+    expect(screen.queryByText(/Something went wrong/i)).toBeNull();
+
+    ready = true;
+    fireEvent.click(screen.getByRole("button", { name: /check again/i }));
+
+    await screen.findByText(/Analysis ready/i);
+    expect(bridge.callsTo("get_analysis_status").length).toBeGreaterThan(before);
+  });
+
+  it("reports a failed analysis and retries with a new idempotency key", async () => {
+    const bridge = await renderToProcessing({
+      get_analysis_status: (_args, call) =>
+        call === 1 ? STATUS_MISSING : statusResponse("failed"),
+    });
+
+    await screen.findByText(/We couldn't complete your analysis/i);
+    expect(screen.getByText(/did not finish successfully/i)).toBeDefined();
+    // A failed analysis is reported as a recovery state, not a stack trace.
+    expect(screen.queryByText(/Something went wrong/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+
+    await waitFor(() => expect(bridge.callsTo("create_report")).toHaveLength(2));
+    // The previous analysis failed, so the retry must not deduplicate onto it.
+    const keys = bridge.callsTo("create_report").map((call) => call.arguments.import_request_id);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it("asks for a file again when a resumed session cannot retry in place", async () => {
+    const bridge = renderWith({ get_analysis_status: statusResponse("failed") });
+
+    await screen.findByText(/We couldn't complete your analysis/i);
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+
+    await screen.findByText(/Drag and drop your DNA file here/i);
+    expect(bridge.callsTo("create_report")).toHaveLength(0);
+  });
+
+  it("renders the top findings inline when the user asks for them", async () => {
+    const bridge = renderWith({ get_analysis_status: statusResponse("ready") });
+
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+
+    await screen.findByText(/Alpha finding/i);
+    expect(screen.getByText(/Beta finding/i)).toBeDefined();
+    expect(screen.getByText(/Gamma finding/i)).toBeDefined();
+    expect(screen.getByText("First summary.")).toBeDefined();
+
+    const calls = bridge.callsTo("list_health_hypotheses");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.arguments).toEqual({ limit: 3 });
+    // The findings render in place; ChatGPT is not asked to do it again.
+    expect(bridge.messages).toHaveLength(0);
+    expect(screen.getByRole("button", { name: /ask chatgpt about my results/i })).toBeDefined();
+  });
+
+  it("hands a finding to ChatGPT only when the user asks", async () => {
+    const bridge = renderWith({ get_analysis_status: statusResponse("ready") });
+
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+    await screen.findByText(/Alpha finding/i);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /explain this finding/i })[0]!);
+
+    await waitFor(() => expect(bridge.messages).toHaveLength(1));
+    const sent = JSON.stringify(bridge.messages[0]);
+    expect(sent).toMatch(/Alpha finding/);
+    expect(sent).toMatch(/HYP_A/);
+    // Requesting the findings again must not refetch or re-message.
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
+  });
+
+  it("exposes a low-emphasis replace action once the analysis is ready", async () => {
+    const bridge = renderWith({ get_analysis_status: statusResponse("ready") });
+
+    await screen.findByText(/Analysis ready/i);
+    // No re-import control while processing; a quiet one when ready.
+    expect(screen.queryByRole("button", { name: /import another file/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /replace dna data/i }));
+
+    await screen.findByText(/Drag and drop your DNA file here/i);
+    expect(bridge.callsTo("create_report")).toHaveLength(0);
+  });
+
+  it("keeps the card alive but stops polling without the read scope", async () => {
+    const bridge = renderWith({
+      get_analysis_status: makeErrorResponse("INSUFFICIENT_SCOPE", "scope missing", {
+        app_code: "insufficient_scope",
+        required_scope: "https://mcp.mutantgenomics.com/mcp/analysis.read",
+      }),
+    });
+
+    await screen.findByText(/Drag and drop your DNA file here/i);
+    selectFile(microarrayFile());
+    await screen.findByText(/Ready to submit/i);
+    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+
+    await screen.findByText(PROCESSING_HEADING);
+    expect(screen.getByText(/Ask ChatGPT when your analysis is ready/i)).toBeDefined();
+    // The mount check plus nothing else: polling never started.
+    expect(bridge.callsTo("get_analysis_status")).toHaveLength(1);
   });
 
   it("reuses one idempotency key when the same attempt is retried", async () => {
-    let attempts = 0;
-    const bridge = await renderToReview((name) => {
-      if (name === "get_snp_catalog") return CATALOG;
-      attempts += 1;
-      return attempts === 1
-        ? makeErrorResponse("REPORT_GENERATION_FAILED", "boom", {
-            app_code: "report_generation_failed",
-          })
-        : makeSuccessResponse({ analysis_id: "a-2", status: "queued" });
+    const bridge = await renderToReview({
+      create_report: (_args, call) =>
+        call === 1
+          ? makeErrorResponse("REPORT_GENERATION_FAILED", "boom", {
+              app_code: "report_generation_failed",
+            })
+          : makeSuccessResponse({ analysis_id: "a-2", status: "processing" }),
     });
 
     fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
     await screen.findByText(/could not start your analysis/i);
 
     fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
-    await screen.findByText(/DNA data added/i);
+    await screen.findByText(PROCESSING_HEADING);
 
     const keys = bridge.callsTo("create_report").map((call) => call.arguments.import_request_id);
     expect(keys).toHaveLength(2);
@@ -338,14 +649,11 @@ describe("DNA import component", () => {
   });
 
   it("asks the user to re-consent when the token lacks the import scope", async () => {
-    await renderToReview((name) =>
-      name === "get_snp_catalog"
-        ? CATALOG
-        : // No `app_code`: the component maps the contract code itself.
-          makeErrorResponse("INSUFFICIENT_SCOPE", "scope missing", {
-            required_scope: "https://mcp.mutantgenomics.com/mcp/dna.import",
-          }),
-    );
+    await renderToReview({
+      create_report: makeErrorResponse("INSUFFICIENT_SCOPE", "scope missing", {
+        required_scope: "https://mcp.mutantgenomics.com/mcp/dna.import",
+      }),
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
 
@@ -356,7 +664,7 @@ describe("DNA import component", () => {
   });
 
   it("explains a file with no panel variants instead of submitting it", async () => {
-    const bridge = await renderApp(() => CATALOG);
+    const bridge = await renderApp();
 
     selectFile(
       microarrayFile(["# rsid\tchromosome\tposition\tgenotype", "rs0\t1\t1\tAA", ""].join("\n")),
@@ -367,7 +675,7 @@ describe("DNA import component", () => {
   });
 
   it("rejects an oversized file before reading any of it", async () => {
-    const bridge = await renderApp(() => CATALOG);
+    const bridge = await renderApp();
 
     // No bytes are allocated: only the reported size matters here.
     const huge = new File([""], "huge.vcf.gz", { type: "application/gzip" });
@@ -385,7 +693,7 @@ describe("DNA import component", () => {
     const ownDescriptor = Object.getOwnPropertyDescriptor(File.prototype, "stream");
     Object.defineProperty(File.prototype, "stream", { value: undefined, configurable: true });
     try {
-      const bridge = await renderApp(() => CATALOG);
+      const bridge = await renderApp();
 
       selectFile(microarrayFile());
 
@@ -410,11 +718,9 @@ describe("DNA import component", () => {
       snps[rsID] = { rsID, chromosome: "1", position_GRCh37: 100000 + index, risk_allele: "A" };
       lines.push(`${rsID}\t1\t${100000 + index}\tAA`);
     }
-    const bridge = await renderApp((name) =>
-      name === "get_snp_catalog"
-        ? makeSuccessResponse({ version: 1, snp_count: markerCount, snps })
-        : makeSuccessResponse({ analysis_id: "a-3" }),
-    );
+    const bridge = await renderApp({
+      get_snp_catalog: makeSuccessResponse({ version: 1, snp_count: markerCount, snps }),
+    });
 
     selectFile(microarrayFile(lines.join("\n")));
 
@@ -423,7 +729,7 @@ describe("DNA import component", () => {
   }, 30_000);
 
   it("cancels an in-flight parse and returns to the file picker", async () => {
-    const bridge = await renderApp(() => CATALOG);
+    const bridge = await renderApp();
 
     // A stream that never yields or closes: the parse stays in flight, which is
     // what a large file looks like to the user.
@@ -438,19 +744,5 @@ describe("DNA import component", () => {
 
     await screen.findByText(/Drag and drop your DNA file here/i);
     expect(bridge.callsTo("create_report")).toHaveLength(0);
-  });
-
-  it("offers another import after a successful one", async () => {
-    const bridge = await renderToReview((name) =>
-      name === "get_snp_catalog" ? CATALOG : makeSuccessResponse({ analysis_id: "a-4" }),
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
-    await screen.findByText(/DNA data added/i);
-
-    fireEvent.click(screen.getByRole("button", { name: /import another file/i }));
-
-    await screen.findByText(/Drag and drop your DNA file here/i);
-    expect(bridge.callsTo("create_report")).toHaveLength(1);
   });
 });

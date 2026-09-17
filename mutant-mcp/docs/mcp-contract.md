@@ -105,6 +105,8 @@ Input: `{}`.
   "dna_status": "missing",
   "analysis_status": "not_started",
   "plan": "Mutant Free",
+  "analysis_id": null,
+  "created_at": null,
   "next_action": {
     "tool": "show_dna_import",
     "reason": "DNA data is required before an analysis can be generated."
@@ -130,18 +132,29 @@ Input: `{}`.
 Status is a successful call even with no analysis. `analysis.status` is
 `none | processing | ready | failed`.
 
-The four routing fields are the contract the model acts on:
+The routing fields are the contract the model acts on:
 
 - `dna_status` is `missing | available`; `missing` means no DNA data has been
   received, so `show_dna_import` is the next action.
 - `analysis_status` is `not_started | processing | ready | failed` (`none` maps
-  to `not_started`).
+  to `not_started`, and the in-flight words `queued`, `pending`, `running`, and
+  `in_progress` all map to `processing` so an analysis that exists is never
+  reported as no DNA data).
 - `plan` is the human-readable effective plan (for example `Mutant Free`),
   derived from `entitlement.plan`.
+- `analysis_id` and `created_at` are always present, `null` when unknown. The
+  DNA import component uses them to resume the same analysis across rerenders
+  and to compute elapsed processing time. No percent-complete or stage field is
+  exposed: progress percentages are not available and are never simulated.
 - `next_action` names the tool to call next and why. It is
   `show_dna_import` when `dna_status` is `missing`, `get_analysis_context` when
   the analysis is `ready`, and `get_analysis_status` while an analysis is still
   `processing`.
+
+While `analysis_status` is `processing`, the DNA import component polls this
+tool itself (about every 7 seconds, up to 10 minutes) after it creates a report.
+The model should not tell the user to keep asking whether processing has
+finished, and should not narrate the status while that component is on screen.
 
 Until the backend reports these fields authoritatively, the MCP layer derives
 them from the raw status payload; a backend-provided value always wins.
@@ -244,12 +257,17 @@ The model calls this immediately whenever `get_analysis_status` reports
 `dna_status="missing"` — it renders the import UI rather than describing it, so
 the model must not tell the user to upload DNA without invoking it.
 
-Visibility `["model", "app"]`. Returns minimal routing state only — no genetic
-data and no account state beyond "connected":
+Visibility `["model", "app"]`. The result carries **no** routing state, no
+genetic data, and no account state, because the component reads the authoritative
+state itself on mount:
 
 ```json
-{ "account_status": "connected", "dna_status": "missing", "status": "awaiting_file" }
+{ "ui_rendered": true }
 ```
+
+That is deliberate: any status echoed here would be stale the moment the user
+picks a file, and the model would have to reconcile it. After calling this tool
+the model must not restate DNA status, analysis status, or import instructions.
 
 The result and the tool descriptor both carry the UI descriptor, so a host can
 mount the component from either:
@@ -310,13 +328,26 @@ document, identical for every authenticated account. Its `_meta.ui.csp` is
 the server only through the host bridge (`tools/call`), so it declares neither
 `connectDomains` nor `resourceDomains`. The raw DNA file never leaves the iframe.
 
-The component (`src/ui/dna-import/main.tsx` mounts `app.tsx`) calls
-`get_snp_catalog` on mount, parses the selected file with the vendored shared
-processor (`src/ui/genomics/*`, synced from `front-end-web/src/genomics`), filters
-to catalog-matched variants, and submits via `create_report` with one
-`crypto.randomUUID()` per attempt. It applies the host's theme and CSS variables
-(`useHostStyles`) and reads the `show_dna_import` result to open in the
-`account_status` / `dna_status` state the host asked for.
+The component (`src/ui/dna-import/main.tsx` mounts `app.tsx`) owns the whole
+asynchronous lifecycle. On mount it calls `get_snp_catalog` and
+`get_analysis_status` in parallel, which is how a rerender or a reopened panel
+resumes an in-flight analysis instead of starting a new one: `processing` opens
+the progress card and resumes polling, `ready` opens the completion card, and
+`failed` opens the recovery card. It parses the selected file with the vendored
+shared processor (`src/ui/dna-import/parseFile.ts` over `src/ui/genomics/*`, synced
+from `front-end-web/src/genomics`), filters to catalog-matched variants, and
+submits via `create_report` with one `crypto.randomUUID()` per attempt.
+
+After a successful `create_report` the component polls `get_analysis_status`
+itself (about every 7 seconds, up to 10 minutes) and stops on `ready`, `failed`,
+unmount, a new import, or the ceiling. It shows an elapsed timer measured from
+`created_at` (falling back to its own clock), never a countdown, percentage, or
+estimated time remaining. When the analysis is ready the same card becomes the
+completion view, offering either `View my top 3 findings`, which calls
+`list_health_hypotheses` from the component and renders the summaries inline, or
+`Ask ChatGPT about my results` / `Explain this finding`, which hand off to ChatGPT
+through `ui/message` only when the user asks for interpretation. It applies the
+host's theme and CSS variables (`useHostStyles`).
 
 Because `_meta.ui.csp` cannot declare `worker-src`, parsing prefers a Web Worker
 started from a `blob:` URL and falls back to the same parser on the main thread if
@@ -360,6 +391,12 @@ these with stable lowercase names: `unauthorized`, `insufficient_scope`,
 `payload_too_large`, `catalog_unavailable`, `invalid_dna_payload`,
 `unsupported_format`, `unsupported_genome_build`, `report_generation_failed`, and
 `service_unavailable` (the fallback).
+
+Two further app codes are derived by the DNA import component from the analysis
+lifecycle rather than returned by any tool: `analysis_failed` when the analysis
+reaches a failed state, and `analysis_timeout` when polling stops without a
+terminal state. They let the component classify its recovery states without
+surfacing backend exceptions to the user.
 
 ## Vocabulary mapping
 

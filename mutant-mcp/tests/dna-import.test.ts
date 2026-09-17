@@ -5,6 +5,7 @@ import {
   enforceRequestCap,
   enforceResponseCap,
   MockMutantBackendClient,
+  resetMockAnalyses,
   responseCapFor,
 } from "../src/clients/mutant-lambda-client.js";
 import { CONTRACT_VERSION, type ToolResponse } from "../src/contract.js";
@@ -171,16 +172,14 @@ describe("show_dna_import", () => {
     expect((resultMeta.ui as { resourceUri?: string }).resourceUri).toBe(DNA_IMPORT_UI_URI);
   });
 
-  it("returns only minimal routing state and never genetic data", async () => {
+  it("returns only a rendered flag and never genetic data or account state", async () => {
     const { client, backendClient } = await connect({});
     const result = await client.callTool({ name: "show_dna_import", arguments: {} });
     const envelope = structured(result);
     expect(envelope.ok).toBe(true);
-    expect(envelope.data).toEqual({
-      account_status: "connected",
-      dna_status: "missing",
-      status: "awaiting_file",
-    });
+    // No routing state is echoed back: the component reads the authoritative
+    // state itself, so there is nothing here for the model to narrate.
+    expect(envelope.data).toEqual({ ui_rendered: true });
     // Rendering the UI must not require a backend round trip.
     expect(backendClient.calls).toHaveLength(0);
     // No genotypes anywhere in the result.
@@ -453,5 +452,99 @@ describe("get_analysis_status", () => {
     expect(data.analysis_status).toBe("processing");
     expect(data.plan).toBe("Mutant Full");
     expect(data.next_action).toEqual(providedNextAction);
+  });
+
+  it("treats a queued analysis as processing with DNA on file", async () => {
+    // A lifecycle word the DNA import component does not know would otherwise
+    // leave it showing "no DNA data" for an account that just imported.
+    for (const upstream of ["queued", "pending", "running", "in_progress"]) {
+      const { client } = await connect({
+        responder: () => ok({ data: { analysis: { status: upstream } } }),
+      });
+      const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
+      const data = structured(result).data as Record<string, unknown>;
+      expect(data.analysis_status, upstream).toBe("processing");
+      expect(data.dna_status, upstream).toBe("available");
+    }
+  });
+
+  it("carries the analysis id and creation time for the import component", async () => {
+    const { client } = await connect({
+      responder: () =>
+        ok({
+          data: {
+            analysis_status: "processing",
+            analysis_id: "analysis_123",
+            created_at: "2026-09-16T23:00:00Z",
+          },
+        }),
+    });
+    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    const data = structured(result).data as Record<string, unknown>;
+    // Both are needed to resume the same analysis and to compute elapsed time.
+    expect(data.analysis_id).toBe("analysis_123");
+    expect(data.created_at).toBe("2026-09-16T23:00:00Z");
+  });
+
+  it("reads the id and creation time out of a nested analysis, and reports null when absent", async () => {
+    const nested = await connect({
+      responder: () =>
+        ok({ data: { analysis: { status: "processing", id: "analysis_9", started_at: "t0" } } }),
+    });
+    const nestedData = structured(
+      await nested.client.callTool({ name: "get_analysis_status", arguments: {} }),
+    ).data as Record<string, unknown>;
+    expect(nestedData.analysis_id).toBe("analysis_9");
+    expect(nestedData.created_at).toBe("t0");
+
+    const missing = await connect({ responder: () => ok({ data: { analysis: { status: "none" } } }) });
+    const missingData = structured(
+      await missing.client.callTool({ name: "get_analysis_status", arguments: {} }),
+    ).data as Record<string, unknown>;
+    // Explicit nulls distinguish "no analysis" from "the backend did not say".
+    expect(missingData.analysis_id).toBeNull();
+    expect(missingData.created_at).toBeNull();
+  });
+});
+
+describe("dev-mode mock analysis lifecycle", () => {
+  it("remembers an import so status polling reaches ready", async () => {
+    resetMockAnalyses();
+    const client = new MockMutantBackendClient({ analysisProcessingMs: 0 });
+    const user = makeUser();
+
+    const before = await client.invoke("get_analysis_status", {}, user, "req");
+    expect(before.data?.dna_status).toBe("missing");
+
+    await client.invoke("create_report", VALID_IMPORT, user, "req");
+
+    const after = await client.invoke("get_analysis_status", {}, user, "req");
+    expect(after.data?.analysis_status).toBe("ready");
+    expect(after.data?.dna_status).toBe("available");
+    expect(typeof after.data?.analysis_id).toBe("string");
+    expect(typeof after.data?.created_at).toBe("string");
+  });
+
+  it("reports processing until the synthetic window elapses", async () => {
+    resetMockAnalyses();
+    const client = new MockMutantBackendClient({ analysisProcessingMs: 60_000 });
+    const user = makeUser({ userId: "user-processing" });
+
+    await client.invoke("create_report", VALID_IMPORT, user, "req");
+
+    const status = await client.invoke("get_analysis_status", {}, user, "req");
+    expect(status.data?.analysis_status).toBe("processing");
+  });
+
+  it("returns synthetic hypotheses only once an analysis exists", async () => {
+    resetMockAnalyses();
+    const client = new MockMutantBackendClient();
+    const idle = await client.invoke("list_health_hypotheses", {}, makeUser(), "req");
+    expect((idle.data?.items as unknown[]).length).toBe(0);
+
+    const user = makeUser({ userId: "user-hypotheses" });
+    await client.invoke("create_report", VALID_IMPORT, user, "req");
+    const loaded = await client.invoke("list_health_hypotheses", {}, user, "req");
+    expect((loaded.data?.items as unknown[]).length).toBe(3);
   });
 });

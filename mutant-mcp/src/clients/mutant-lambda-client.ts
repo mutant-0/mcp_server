@@ -280,6 +280,46 @@ export interface MockClientCaps {
   maxRequestBytes?: number;
   maxResponseBytes?: number;
   snpCatalogMaxBytes?: number;
+  /**
+   * How long the synthetic dev-mode analysis stays `processing` before the mock
+   * reports it `ready`. Dev-loop convenience and a test seam; the real timing is
+   * the reports-generator's.
+   */
+  analysisProcessingMs?: number;
+}
+
+/** Dev-mode default: long enough to see the processing card, short enough to wait. */
+const DEFAULT_MOCK_ANALYSIS_PROCESSING_MS = 20_000;
+
+/**
+ * Dev-mode analyses, keyed by user. Module-level because the mock stands in for a
+ * backend that is stateless per request: the Lambda process is the only thing
+ * that can remember that an import happened.
+ */
+const mockAnalyses = new Map<string, { analysisId: string; startedAt: number }>();
+
+/** Dev/test helper: forget every synthetic analysis. */
+export function resetMockAnalyses(): void {
+  mockAnalyses.clear();
+}
+
+/** Synthetic hypotheses so the ready-state CTA renders in dev mode. */
+function mockHypotheses(): Record<string, unknown> {
+  const rows = [
+    ["HYP_MOCK_A", "Lipid metabolism", "Model support for how your variants influence lipid handling."],
+    ["HYP_MOCK_B", "Folate metabolism", "Patterns in your variants related to folate and homocysteine."],
+    ["HYP_MOCK_C", "Caffeine clearance", "Reported variant support for how you metabolize caffeine."],
+  ];
+  return {
+    items: rows.map(([id, title, summary], index) => ({
+      id,
+      rank: index + 1,
+      title,
+      summary,
+      assessment_state: "assessed",
+    })),
+    page: { has_more: false, next_cursor: null },
+  };
 }
 
 /** Used when no target ARN is configured, so local development stays self-contained. */
@@ -287,11 +327,13 @@ export class MockMutantBackendClient implements MutantBackendClient {
   private readonly maxRequestBytes: number;
   private readonly maxResponseBytes: number;
   private readonly snpCatalogMaxBytes: number;
+  private readonly analysisProcessingMs: number;
 
   constructor(caps: MockClientCaps = {}) {
     this.maxRequestBytes = caps.maxRequestBytes ?? DEFAULT_MUTANT_MAX_REQUEST_BYTES;
     this.maxResponseBytes = caps.maxResponseBytes ?? 512000;
     this.snpCatalogMaxBytes = caps.snpCatalogMaxBytes ?? 2000000;
+    this.analysisProcessingMs = caps.analysisProcessingMs ?? DEFAULT_MOCK_ANALYSIS_PROCESSING_MS;
   }
 
   async invoke(
@@ -311,6 +353,50 @@ export class MockMutantBackendClient implements MutantBackendClient {
       responseCap(operation, this.maxResponseBytes, this.snpCatalogMaxBytes),
     );
     return tooLarge ?? response;
+  }
+
+  /**
+   * The synthetic DNA import lifecycle: an import is remembered, then reports
+   * `processing` until the window elapses and `ready` afterwards. Without this,
+   * dev mode would tell the component there is no DNA data right after a
+   * successful import and the polling flow would look broken.
+   */
+  private analysisStatus(ctx: MutantUserContext): ToolResponse {
+    const record = mockAnalyses.get(ctx.userId);
+    if (!record) {
+      return {
+        contract_version: CONTRACT_VERSION,
+        analysis_version: null,
+        ok: true,
+        data: {
+          dna_status: "missing",
+          analysis_status: "not_started",
+          analysis: { status: "none", created_at: null },
+          entitlement: { plan: "mutant_free", hypothesis_scope: "top_3" },
+          plan: "Mutant Free",
+        },
+        error: null,
+      };
+    }
+
+    const createdAt = new Date(record.startedAt).toISOString();
+    const ready = Date.now() - record.startedAt >= this.analysisProcessingMs;
+    const status = ready ? "ready" : "processing";
+    return {
+      contract_version: CONTRACT_VERSION,
+      analysis_version: ready ? "mock" : null,
+      ok: true,
+      data: {
+        dna_status: "available",
+        analysis_status: status,
+        analysis_id: record.analysisId,
+        created_at: createdAt,
+        analysis: { status, created_at: createdAt, generated_at: ready ? createdAt : null },
+        entitlement: { plan: "mutant_free", hypothesis_scope: "top_3" },
+        plan: "Mutant Free",
+      },
+      error: null,
+    };
   }
 
   private respond(
@@ -334,14 +420,29 @@ export class MockMutantBackendClient implements MutantBackendClient {
     if (operation === "create_report") {
       const importRequestId =
         typeof args.import_request_id === "string" ? args.import_request_id : "unknown";
+      const analysisId = `analysis_mock_${importRequestId.slice(0, 8)}`;
+      // A repeat of the same import request is idempotent here too: the new
+      // attempt always restarts the clock, because it is a new import.
+      mockAnalyses.set(ctx.userId, { analysisId, startedAt: Date.now() });
       return {
         contract_version: CONTRACT_VERSION,
         analysis_version: null,
         ok: true,
-        data: {
-          analysis_id: `analysis_mock_${importRequestId.slice(0, 8)}`,
-          status: "processing",
-        },
+        data: { analysis_id: analysisId, status: "processing" },
+        error: null,
+      };
+    }
+
+    if (operation === "get_analysis_status") {
+      return this.analysisStatus(ctx);
+    }
+
+    if (operation === "list_health_hypotheses") {
+      return {
+        contract_version: CONTRACT_VERSION,
+        analysis_version: "mock",
+        ok: true,
+        data: mockAnalyses.has(ctx.userId) ? mockHypotheses() : { items: [], page: { has_more: false } },
         error: null,
       };
     }

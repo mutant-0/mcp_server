@@ -22,9 +22,20 @@ user's raw DNA file **locally in the iframe**. Only the variants present in the
 Mutant catalog ever leave the browser, are submitted through `create_report`, and
 are persisted by the backend. The raw file is never uploaded.
 
+The component owns the entire asynchronous lifecycle. It reads
+`get_analysis_status` on mount (so a rerender or a reopened panel resumes an
+in-flight analysis instead of starting a new one), polls that tool itself after
+`create_report` until the analysis is `ready` or `failed`, shows an elapsed timer
+rather than a countdown or a simulated percentage, and transforms the same card
+in place into the completion view. The user never has to ask ChatGPT whether
+processing finished. `show_dna_import` returns only `{ ui_rendered: true }`, so
+there is no stale status for the model to narrate.
+
 Two scopes gate the surface: the six analysis tools require `analysis.read`, and
 `show_dna_import` / `get_snp_catalog` / `create_report` require `dna.import`.
 Because importing DNA creates user data, a read-only grant can never trigger it.
+A `dna.import`-only grant still imports, but the completion card explains that
+ChatGPT reports the result because the panel cannot read the status itself.
 
 ## Architecture
 
@@ -110,13 +121,13 @@ mutant-mcp/
 
 | Tool | Scope | Purpose |
 |---|---|---|
-| `get_analysis_status` | `analysis.read` | Routing gate: `dna_status`, `analysis_status`, `plan`, and an explicit `next_action`. |
+| `get_analysis_status` | `analysis.read` | Routing gate: `dna_status`, `analysis_status`, `plan`, `analysis_id`, `created_at`, and an explicit `next_action`. Polled by the DNA import component while an analysis is processing. |
 | `get_analysis_context` | `analysis.read` | **Start here.** Coverage, interpretation rules/limitations, top hypotheses. |
 | `list_health_hypotheses` | `analysis.read` | List/search hypotheses (Free: fixed top three; Full: whole set). |
 | `get_hypothesis_details` | `analysis.read` | Full interpretation: scoring, patterns, clinical correlation, guardrails. |
 | `get_supporting_evidence` | `analysis.read` | Stored patterns, variant contributions, or cited sources. |
 | `get_genetic_context` | `analysis.read` | Marker-level context by hypothesis (Free) or module/gene/rsIDs (Full). |
-| `show_dna_import` | `dna.import` | Renders the DNA import component. No backend call. |
+| `show_dna_import` | `dna.import` | Renders the DNA import component, which owns import, submission, polling, and the completion UI. No backend call, no echoed status. |
 | `get_snp_catalog` | `dna.import` | Returns the SNP catalog to the component (`app` visibility only). |
 | `create_report` | `dna.import` | Creates an analysis from locally processed variants (`app` visibility only). |
 

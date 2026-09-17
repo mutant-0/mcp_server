@@ -1,15 +1,20 @@
 /**
  * Mutant DNA import - Apps SDK component.
  *
- * Renders the DNA upload experience inside ChatGPT. The raw file is read here,
- * in the sandboxed app iframe, and never leaves it: the component uploads no
- * bytes and makes no direct network request. It talks to the Mutant MCP server
- * only through the host bridge (`app.callServerTool`):
+ * Renders the DNA upload experience inside ChatGPT and owns the entire
+ * asynchronous lifecycle: file selection, the local parse, report creation, then
+ * polling `get_analysis_status` until the analysis is ready or fails. The user
+ * never has to ask ChatGPT again just to find out whether processing finished.
+ *
+ * The raw file is read here, in the sandboxed app iframe, and never leaves it:
+ * the component uploads no bytes and makes no direct network request. It talks to
+ * the Mutant MCP server only through the host bridge (`app.callServerTool`):
  *
  *   get_snp_catalog -> parse the raw file locally -> create_report
+ *   get_analysis_status -> poll while processing -> list_health_hypotheses
  *
- * so the only thing that crosses the boundary is the normalized subset of
- * Mutant-relevant variants.
+ * so the only things that cross the boundary are the normalized subset of
+ * Mutant-relevant variants and ordinary analysis reads.
  */
 import {
   useCallback,
@@ -23,7 +28,7 @@ import {
 } from "react";
 import { useApp, useDocumentTheme, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
 import type { App } from "@modelcontextprotocol/ext-apps";
-import { appErrorCode, type ErrorCodeValue, type ToolResponse } from "../../contract";
+import { appErrorCode, type AppErrorCode, type ToolResponse } from "../../contract";
 import { parseDnaFile } from "./parseFile";
 
 /** Client-side ceiling mirroring the server's MAX_SNP_ENTRIES transport guard. */
@@ -37,6 +42,25 @@ const MAX_SNP_ENTRIES = 20000;
  * it has stalled the panel.
  */
 const MAX_LOCAL_FILE_BYTES = 1024 * 1024 * 1024;
+
+/**
+ * How often the component asks whether the analysis is ready, and how long it
+ * keeps asking before handing the user a recoverable "still working" state. The
+ * observed processing time is a couple of minutes, so the ceiling is generous
+ * enough that only a genuinely stuck analysis reaches it.
+ */
+const DEFAULT_POLL_INTERVAL_MS = 7000;
+const DEFAULT_MAX_POLLING_MS = 10 * 60 * 1000;
+/** Consecutive transient failures tolerated before polling stops with a notice. */
+const DEFAULT_MAX_POLL_FAILURES = 3;
+
+/** Long-running thresholds, after which the expectation copy changes. */
+const SLOW_ANALYSIS_MS = 3 * 60 * 1000;
+const VERY_SLOW_ANALYSIS_MS = 5 * 60 * 1000;
+
+/** Findings requested by the ready-state CTA. Free accounts see their top three. */
+const FREE_FINDINGS_LIMIT = 3;
+const FULL_FINDINGS_LIMIT = 10;
 
 interface Catalog {
   version?: number;
@@ -59,16 +83,68 @@ interface ParsedResult {
   totalLines: number;
 }
 
-interface SubmitOutcome {
+/**
+ * The stage the card is displaying. Explicit rather than a generic `loading`
+ * flag, so the UI always knows which part of the flow it is painting.
+ */
+type Stage =
+  | "loading_catalog"
+  | "waiting_for_file"
+  | "parsing_file"
+  | "review_variants"
+  | "submitting_variants"
+  | "analysis_processing"
+  | "analysis_ready"
+  | "analysis_failed";
+
+type LifecycleStatus = "not_started" | "processing" | "ready" | "failed";
+type DnaStatus = "missing" | "available" | "unknown";
+
+/** What `get_analysis_status` told us about the account. */
+interface StatusInfo {
+  dnaStatus: DnaStatus;
+  analysisStatus: LifecycleStatus | "unknown";
   analysisId: string | null;
-  status: string | null;
+  createdAt: string | null;
+  planLabel: string | null;
+  planSlug: string | null;
+  hypothesisScope: string | null;
+  upgradeUrl: string | null;
 }
 
-/** Routing state the host passed to `show_dna_import`, read off its tool result. */
-interface ImportContext {
-  accountStatus: string | null;
-  dnaStatus: string | null;
+interface AnalysisState {
+  id: string | null;
+  createdAt: string | null;
+  planLabel: string | null;
+  planSlug: string | null;
+  hypothesisScope: string | null;
+  upgradeUrl: string | null;
 }
+
+/** Why polling is not running, when it is not: each is a recoverable notice. */
+interface PollState {
+  /** The polling ceiling was reached; the analysis may still be processing. */
+  exhausted: boolean;
+  /** A user-facing message after repeated transient failures. */
+  error: string | null;
+  /** The grant lacks the scope this check needs, so ChatGPT reports instead. */
+  scopeBlocked: boolean;
+}
+
+interface Finding {
+  id: string | null;
+  rank: number;
+  title: string;
+  summary: string | null;
+}
+
+type FindingsState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "loaded"; items: Finding[] }
+  | { status: "error"; message: string };
+
+const INITIAL_POLL: PollState = { exhausted: false, error: null, scopeBlocked: false };
 
 /** Host context (theme, styles, display mode) as negotiated during initialize. */
 type HostContext = NonNullable<ReturnType<App["getHostContext"]>>;
@@ -88,6 +164,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   payload_too_large:
     "The processed DNA data is too large to submit in one request. Contact support@mutantbiotech.com.",
   service_unavailable: "Mutant is temporarily unavailable. Please try again in a moment.",
+  analysis_failed:
+    "Mutant could not finish your analysis. Your DNA file was imported; you can try again.",
+  analysis_timeout: "Your analysis is taking longer than expected.",
 };
 
 const LOCAL_FILE_TOO_LARGE_MESSAGE =
@@ -105,10 +184,29 @@ function formatCount(value: number): string {
   return value.toLocaleString("en-US");
 }
 
+/** `1:24` - an elapsed timer, never a countdown or a made-up estimate. */
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 /** Bridge-level failures are diagnostic; user-facing failures come from envelopes. */
 function logBridgeError(err: unknown): void {
   if (typeof console === "undefined" || typeof console.debug !== "function") return;
   console.debug("[dna-import] host bridge error", err);
+}
+
+/**
+ * Classify a recovery state the component derived itself. These codes
+ * (`analysis_failed`, `analysis_timeout`) are never shown to the user: they
+ * exist so a support engineer can trace what the panel decided from the console
+ * without the card exposing backend vocabulary.
+ */
+function logAnalysisState(code: AppErrorCode, detail?: string): void {
+  if (typeof console === "undefined" || typeof console.debug !== "function") return;
+  console.debug(`[dna-import] ${code}${detail ? `: ${detail}` : ""}`);
 }
 
 /**
@@ -146,27 +244,120 @@ function toCatalog(response: ToolResponse): Catalog | null {
   return catalog;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+/** First non-empty string among the candidates; null when none is usable. */
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
+}
+
 /**
- * Extract the `show_dna_import` routing state from a tool result, or null for
- * any other result the host forwards to this component.
- *
- * The component is mounted by `show_dna_import`, so the enclosing tool result is
- * the only one that describes which state to open in. The tool reports the
- * precondition it was called under rather than a fresh backend read, so this is
- * used to set expectations, never to block an upload.
+ * Collapse the status lifecycle words to the four states the component paints.
+ * Anything unrecognized stays `null` so an upstream change cannot make the card
+ * claim a state that is not real.
  */
-function importContextOf(result: {
-  isError?: boolean;
-  structuredContent?: unknown;
-  content?: Array<{ type: string; text?: string }>;
-}): ImportContext | null {
-  const data = envelopeOf(result)?.data;
-  if (!data || typeof data !== "object") return null;
-  const row = data as Record<string, unknown>;
-  const accountStatus = typeof row.account_status === "string" ? row.account_status : null;
-  const dnaStatus = typeof row.dna_status === "string" ? row.dna_status : null;
-  if (!accountStatus && !dnaStatus) return null;
-  return { accountStatus, dnaStatus };
+function normalizeStatus(value: unknown): LifecycleStatus | null {
+  if (typeof value !== "string") return null;
+  if (value === "not_started" || value === "ready" || value === "failed") return value;
+  if (
+    value === "processing" ||
+    value === "queued" ||
+    value === "pending" ||
+    value === "running" ||
+    value === "in_progress"
+  ) {
+    return "processing";
+  }
+  return null;
+}
+
+/**
+ * Read the routing and plan fields out of a `get_analysis_status` envelope. This
+ * is the only input to the component's lifecycle: whatever the server says on
+ * mount is what lets a rerender (or a reopened panel) resume an existing
+ * analysis instead of starting a new one.
+ */
+function statusOf(envelope: ToolResponse): StatusInfo {
+  const data = asRecord(envelope.data) ?? {};
+  const analysis = asRecord(data.analysis);
+  const entitlement = asRecord(data.entitlement);
+  const upgrade = asRecord(data.upgrade);
+
+  const analysisStatus = normalizeStatus(data.analysis_status) ?? normalizeStatus(analysis?.status);
+  const rawDna = data.dna_status;
+  const dnaStatus: DnaStatus =
+    rawDna === "missing" || rawDna === "available"
+      ? rawDna
+      : analysisStatus && analysisStatus !== "not_started"
+        ? "available"
+        : "unknown";
+
+  return {
+    dnaStatus,
+    analysisStatus: analysisStatus ?? "unknown",
+    analysisId: firstString(data.analysis_id, analysis?.analysis_id, analysis?.id),
+    createdAt: firstString(
+      data.created_at,
+      analysis?.created_at,
+      analysis?.started_at,
+      analysis?.requested_at,
+    ),
+    planLabel: firstString(data.plan, entitlement?.plan_label),
+    planSlug: firstString(data.plan_slug, entitlement?.plan),
+    hypothesisScope: firstString(entitlement?.hypothesis_scope, data.hypothesis_scope),
+    upgradeUrl: firstString(upgrade?.url, data.upgrade_url),
+  };
+}
+
+/** Expand the analysis summary from a status payload, keeping what we know. */
+function analysisFromStatus(previous: AnalysisState | null, info: StatusInfo): AnalysisState {
+  return {
+    id: info.analysisId ?? previous?.id ?? null,
+    createdAt: info.createdAt ?? previous?.createdAt ?? null,
+    planLabel: info.planLabel ?? previous?.planLabel ?? null,
+    planSlug: info.planSlug ?? previous?.planSlug ?? null,
+    hypothesisScope: info.hypothesisScope ?? previous?.hypothesisScope ?? null,
+    upgradeUrl: info.upgradeUrl ?? previous?.upgradeUrl ?? null,
+  };
+}
+
+/** Free accounts see a fixed top three; Full accounts can see the whole set. */
+function isFullAccount(analysis: AnalysisState | null): boolean {
+  return analysis?.hypothesisScope === "all" || analysis?.planSlug === "mutant_full";
+}
+
+/**
+ * Pull the hypothesis summaries out of a `list_health_hypotheses` payload. The
+ * shapes are accepted defensively: this renders whatever the backend sends and
+ * falls back to the ChatGPT handoff when nothing usable is there.
+ */
+function findingsFrom(data: unknown): Finding[] {
+  const row = asRecord(data);
+  const raw = Array.isArray(row?.items)
+    ? row.items
+    : Array.isArray(row?.hypotheses)
+      ? row.hypotheses
+      : [];
+  const findings: Finding[] = [];
+  raw.forEach((entry, index) => {
+    const item = asRecord(entry);
+    if (!item) return;
+    const title = firstString(item.title, item.name);
+    if (!title) return;
+    const rank = typeof item.rank === "number" ? item.rank : index + 1;
+    findings.push({
+      id: firstString(item.id, item.hypothesis_id),
+      rank,
+      title,
+      summary: firstString(item.summary, item.description),
+    });
+  });
+  return findings;
 }
 
 /**
@@ -253,6 +444,15 @@ const styles = {
     fontSize: 14,
     cursor: "pointer",
   } as const,
+  subtleButton: {
+    background: "transparent",
+    color: "var(--color-text-secondary, #5f6368)",
+    border: "none",
+    padding: "6px 0",
+    fontSize: 13,
+    textDecoration: "underline",
+    cursor: "pointer",
+  } as const,
   privacy: {
     background: "var(--color-background-secondary, #f0f9f0)",
     border: "1px solid var(--color-border-secondary, #cdeacd)",
@@ -297,7 +497,37 @@ const styles = {
     fontSize: 13,
   } as const,
   buttonRow: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" } as const,
+  stageList: {
+    listStyle: "none",
+    margin: "14px 0 10px",
+    padding: 0,
+    fontSize: 13,
+  } as const,
+  stageItem: { display: "flex", gap: 8, padding: "3px 0", alignItems: "baseline" } as const,
+  stageMarker: { width: 12, color: "var(--mutant-accent, #1f7a3f)" } as const,
+  meta: { margin: "0 0 12px", fontSize: 13, color: "var(--color-text-secondary, #5f6368)" } as const,
+  small: { margin: "0 0 12px", fontSize: 13, color: "var(--color-text-secondary, #5f6368)" } as const,
+  findingList: { listStyle: "none", margin: "14px 0", padding: 0 } as const,
+  finding: {
+    border: "1px solid var(--color-border-secondary, #eceff1)",
+    borderRadius: 8,
+    padding: "10px 12px",
+    marginBottom: 8,
+  } as const,
+  findingTitle: { margin: "0 0 4px", fontSize: 14, fontWeight: 600 } as const,
+  findingSummary: {
+    margin: "0 0 6px",
+    fontSize: 13,
+    color: "var(--color-text-secondary, #5f6368)",
+  } as const,
 };
+
+/** The three broad stages that are always true after `create_report` succeeds. */
+const STAGE_STEPS = [
+  { label: "DNA file processed", state: "done" },
+  { label: "Relevant variants imported", state: "done" },
+  { label: "Analyzing genetic patterns and health hypotheses", state: "active" },
+] as const;
 
 /**
  * Every state renders inside this shell so the host palette is applied in one
@@ -344,17 +574,37 @@ function ErrorPanel({ message, onRetry, retryLabel = "Try again" }: ErrorPanelPr
   );
 }
 
-export function DnaImportApp() {
-  const [importContext, setImportContext] = useState<ImportContext | null>(null);
+export interface DnaImportAppProps {
+  /** How often the analysis status is polled while processing. */
+  pollIntervalMs?: number;
+  /** How long polling continues before the recoverable "still working" state. */
+  maxPollingMs?: number;
+  /** Consecutive transient poll failures tolerated before stopping. */
+  maxPollFailures?: number;
+}
+
+export function DnaImportApp({
+  pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
+  maxPollingMs = DEFAULT_MAX_POLLING_MS,
+  maxPollFailures = DEFAULT_MAX_POLL_FAILURES,
+}: DnaImportAppProps = {}) {
+  const [stage, setStage] = useState<Stage>("loading_catalog");
   const [hostContext, setHostContext] = useState<HostContext | undefined>(undefined);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [parsed, setParsed] = useState<ParsedResult | null>(null);
   const [progress, setProgress] = useState(0);
-  const [busy, setBusy] = useState<null | "parsing" | "submitting">(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<SubmitOutcome | null>(null);
+  const [accountMissing, setAccountMissing] = useState(false);
+  const [dnaOnFile, setDnaOnFile] = useState(false);
+  const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
+  const [poll, setPoll] = useState<PollState>(INITIAL_POLL);
+  const [findings, setFindings] = useState<FindingsState>({ status: "idle" });
   const [isDragging, setIsDragging] = useState(false);
+  /** Ticks while processing so the elapsed timer advances without polling state. */
+  const [now, setNow] = useState(() => Date.now());
+  /** Bumped to restart the polling loop after a recoverable stop. */
+  const [resumeToken, setResumeToken] = useState(0);
 
   const {
     app,
@@ -364,13 +614,6 @@ export function DnaImportApp() {
     appInfo: { name: "Mutant DNA Import", version: "1.0.0" },
     capabilities: {},
     onAppCreated: (created) => {
-      // The host mounts this component because of show_dna_import, so its result
-      // carries the account/DNA state to open in. Results for any other tool are
-      // ignored rather than misread.
-      created.ontoolresult = (result) => {
-        const context = importContextOf(result);
-        if (context) setImportContext(context);
-      };
       created.onerror = logBridgeError;
     },
   });
@@ -379,6 +622,21 @@ export function DnaImportApp() {
   const abortRef = useRef<AbortController | null>(null);
   /** One idempotency key per import attempt, reused across retries of that attempt. */
   const importRequestIdRef = useRef<string | null>(null);
+  /**
+   * When this analysis started, in epoch ms. Preferred source is the backend's
+   * `created_at`; the local timestamp is the fallback when the backend does not
+   * send one, and is never persisted across reloads.
+   */
+  const startedAtRef = useRef<number | null>(null);
+  /** End of the current polling window; null until polling starts. */
+  const deadlineRef = useRef<number | null>(null);
+  /** Read inside the polling loop without making the loop depend on state. */
+  const findingsRef = useRef<FindingsState>({ status: "idle" });
+
+  const setFindingsState = useCallback((next: FindingsState) => {
+    findingsRef.current = next;
+    setFindings(next);
+  }, []);
 
   // Host styling has to be seeded explicitly: the hook applies the host's CSS
   // variables and theme when it is handed a context, and there is no `app` yet
@@ -415,6 +673,62 @@ export function DnaImportApp() {
     }
   }, []);
 
+  /**
+   * Ask the server where this account stands. This is the component's only
+   * source of lifecycle truth, so a rerender or a reopened panel resumes the
+   * existing analysis rather than restarting the import (§18).
+   *
+   * A failure here never blocks the import: at worst the component opens on the
+   * file picker and the submit path reports its own errors.
+   */
+  const loadStatus = useCallback(async (client: App) => {
+    try {
+      const result = await client.callServerTool({ name: "get_analysis_status", arguments: {} });
+      const envelope = envelopeOf(result);
+      if (result.isError || !envelope || !envelope.ok) {
+        const code = envelope?.error?.code;
+        const appCode = envelope?.error?.app_code ?? (code ? appErrorCode(code) : undefined);
+        if (code === "AUTHENTICATION_REQUIRED" || code === "ACCOUNT_NOT_AVAILABLE") {
+          setAccountMissing(true);
+        } else if (appCode === "insufficient_scope") {
+          // A dna.import-only grant can submit but cannot read status, so the
+          // card explains that ChatGPT reports completion instead.
+          setPoll((previous) => ({ ...previous, scopeBlocked: true }));
+        }
+        setStage("waiting_for_file");
+        return;
+      }
+
+      const info = statusOf(envelope);
+      setAnalysis((previous) => analysisFromStatus(previous, info));
+      if (info.createdAt) {
+        const startedAt = Date.parse(info.createdAt);
+        if (Number.isFinite(startedAt)) startedAtRef.current = startedAt;
+      }
+
+      if (info.analysisStatus === "processing") {
+        if (startedAtRef.current === null) startedAtRef.current = Date.now();
+        setNow(Date.now());
+        setStage("analysis_processing");
+        return;
+      }
+      if (info.analysisStatus === "ready") {
+        setStage("analysis_ready");
+        return;
+      }
+      if (info.analysisStatus === "failed") {
+        logAnalysisState("analysis_failed", "status reported failed on mount");
+        setStage("analysis_failed");
+        return;
+      }
+      setDnaOnFile(info.dnaStatus === "available");
+      setStage("waiting_for_file");
+    } catch (err) {
+      logBridgeError(err);
+      setStage("waiting_for_file");
+    }
+  }, []);
+
   // Exactly one automatic load per mount. Keying this off `catalogError` would
   // re-fire when the retry clears the error, double-fetching the catalog.
   const autoLoadedRef = useRef(false);
@@ -422,18 +736,31 @@ export function DnaImportApp() {
     if (!isConnected || !app || autoLoadedRef.current) return;
     autoLoadedRef.current = true;
     void loadCatalog(app);
-  }, [isConnected, app, loadCatalog]);
+    void loadStatus(app);
+  }, [isConnected, app, loadCatalog, loadStatus]);
+
+  /** Tell the model the component owns this state, so it does not narrate it. */
+  const reportToModel = useCallback(
+    (text: string) => {
+      if (!app) return;
+      void app.updateModelContext({ content: [{ type: "text", text }] }).catch(() => undefined);
+    },
+    [app],
+  );
 
   const resetImport = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
     importRequestIdRef.current = null;
+    startedAtRef.current = null;
+    deadlineRef.current = null;
     setParsed(null);
     setUploadError(null);
-    setOutcome(null);
     setProgress(0);
-    setBusy(null);
-  }, []);
+    setPoll(INITIAL_POLL);
+    setFindingsState({ status: "idle" });
+    setStage("waiting_for_file");
+  }, [setFindingsState]);
 
   const openFilePicker = useCallback(() => {
     resetImport();
@@ -459,7 +786,7 @@ export function DnaImportApp() {
     abortRef.current?.abort();
     abortRef.current = null;
     setProgress(0);
-    setBusy(null);
+    setStage("waiting_for_file");
   }, []);
 
   const handleFile = useCallback(
@@ -472,15 +799,15 @@ export function DnaImportApp() {
 
       setUploadError(null);
       setParsed(null);
-      setOutcome(null);
       setProgress(0);
 
       if (file.size > MAX_LOCAL_FILE_BYTES) {
         setUploadError(LOCAL_FILE_TOO_LARGE_MESSAGE);
+        setStage("waiting_for_file");
         return;
       }
 
-      setBusy("parsing");
+      setStage("parsing_file");
       // A new file starts a new import attempt, so it gets a fresh idempotency key.
       importRequestIdRef.current = crypto.randomUUID();
 
@@ -495,6 +822,7 @@ export function DnaImportApp() {
 
         if (!result.supported) {
           setUploadError(UNSUPPORTED_CLIENT_MESSAGE);
+          setStage("waiting_for_file");
           return;
         }
 
@@ -503,25 +831,28 @@ export function DnaImportApp() {
           setUploadError(
             `Your ${result.providerLabel} file was read successfully but contained none of the variants in the Mutant panel. Check that you selected a raw DNA data file rather than a report or summary.`,
           );
+          setStage("waiting_for_file");
           return;
         }
         if (matched > MAX_SNP_ENTRIES) {
           setUploadError(messageFor("payload_too_large"));
+          setStage("waiting_for_file");
           return;
         }
 
         setParsed(result);
+        setStage("review_variants");
       } catch (err) {
         if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
           return;
         }
         setUploadError(messageFor("invalid_dna_payload"));
+        setStage("waiting_for_file");
       } finally {
-        // Only the attempt that still owns the ref may clear the busy state: a
+        // Only the attempt that still owns the ref may clear the abort state: a
         // cancelled or superseded attempt must not disturb the current one.
         if (abortRef.current === controller) {
           abortRef.current = null;
-          setBusy(null);
         }
       }
     },
@@ -534,7 +865,7 @@ export function DnaImportApp() {
       const importRequestId = importRequestIdRef.current ?? crypto.randomUUID();
       importRequestIdRef.current = importRequestId;
 
-      setBusy("submitting");
+      setStage("submitting_variants");
       setUploadError(null);
 
       const args: Record<string, unknown> = {
@@ -556,35 +887,236 @@ export function DnaImportApp() {
         if (result.isError || !envelope || !envelope.ok) {
           setUploadError(
             messageFor(
-              (envelope?.error?.app_code ??
-                (envelope?.error?.code ? appErrorCode(envelope.error.code) : undefined)) as
-                ErrorCodeValue | undefined,
+              envelope?.error?.app_code ??
+                (envelope?.error?.code ? appErrorCode(envelope.error.code) : undefined),
             ),
+          );
+          // The review screen survives so the same file can be resubmitted.
+          setStage("review_variants");
+          return;
+        }
+
+        const data = (envelope.data ?? {}) as { analysis_id?: string; status?: string };
+        const submittedStatus = normalizeStatus(data.status);
+        // The local clock is the fallback; the first poll replaces it with the
+        // backend's `created_at` when one is available (§11).
+        startedAtRef.current = Date.now();
+        deadlineRef.current = Date.now() + maxPollingMs;
+        setNow(Date.now());
+        // `scopeBlocked` survives a submit: it describes the grant, not the
+        // attempt, so a dna.import-only connection stays on the ChatGPT hint.
+        setPoll((previous) => ({ ...INITIAL_POLL, scopeBlocked: previous.scopeBlocked }));
+        setFindingsState({ status: "idle" });
+        setAnalysis((previous) => ({
+          ...(previous ?? {
+            planLabel: null,
+            planSlug: null,
+            hypothesisScope: null,
+            upgradeUrl: null,
+          }),
+          id: data.analysis_id ?? null,
+          createdAt: null,
+        }));
+
+        if (submittedStatus === "ready") {
+          setStage("analysis_ready");
+        } else if (submittedStatus === "failed") {
+          logAnalysisState("analysis_failed", "create_report returned failed");
+          setStage("analysis_failed");
+        } else {
+          setStage("analysis_processing");
+          reportToModel(
+            "The user's DNA was imported from the Mutant DNA import component and an analysis is " +
+              "being generated. The component polls the status and shows progress and completion " +
+              "itself: do not restate DNA or analysis status.",
+          );
+        }
+      } catch {
+        setUploadError(messageFor("service_unavailable"));
+        setStage("review_variants");
+      }
+    },
+    [parsed, maxPollingMs, reportToModel, setFindingsState],
+  );
+
+  // Poll `get_analysis_status` until the analysis is terminal, the ceiling is
+  // reached, the grant cannot read status, or the component unmounts. The loop
+  // is self-scheduling (`setTimeout` per tick) so the interval is measured from
+  // each response rather than from the moment polling started.
+  useEffect(() => {
+    if (stage !== "analysis_processing" || !app) return;
+    if (poll.exhausted || poll.scopeBlocked) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
+    if (deadlineRef.current === null) deadlineRef.current = Date.now() + maxPollingMs;
+
+    const sleep = () =>
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, pollIntervalMs);
+      });
+
+    void (async () => {
+      while (!cancelled) {
+        await sleep();
+        if (cancelled) return;
+
+        if (Date.now() > (deadlineRef.current ?? 0)) {
+          logAnalysisState("analysis_timeout", "polling ceiling reached");
+          setPoll((previous) => ({ ...previous, exhausted: true }));
+          return;
+        }
+
+        let result;
+        try {
+          result = await app.callServerTool({ name: "get_analysis_status", arguments: {} });
+        } catch (err) {
+          logBridgeError(err);
+          failures += 1;
+          if (failures >= maxPollFailures) {
+            setPoll((previous) => ({
+              ...previous,
+              error: messageFor("service_unavailable"),
+            }));
+            return;
+          }
+          continue;
+        }
+        if (cancelled) return;
+
+        const envelope = envelopeOf(result);
+        if (result.isError || !envelope || !envelope.ok) {
+          const code = envelope?.error?.code;
+          const appCode = envelope?.error?.app_code ?? (code ? appErrorCode(code) : undefined);
+          if (appCode === "insufficient_scope" || appCode === "unauthorized") {
+            setPoll((previous) => ({ ...previous, scopeBlocked: true }));
+            return;
+          }
+          failures += 1;
+          if (failures >= maxPollFailures) {
+            setPoll((previous) => ({ ...previous, error: messageFor(appCode) }));
+            return;
+          }
+          continue;
+        }
+
+        failures = 0;
+        const info = statusOf(envelope);
+        if (info.createdAt) {
+          const startedAt = Date.parse(info.createdAt);
+          if (Number.isFinite(startedAt)) startedAtRef.current = startedAt;
+        }
+        setAnalysis((previous) => analysisFromStatus(previous, info));
+
+        if (info.analysisStatus === "ready") {
+          setStage("analysis_ready");
+          reportToModel(
+            "The Mutant analysis is ready and the DNA import component is showing the completion " +
+              "card. Do not restate the analysis status; wait for the user to ask about their " +
+              "results.",
           );
           return;
         }
-        const data = (envelope.data ?? {}) as { analysis_id?: string; status?: string };
-        setOutcome({ analysisId: data.analysis_id ?? null, status: data.status ?? null });
+        if (info.analysisStatus === "failed") {
+          logAnalysisState("analysis_failed", "status reported failed");
+          setStage("analysis_failed");
+          return;
+        }
+        // Any other state (including a transient `not_started`) still means the
+        // analysis has not arrived, so polling continues.
+      }
+    })();
 
-        // Let the model know the analysis now exists so it can continue with the
-        // analysis tools. Best-effort: never fail the import over this.
-        void client
-          .updateModelContext({
-            content: [
-              {
-                type: "text",
-                text: "The user's DNA has been imported and a Mutant analysis is being generated. You can now continue with the Mutant analysis tools.",
-              },
-            ],
-          })
-          .catch(() => undefined);
-      } catch {
-        setUploadError(messageFor("service_unavailable"));
-      } finally {
-        setBusy(null);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [
+    stage,
+    app,
+    poll.exhausted,
+    poll.scopeBlocked,
+    pollIntervalMs,
+    maxPollingMs,
+    maxPollFailures,
+    resumeToken,
+    reportToModel,
+  ]);
+
+  // One tick per second while processing drives the elapsed timer.
+  useEffect(() => {
+    if (stage !== "analysis_processing") return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [stage]);
+
+  const startedAt = startedAtRef.current;
+  const elapsedMs = startedAt === null ? 0 : Math.max(0, now - startedAt);
+  const isFull = isFullAccount(analysis);
+
+  /** Resume polling after the ceiling or a run of transient failures. */
+  const checkAgain = useCallback(() => {
+    deadlineRef.current = Date.now() + maxPollingMs;
+    setNow(Date.now());
+    setPoll(INITIAL_POLL);
+    setResumeToken((token) => token + 1);
+  }, [maxPollingMs]);
+
+  /** Re-submit the variants still in memory; a resumed session has none. */
+  const tryAgain = useCallback(() => {
+    if (!parsed || !app) {
+      openFilePicker();
+      return;
+    }
+    // A new attempt gets a fresh idempotency key: the previous analysis failed,
+    // so the new one must not be deduplicated onto it.
+    importRequestIdRef.current = crypto.randomUUID();
+    void submit(app);
+  }, [app, openFilePicker, parsed, submit]);
+
+  const loadFindings = useCallback(async () => {
+    if (!app) return;
+    if (findingsRef.current.status === "loading" || findingsRef.current.status === "loaded") return;
+    setFindingsState({ status: "loading" });
+    try {
+      const result = await app.callServerTool({
+        name: "list_health_hypotheses",
+        arguments: { limit: isFull ? FULL_FINDINGS_LIMIT : FREE_FINDINGS_LIMIT },
+      });
+      const envelope = envelopeOf(result);
+      if (result.isError || !envelope || !envelope.ok) {
+        setFindingsState({
+          status: "error",
+          message: messageFor(envelope?.error?.app_code ?? envelope?.error?.code),
+        });
+        return;
+      }
+      const items = findingsFrom(envelope.data);
+      if (!items.length) {
+        setFindingsState({
+          status: "error",
+          message: "Mutant did not return any findings for this analysis yet.",
+        });
+        return;
+      }
+      setFindingsState({ status: "loaded", items });
+    } catch {
+      setFindingsState({ status: "error", message: messageFor("service_unavailable") });
+    }
+  }, [app, isFull, setFindingsState]);
+
+  /** Hand control back to ChatGPT only when the user asks for interpretation. */
+  const askChatGpt = useCallback(
+    async (text: string) => {
+      if (!app) return;
+      try {
+        await app.sendMessage({ role: "user", content: [{ type: "text", text }] });
+      } catch (err) {
+        logBridgeError(err);
       }
     },
-    [parsed],
+    [app],
   );
 
   const onDrop = useCallback(
@@ -614,6 +1146,191 @@ export function DnaImportApp() {
   if (!isConnected || !app) {
     return <Loading label="Connecting to Mutant…" />;
   }
+  if (stage === "loading_catalog") {
+    return <Loading label="Preparing DNA import…" />;
+  }
+
+  /**
+   * The picker input is rendered by every card that offers a way back to the file
+   * dialog, so `openFilePicker` always finds it already mounted: the click has to
+   * happen in the same tick as the ref read, before React swaps the card.
+   */
+  const fileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept=".txt,.vcf,.gz,.bgz"
+      style={{ display: "none" }}
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        if (!file || !catalog) return;
+        void handleFile(file, app, catalog);
+      }}
+    />
+  );
+
+  if (stage === "analysis_processing") {
+    const slow = elapsedMs >= SLOW_ANALYSIS_MS;
+    const verySlow = elapsedMs >= VERY_SLOW_ANALYSIS_MS;
+    return (
+      <Shell>
+        <h1 style={styles.h1}>Generating your analysis</h1>
+        <p style={styles.subtitle}>Your DNA was imported successfully.</p>
+        <p style={styles.meta}>We're generating your analysis now.</p>
+        <ul style={styles.stageList}>
+          {STAGE_STEPS.map((step) => (
+            <li key={step.label} style={styles.stageItem}>
+              <span style={styles.stageMarker} aria-hidden="true">
+                {step.state === "done" ? "✓" : "●"}
+              </span>
+              <span>{step.label}</span>
+            </li>
+          ))}
+        </ul>
+
+        {poll.exhausted ? (
+          <>
+            <p style={styles.meta}>
+              Your analysis is still processing. You can leave this conversation and return later.
+              Your DNA has already been imported successfully.
+            </p>
+            <p style={styles.small}>
+              Mutant stopped checking automatically. Check again to keep watching.
+            </p>
+          </>
+        ) : poll.error ? (
+          <p style={styles.meta}>{poll.error}</p>
+        ) : poll.scopeBlocked ? (
+          <p style={styles.meta}>
+            Ask ChatGPT when your analysis is ready; this panel cannot check the status on its own.
+          </p>
+        ) : (
+          <>
+            {verySlow ? (
+              <p style={styles.meta}>
+                Your analysis is still processing. You can leave this conversation and return later.
+                Your DNA has already been imported successfully.
+              </p>
+            ) : slow ? (
+              <p style={styles.meta}>
+                Still working on your analysis. Some files take a little longer to process.
+              </p>
+            ) : (
+              <p style={styles.meta}>This usually takes about 2–3 minutes.</p>
+            )}
+            <p style={styles.small}>Elapsed: {formatElapsed(elapsedMs)}</p>
+          </>
+        )}
+
+        {poll.exhausted || poll.error || poll.scopeBlocked ? (
+          <div style={styles.buttonRow}>
+            <button type="button" style={styles.secondaryButton} onClick={checkAgain}>
+              {poll.scopeBlocked ? "Check status" : "Check again"}
+            </button>
+          </div>
+        ) : null}
+      </Shell>
+    );
+  }
+
+  if (stage === "analysis_ready") {
+    const loaded = findings.status === "loaded" ? findings.items : null;
+    return (
+      <Shell>
+        <h1 style={styles.h1}>Analysis ready</h1>
+        <p style={styles.subtitle}>Your DNA analysis is complete.</p>
+
+        {loaded ? (
+          <ol style={styles.findingList}>
+            {loaded.map((finding) => (
+              <li key={`${finding.rank}-${finding.title}`} style={styles.finding}>
+                <p style={styles.findingTitle}>
+                  {finding.rank}. {finding.title}
+                </p>
+                {finding.summary ? <p style={styles.findingSummary}>{finding.summary}</p> : null}
+                <button
+                  type="button"
+                  style={styles.subtleButton}
+                  onClick={() =>
+                    void askChatGpt(
+                      `Explain my "${finding.title}" finding${
+                        finding.id ? ` (hypothesis ${finding.id})` : ""
+                      } from my Mutant analysis.`,
+                    )
+                  }
+                >
+                  Explain this finding
+                </button>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p style={styles.meta}>
+            {isFull
+              ? "Every analyzed health hypothesis is included with Mutant Full."
+              : "Your top 3 ranked health hypotheses are included with Mutant Free. Mutant Full unlocks every analyzed hypothesis."}
+          </p>
+        )}
+
+        {findings.status === "error" ? <ErrorPanel message={findings.message} /> : null}
+
+        {loaded ? null : (
+          <div style={styles.buttonRow}>
+            <button
+              type="button"
+              style={styles.primaryButton}
+              onClick={() => void loadFindings()}
+              disabled={findings.status === "loading"}
+            >
+              {findings.status === "loading"
+                ? "Loading your findings…"
+                : isFull
+                  ? "View my findings"
+                  : "View my top 3 findings"}
+            </button>
+          </div>
+        )}
+
+        <div style={{ ...styles.buttonRow, marginTop: 14 }}>
+          {loaded ? (
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={() => void askChatGpt("Ask ChatGPT about my Mutant results.")}
+            >
+              Ask ChatGPT about my results
+            </button>
+          ) : null}
+          <button type="button" style={styles.subtleButton} onClick={openFilePicker}>
+            Replace DNA data
+          </button>
+        </div>
+        {fileInput}
+      </Shell>
+    );
+  }
+
+  if (stage === "analysis_failed") {
+    return (
+      <Shell>
+        <h1 style={styles.h1}>Analysis couldn't be completed</h1>
+        <p style={styles.subtitle}>We couldn't complete your analysis.</p>
+        <p style={styles.meta}>
+          Your DNA file was imported, but analysis generation did not finish successfully.
+        </p>
+        <div style={styles.buttonRow}>
+          <button type="button" style={styles.primaryButton} onClick={tryAgain}>
+            Try again
+          </button>
+          <button type="button" style={styles.secondaryButton} onClick={openFilePicker}>
+            Replace DNA data
+          </button>
+        </div>
+        {fileInput}
+      </Shell>
+    );
+  }
+
   if (catalogError) {
     return (
       <Shell>
@@ -625,50 +1342,33 @@ export function DnaImportApp() {
     return <Loading label="Preparing DNA import…" />;
   }
 
-  if (outcome) {
+  if (stage === "submitting_variants") {
     return (
       <Shell>
-        <h1 style={styles.h1}>DNA data added</h1>
-        <p style={styles.subtitle}>Your Mutant analysis is being generated.</p>
-        {outcome.analysisId || outcome.status ? (
-          <div style={{ marginTop: 8 }}>
-            {outcome.status ? (
-              <div style={styles.summaryRow}>
-                <span>Status</span>
-                <strong>{outcome.status}</strong>
-              </div>
-            ) : null}
-            {outcome.analysisId ? (
+        <h1 style={styles.h1}>DNA processed</h1>
+        <p style={styles.subtitle}>Creating your analysis…</p>
+        {parsed ? (
+          <div style={{ marginBottom: 16 }}>
+            <div style={styles.summaryRow}>
+              <span>Relevant variants found</span>
+              <strong>{formatCount(parsed.coverage.matched)}</strong>
+            </div>
+            {parsed.genomeBuild ? (
               <div style={{ ...styles.summaryRow, borderBottom: "none" }}>
-                <span>Analysis</span>
-                <strong>{outcome.analysisId}</strong>
+                <span>Genome build</span>
+                <strong>{parsed.genomeBuild}</strong>
               </div>
             ) : null}
           </div>
         ) : null}
-        <p style={{ margin: "16px 0", color: "var(--color-text-secondary, #5f6368)" }}>
-          You can now ask ChatGPT about your Mutant analysis.
-        </p>
-        <button type="button" style={styles.secondaryButton} onClick={openFilePicker}>
-          Import another file
-        </button>
-      </Shell>
-    );
-  }
-
-  if (busy === "submitting") {
-    return (
-      <Shell>
-        <h1 style={styles.h1}>Creating your Mutant analysis…</h1>
-        <p style={styles.subtitle}>
-          Submitting {formatCount(parsed?.coverage.matched ?? 0)} relevant variants. Your raw DNA
-          file stayed on your device.
+        <p style={styles.small}>
+          Your raw DNA file stayed on your device; only variants used by Mutant were submitted.
         </p>
       </Shell>
     );
   }
 
-  if (busy === "parsing") {
+  if (stage === "parsing_file") {
     return (
       <Shell>
         <h1 style={styles.h1}>Reading DNA file…</h1>
@@ -690,7 +1390,7 @@ export function DnaImportApp() {
     );
   }
 
-  if (parsed) {
+  if (stage === "review_variants" && parsed) {
     return (
       <Shell>
         <h1 style={styles.h1}>Ready to submit</h1>
@@ -731,7 +1431,6 @@ export function DnaImportApp() {
             type="button"
             style={styles.primaryButton}
             onClick={() => void submit(app)}
-            disabled={busy !== null}
           >
             Create my Mutant analysis
           </button>
@@ -743,18 +1442,11 @@ export function DnaImportApp() {
     );
   }
 
-  // Routing state from show_dna_import. It reflects the precondition the tool was
-  // called under, not a fresh entitlement check, so it sets expectations without
-  // removing the user's ability to import.
-  const unlinked = importContext?.accountStatus === "unlinked";
-  const alreadyImported = importContext?.dnaStatus === "available";
-
   return (
     <Shell>
-      <h1 style={styles.h1}>Mutant Genomics</h1>
-      <p style={styles.subtitle}>Add your DNA data</p>
+      <h1 style={styles.h1}>Add your DNA data</h1>
 
-      {unlinked ? (
+      {accountMissing ? (
         <div style={styles.notice} role="status">
           <p style={{ margin: "0 0 4px", fontWeight: 600 }}>Connect your Mutant account first</p>
           <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>
@@ -764,7 +1456,7 @@ export function DnaImportApp() {
         </div>
       ) : null}
 
-      {alreadyImported ? (
+      {dnaOnFile && !accountMissing ? (
         <div style={styles.notice} role="status">
           <p style={{ margin: "0 0 4px", fontWeight: 600 }}>DNA data is already on file</p>
           <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>
@@ -775,7 +1467,7 @@ export function DnaImportApp() {
 
       {uploadError ? <ErrorPanel message={uploadError} onRetry={openFilePicker} /> : null}
 
-      {unlinked ? null : (
+      {accountMissing ? null : (
         <div
           style={{
             ...styles.dropzone,
@@ -807,7 +1499,7 @@ export function DnaImportApp() {
             Accepted formats: .txt (23andMe, AncestryDNA), .vcf, and .vcf.gz
           </p>
           <button type="button" style={styles.primaryButton} onClick={openFilePicker}>
-            Choose DNA File
+            Choose DNA file
           </button>
         </div>
       )}
@@ -823,21 +1515,9 @@ export function DnaImportApp() {
         </p>
       </div>
 
-      <p style={{ margin: 0, fontSize: 13, color: "var(--color-text-secondary, #5f6368)" }}>
-        Supported formats: 23andMe, Ancestry, VCF / WGS. Whole-genome files can take several minutes
-        to process locally.
-      </p>
+      <p style={styles.meta}>Generating your analysis usually takes about 2–3 minutes.</p>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".txt,.vcf,.gz,.bgz"
-        style={{ display: "none" }}
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          void handleFile(file, app, catalog);
-        }}
-      />
+      {fileInput}
     </Shell>
   );
 }

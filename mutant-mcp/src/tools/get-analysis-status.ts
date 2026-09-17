@@ -26,17 +26,25 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 }
 
+/**
+ * Upstream lifecycle words that all mean "an analysis exists and is in flight".
+ * Recognizing them here keeps `dna_status` from reporting `missing` for an
+ * account whose DNA was accepted but whose analysis is still queued (§10).
+ */
+const PROCESSING_STATUSES = new Set(["processing", "queued", "pending", "running", "in_progress"]);
+
+function normalizeAnalysisStatus(value: unknown): AnalysisStatus | null {
+  if (typeof value !== "string") return null;
+  if (value === "not_started" || value === "ready" || value === "failed") return value;
+  if (PROCESSING_STATUSES.has(value)) return "processing";
+  return null;
+}
+
 function deriveAnalysisStatus(data: Record<string, unknown>): AnalysisStatus {
-  if (
-    data.analysis_status === "not_started" ||
-    data.analysis_status === "processing" ||
-    data.analysis_status === "ready" ||
-    data.analysis_status === "failed"
-  ) {
-    return data.analysis_status;
-  }
-  const status = asRecord(data.analysis)?.status;
-  if (status === "processing" || status === "ready" || status === "failed") return status;
+  const provided = normalizeAnalysisStatus(data.analysis_status);
+  if (provided) return provided;
+  const status = normalizeAnalysisStatus(asRecord(data.analysis)?.status);
+  if (status) return status;
   // `none` (and anything unrecognized) means no analysis has been generated.
   return "not_started";
 }
@@ -53,6 +61,36 @@ function derivePlan(data: Record<string, unknown>): string {
   const raw = asRecord(data.entitlement)?.plan;
   if (typeof raw === "string" && raw.length > 0) return PLAN_LABELS[raw] ?? raw;
   return "unknown";
+}
+
+/** First non-empty string among the candidate values, used for optional fields. */
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
+}
+
+/**
+ * The analysis id and creation timestamp, exposed so the DNA import component
+ * can keep using the same analysis across rerenders and can derive accurate
+ * elapsed processing time (§11, §18). Neither is a genotype or an account claim,
+ * and both stay `null` when the backend does not send them.
+ */
+function deriveAnalysisMetadata(data: Record<string, unknown>): {
+  analysis_id: string | null;
+  created_at: string | null;
+} {
+  const analysis = asRecord(data.analysis);
+  return {
+    analysis_id: firstString(data.analysis_id, analysis?.analysis_id, analysis?.id),
+    created_at: firstString(
+      data.created_at,
+      analysis?.created_at,
+      analysis?.started_at,
+      analysis?.requested_at,
+    ),
+  };
 }
 
 function deriveNextAction(dnaStatus: DnaStatus, analysisStatus: AnalysisStatus): NextAction {
@@ -104,6 +142,7 @@ export function withRoutingHints(response: ToolResponse): ToolResponse {
   const analysisStatus = deriveAnalysisStatus(data);
   const dnaStatus = deriveDnaStatus(data, analysisStatus);
   const plan = derivePlan(data);
+  const metadata = deriveAnalysisMetadata(data);
   const providedNextAction = asRecord(data.next_action);
   const nextAction =
     providedNextAction && typeof providedNextAction.tool === "string"
@@ -117,6 +156,10 @@ export function withRoutingHints(response: ToolResponse): ToolResponse {
       dna_status: dnaStatus,
       analysis_status: analysisStatus,
       plan,
+      // Always present (null when unknown) so the component can distinguish
+      // "no analysis" from "the backend did not say".
+      analysis_id: metadata.analysis_id,
+      created_at: metadata.created_at,
       next_action: nextAction,
     },
   };
@@ -126,13 +169,17 @@ export const getAnalysisStatusTool: MutantToolDefinition = {
   name: "get_analysis_status",
   title: "Get Analysis Status",
   description:
-    "Checks whether the authenticated Mutant account has DNA data and a completed analysis.\n\n" +
+    "Returns the current Mutant DNA and analysis state: dna_status, analysis_status, plan, and " +
+    "an explicit next_action.\n\n" +
     "IMPORTANT:\n" +
     'If the result has dna_status="missing", do not answer the user with instructions about ' +
     "importing DNA. Immediately call show_dna_import in the same turn so the DNA import UI is " +
     "rendered.\n\n" +
     'If dna_status="available" and analysis_status="ready", continue with the appropriate ' +
-    "analysis tools.",
+    "analysis tools.\n\n" +
+    "The DNA import component polls this tool itself while analysis_status is processing, so do " +
+    "not tell the user to keep asking whether processing has finished and do not narrate the " +
+    "analysis status while that component is active.",
   scope: "analysis.read",
   inputSchema: getAnalysisStatusInputSchema,
   outputSchema: toolResponseOutputSchema,

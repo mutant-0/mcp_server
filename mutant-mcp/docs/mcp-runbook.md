@@ -170,10 +170,16 @@ To exercise the scope boundary locally, connect with `Bearer dev-readonly`
 group's tools return `INSUFFICIENT_SCOPE` naming the missing scope.
 
 For the DNA import flow, in `MUTANT_DEV_MODE=true` the mock backend client
-returns a small synthetic catalog and `{ analysis_id, status }`, so
-`show_dna_import` → `get_snp_catalog` → `create_report` can be driven end to end
-without the real backend. `get_snp_catalog` and `create_report` are hidden from
-the model's tool list (`_meta.ui.visibility: ["app"]`); call them explicitly.
+returns a small synthetic catalog, `{ analysis_id, status }`, and a synthetic
+analysis lifecycle: `create_report` remembers the import for the user, and
+`get_analysis_status` then reports `processing` for about 20 seconds before
+`ready` (with `analysis_id` and `created_at`), so the component's polling,
+elapsed timer, and completion card can be driven end to end without the real
+backend. `list_health_hypotheses` returns three synthetic hypotheses so the
+"View my top 3 findings" call to action renders too. `get_snp_catalog` and
+`create_report` are hidden from the model's tool list
+(`_meta.ui.visibility: ["app"]`); call them explicitly. The synthetic analyses
+live in process memory, so restarting the dev server clears them.
 
 ## 5. Linking the ChatGPT dev connector
 
@@ -199,6 +205,16 @@ the model's tool list (`_meta.ui.visibility: ["app"]`); call them explicitly.
 - `dna_status` is `missing` before an import and `available` after one completes.
 - The component parses the file locally: no request carries raw file bytes, and
   `create_report` receives only catalog-matched variants.
+- **Polling completes without another prompt.** After the file is submitted the
+  card polls `get_analysis_status` (about every 7 seconds) and turns into the
+  completion view on its own. Watch the connector traffic: repeated
+  `get_analysis_status` calls with `{}` are the component, not the model. If the
+  card stalls, check whether the last read returned `ready`/`failed` or whether
+  polling was capped at 10 minutes, which surfaces as the "still working" state.
+- **`dev-dna` is the scope-boundary caveat.** A `dna.import`-only connection can
+  import but cannot read the status, so the completion card says ChatGPT must
+  report the result instead of polling. That is expected; use `dev-paid` or
+  `dev-free` to see polling.
 - Chromium DevTools against the connector page shows no CSP violations and no
   network calls from the iframe (the component declares an empty CSP).
 - **Worker blocked?** Expected, not a failure. The component logs
@@ -208,7 +224,9 @@ the model's tool list (`_meta.ui.visibility: ["app"]`); call them explicitly.
   fails *after* it started working is reported to the user as a parse failure
   instead, since re-parsing would hide the cause.
 - Submitting the same import twice with the same `import_request_id` returns the
-  same `analysis_id` (backend idempotency).
+  same `analysis_id` (backend idempotency), but `Try again` after a failed
+  analysis deliberately mints a **new** key so the retry is not deduplicated onto
+  the failed analysis.
 - A `payload_too_large` response means the parsed payload exceeded
   `MUTANT_MAX_REQUEST_BYTES` (default 5 MiB, below the 6 MiB synchronous
   `lambda:InvokeFunction` limit). See "Rollback and limits" before raising it.
@@ -246,6 +264,10 @@ the model's tool list (`_meta.ui.visibility: ["app"]`); call them explicitly.
   catalog (backend `get_snp_catalog` failing or slow). A spike in
   `PAYLOAD_TOO_LARGE` means real WGS payloads are approaching
   `MUTANT_MAX_REQUEST_BYTES`; see "Rollback and limits".
+- `get_analysis_status` call volume is dominated by the DNA import component's
+  polling: one call per open panel every ~7 seconds for up to 10 minutes while an
+  analysis is processing. That is expected and bounded; a sustained rise without
+  matching imports means panels are being left open on a stuck analysis.
 - `INSUFFICIENT_SCOPE` on all DNA tools for every account means the Cognito
   resource server or app client is missing `dna.import`.
 

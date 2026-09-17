@@ -7,19 +7,23 @@ import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
 /**
  * Render the DNA import component.
  *
- * Deliberately makes no backend call: it only tells the component which state to
- * open in, and the component fetches the catalog and submits the report itself
- * through its own scoped tool calls. That keeps this tool's result free of
- * genetic data, so the model never sees a genotype.
+ * Deliberately makes no backend call: it only mounts the component, which reads
+ * the account's DNA and analysis state itself through `get_analysis_status` and
+ * then fetches the catalog and submits the report through its own scoped tool
+ * calls. That keeps this tool's result free of genetic data and of any state the
+ * component would have to reconcile, so the model never sees a genotype and
+ * never narrates a status that has already moved on.
  */
 export const showDnaImportTool: MutantToolDefinition = {
   name: "show_dna_import",
   title: "Show DNA Import",
   description:
-    "Render the Mutant DNA import UI.\n\n" +
-    'Call this tool immediately whenever get_analysis_status returns dna_status="missing".\n' +
-    "Do not merely tell the user to upload DNA; invoke this tool so the upload interface is " +
-    "shown.",
+    "Displays and manages the complete Mutant DNA import workflow.\n\n" +
+    "The component handles file selection, local DNA processing, report creation, " +
+    "processing-status polling, and the completion UI.\n\n" +
+    "After calling this tool, do not ask the user to check analysis status manually, do not " +
+    "restate DNA status, analysis status, or import instructions from earlier tool results, and " +
+    "do not tell the user to upload DNA: the component owns the whole flow.",
   scope: "dna.import",
   uiVisibility: ["model", "app"],
   uiResourceUri: DNA_IMPORT_UI_URI,
@@ -27,19 +31,14 @@ export const showDnaImportTool: MutantToolDefinition = {
   outputSchema: toolResponseOutputSchema,
   annotations: readOnlyAnnotations,
   handler: async (_args, runtime) => {
-    // Both fields describe the routing precondition rather than a fresh backend
-    // read: this tool is only reached when no usable analysis exists, and the
-    // caller authenticated to get here. The backend will become the authority
-    // for `dna_status` once get_analysis_status reports it directly.
+    // No routing state is echoed back: the component reads the authoritative
+    // state from get_analysis_status on mount, and a stale `dna_status` here
+    // would be exactly the kind of mutable state the model must not narrate.
     const response: ToolResponse = {
       contract_version: CONTRACT_VERSION,
       analysis_version: null,
       ok: true,
-      data: {
-        account_status: "connected",
-        dna_status: "missing",
-        status: "awaiting_file",
-      },
+      data: { ui_rendered: true },
       error: null,
     };
     // Echo the UI descriptor on the result too: some hosts mount the component

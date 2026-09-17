@@ -66,6 +66,8 @@ describe("MCP server integration", () => {
       dna_status: "available",
       analysis_status: "ready",
       plan: "unknown",
+      analysis_id: null,
+      created_at: null,
       next_action: {
         tool: "get_analysis_context",
         reason: "The analysis is ready; start with the analysis context.",

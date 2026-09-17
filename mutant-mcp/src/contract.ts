@@ -128,6 +128,13 @@ export const APP_ERROR_CODES = {
   report_generation_failed: "report_generation_failed",
   payload_too_large: "payload_too_large",
   service_unavailable: "service_unavailable",
+  // Derived by the DNA import component from the analysis lifecycle rather than
+  // returned by a tool: `analysis_failed` when the analysis reaches a failed
+  // state, `analysis_timeout` when polling stops without a terminal state. They
+  // exist so the component reports a debugging code without surfacing backend
+  // exceptions to the user.
+  analysis_failed: "analysis_failed",
+  analysis_timeout: "analysis_timeout",
 } as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[keyof typeof APP_ERROR_CODES];
