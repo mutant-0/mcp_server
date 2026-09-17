@@ -20,8 +20,8 @@ import {
   McpUiToolResultNotificationSchema,
 } from "@modelcontextprotocol/ext-apps";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import { DnaImportApp, type DnaImportAppProps } from "../src/ui/dna-import/app";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DnaImportApp, deliverFollowUp, type DnaImportAppProps } from "../src/ui/dna-import/app";
 import { makeErrorResponse, makeSuccessResponse } from "./helpers.js";
 
 type ToolResponse = ReturnType<typeof makeSuccessResponse>;
@@ -154,8 +154,14 @@ interface HostBridge {
 
 let activeBridge: HostBridge | null = null;
 
+/** Optional per-test tweaks to how the fake host answers a bridge request. */
+interface BridgeOptions {
+  /** Result the host returns for `ui/message`; `{ isError: true }` simulates rejection. */
+  messageResult?: unknown;
+}
+
 /** Stand up a fake host on `window` and answer bridge requests from it. */
-function installHostBridge(responders: Responders = {}): HostBridge {
+function installHostBridge(responders: Responders = {}, options: BridgeOptions = {}): HostBridge {
   const toolCalls: ToolCall[] = [];
   const modelContextUpdates: unknown[] = [];
   const messages: Array<Record<string, unknown>> = [];
@@ -208,7 +214,7 @@ function installHostBridge(responders: Responders = {}): HostBridge {
     }
     if (message.method === "ui/message") {
       messages.push({ params: message.params } as unknown as Record<string, unknown>);
-      reply(message.id, {});
+      reply(message.id, options.messageResult ?? {});
       return;
     }
     // Anything else (open-link, size-changed is a notification, ...) is
@@ -247,15 +253,23 @@ const FAST_POLL: DnaImportAppProps = {
 const PROCESSING_HEADING = /^Generating your analysis$/;
 
 /** Render the app without waiting for any particular stage. */
-function renderWith(responders: Responders = {}, props: DnaImportAppProps = {}): HostBridge {
-  const bridge = installHostBridge(responders);
+function renderWith(
+  responders: Responders = {},
+  props: DnaImportAppProps = {},
+  options: BridgeOptions = {},
+): HostBridge {
+  const bridge = installHostBridge(responders, options);
   render(<DnaImportApp {...FAST_POLL} {...props} />);
   return bridge;
 }
 
 /** Render the app and wait until the catalog has loaded and it is interactive. */
-async function renderApp(responders: Responders = {}, props: DnaImportAppProps = {}): Promise<HostBridge> {
-  const bridge = renderWith(responders, props);
+async function renderApp(
+  responders: Responders = {},
+  props: DnaImportAppProps = {},
+  options: BridgeOptions = {},
+): Promise<HostBridge> {
+  const bridge = renderWith(responders, props, options);
   await screen.findByText(/Drag and drop your DNA file here/i);
   return bridge;
 }
@@ -593,6 +607,93 @@ describe("DNA import component", () => {
     expect(sent).toMatch(/HYP_A/);
     // Requesting the findings again must not refetch or re-message.
     expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
+  });
+
+  it("sends exactly one host follow-up per action and never renders the prompt", async () => {
+    const bridge = renderWith({ get_analysis_status: statusResponse("ready") });
+
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+    await screen.findByText(/Alpha finding/i);
+
+    const findingsBefore = screen.getByRole("list").textContent;
+
+    fireEvent.click(screen.getAllByRole("button", { name: /explain this finding/i })[0]!);
+    await waitFor(() => expect(bridge.messages).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole("button", { name: /ask chatgpt about my results/i }));
+    await waitFor(() => expect(bridge.messages).toHaveLength(2));
+
+    // One host message per click, delivered as a user turn.
+    const texts = bridge.messages.map((message) => {
+      const params = message.params as { role?: string; content?: Array<{ text?: string }> };
+      expect(params.role).toBe("user");
+      return params.content?.map((block) => block.text ?? "").join("") ?? "";
+    });
+    expect(texts[0]).toMatch(/Explain my "Alpha finding"/);
+    expect(texts[1]).toBe("Ask ChatGPT about my Mutant results.");
+
+    // The widget's findings are unchanged and the prompt text is nowhere in the card.
+    expect(screen.getByRole("list").textContent).toBe(findingsBefore);
+    expect(screen.queryByText(/Explain my "Alpha finding"/)).toBeNull();
+    expect(screen.queryByText(/Ask ChatGPT about my Mutant results\./)).toBeNull();
+    expect(screen.getByText(/Alpha finding/i)).toBeDefined();
+    expect(screen.getByText(/First summary\./)).toBeDefined();
+  });
+
+  it("uses the ChatGPT host API when the widget is injected with window.openai", async () => {
+    const sendFollowUpMessage = vi.fn();
+    Object.defineProperty(window, "openai", {
+      value: { sendFollowUpMessage },
+      configurable: true,
+      writable: true,
+    });
+    try {
+      const bridge = renderWith({ get_analysis_status: statusResponse("ready") });
+
+      await screen.findByText(/Analysis ready/i);
+      fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+      await screen.findByText(/Alpha finding/i);
+
+      fireEvent.click(screen.getAllByRole("button", { name: /explain this finding/i })[0]!);
+
+      await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
+      expect(sendFollowUpMessage).toHaveBeenCalledWith({
+        prompt: expect.stringContaining("Alpha finding"),
+        scrollToBottom: true,
+      });
+      // The MCP Apps bridge is not also used: the prompt is sent only once.
+      expect(bridge.messages).toHaveLength(0);
+      expect(screen.queryByText(/Explain my "Alpha finding"/)).toBeNull();
+    } finally {
+      delete (window as unknown as { openai?: unknown }).openai;
+    }
+  });
+
+  it("shows a user-visible error when the host rejects the follow-up", async () => {
+    const bridge = renderWith(
+      { get_analysis_status: statusResponse("ready") },
+      {},
+      { messageResult: { isError: true } },
+    );
+
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+    await screen.findByText(/Alpha finding/i);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /explain this finding/i })[0]!);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/couldn't send that follow-up message/i);
+    // The prompt is reported as an error, not echoed into the card.
+    expect(screen.queryByText(/Explain my "Alpha finding"/)).toBeNull();
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
+  });
+
+  it("feature-detects the host API and reports when none is available", async () => {
+    // jsdom has no `window.openai`, and passing no app simulates a host with no
+    // `ui/message` bridge.
+    await expect(deliverFollowUp(null, "Explain my results")).resolves.toBe("unavailable");
   });
 
   it("exposes a low-emphasis replace action once the analysis is ready", async () => {

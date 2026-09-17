@@ -210,6 +210,76 @@ function logAnalysisState(code: AppErrorCode, detail?: string): void {
 }
 
 /**
+ * The ChatGPT Apps SDK host API, injected as `window.openai` in the widget
+ * iframe. Only `sendFollowUpMessage` is used here: it posts a real user turn to
+ * the conversation, unlike the MCP Apps bridge which some hosts do not wire up.
+ */
+interface ChatGptHostApi {
+  sendFollowUpMessage?: (args: {
+    prompt: string;
+    scrollToBottom?: boolean;
+  }) => void | Promise<void>;
+}
+
+/** Read `window.openai` without assuming the host injected it. */
+function chatGptHost(): ChatGptHostApi | null {
+  if (typeof window === "undefined") return null;
+  const host = (window as Window & { openai?: ChatGptHostApi }).openai;
+  return host && typeof host === "object" ? host : null;
+}
+
+/** What happened when the component tried to hand a prompt to the host chat. */
+type FollowUpOutcome = "sent" | "failed" | "unavailable";
+
+/**
+ * Post a follow-up user turn into the host conversation.
+ *
+ * ChatGPT injects `window.openai.sendFollowUpMessage`, which is the API that
+ * actually advances a chatgpt.com conversation from inside a widget, so it wins
+ * when the host provides it. Every other host exposes the equivalent MCP Apps
+ * `ui/message` request through `App.sendMessage`.
+ *
+ * The prompt is only ever handed to the host. Nothing here renders it in the
+ * widget: a missing or rejected API is reported back to the caller instead.
+ */
+export async function deliverFollowUp(
+  app: App | null,
+  prompt: string,
+): Promise<FollowUpOutcome> {
+  const host = chatGptHost();
+  if (host && typeof host.sendFollowUpMessage === "function") {
+    try {
+      await host.sendFollowUpMessage({ prompt, scrollToBottom: true });
+      return "sent";
+    } catch (err) {
+      logBridgeError(err);
+      return "failed";
+    }
+  }
+
+  if (app && typeof app.sendMessage === "function") {
+    try {
+      const result = await app.sendMessage({
+        role: "user",
+        content: [{ type: "text", text: prompt }],
+      });
+      return result && result.isError === true ? "failed" : "sent";
+    } catch (err) {
+      logBridgeError(err);
+      return "failed";
+    }
+  }
+
+  return "unavailable";
+}
+
+/** User-visible copy for a handoff the host could not perform. Never a prompt. */
+const FOLLOW_UP_UNAVAILABLE_MESSAGE =
+  "ChatGPT can't send a follow-up message from this panel. Reopen the panel and try again.";
+const FOLLOW_UP_FAILED_MESSAGE =
+  "ChatGPT couldn't send that follow-up message. Please try again.";
+
+/**
  * Read the envelope out of a bridge tool result. The structured envelope is
  * authoritative; the text mirror exists only for hosts without structured
  * content, so it is parsed as a fallback.
@@ -520,6 +590,15 @@ const styles = {
     fontSize: 13,
     color: "var(--color-text-secondary, #5f6368)",
   } as const,
+  handoffError: {
+    margin: "0 0 12px",
+    padding: "10px 12px",
+    borderRadius: 8,
+    background: "var(--mutant-error-bg, #fdecea)",
+    border: "1px solid var(--mutant-error-border, #f5c6cb)",
+    color: "var(--mutant-error-text, #7f1d1d)",
+    fontSize: 13,
+  } as const,
 };
 
 /** The three broad stages that are always true after `create_report` succeeds. */
@@ -600,6 +679,8 @@ export function DnaImportApp({
   const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
   const [poll, setPoll] = useState<PollState>(INITIAL_POLL);
   const [findings, setFindings] = useState<FindingsState>({ status: "idle" });
+  /** Set when a follow-up handoff failed; holds copy, never the prompt itself. */
+  const [handoffError, setHandoffError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   /** Ticks while processing so the elapsed timer advances without polling state. */
   const [now, setNow] = useState(() => Date.now());
@@ -1106,15 +1187,18 @@ export function DnaImportApp({
     }
   }, [app, isFull, setFindingsState]);
 
-  /** Hand control back to ChatGPT only when the user asks for interpretation. */
+  /**
+   * Hand control back to ChatGPT only when the user asks for interpretation.
+   *
+   * The prompt goes to the host chat API; it is never appended to the card. If
+   * no host API is available (or the host rejects it) the user sees an error.
+   */
   const askChatGpt = useCallback(
     async (text: string) => {
-      if (!app) return;
-      try {
-        await app.sendMessage({ role: "user", content: [{ type: "text", text }] });
-      } catch (err) {
-        logBridgeError(err);
-      }
+      setHandoffError(null);
+      const outcome = await deliverFollowUp(app, text);
+      if (outcome === "unavailable") setHandoffError(FOLLOW_UP_UNAVAILABLE_MESSAGE);
+      else if (outcome === "failed") setHandoffError(FOLLOW_UP_FAILED_MESSAGE);
     },
     [app],
   );
@@ -1290,6 +1374,12 @@ export function DnaImportApp({
             </button>
           </div>
         )}
+
+        {handoffError ? (
+          <p role="alert" style={styles.handoffError}>
+            {handoffError}
+          </p>
+        ) : null}
 
         <div style={{ ...styles.buttonRow, marginTop: 14 }}>
           {loaded ? (

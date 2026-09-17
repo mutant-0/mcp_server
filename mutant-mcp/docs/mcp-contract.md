@@ -346,8 +346,12 @@ estimated time remaining. When the analysis is ready the same card becomes the
 completion view, offering either `View my top 3 findings`, which calls
 `list_health_hypotheses` from the component and renders the summaries inline, or
 `Ask ChatGPT about my results` / `Explain this finding`, which hand off to ChatGPT
-through `ui/message` only when the user asks for interpretation. It applies the
-host's theme and CSS variables (`useHostStyles`).
+only when the user asks for interpretation. The handoff is feature-detected and
+delivered as a real follow-up turn, never rendered inside the card: on ChatGPT it
+uses `window.openai.sendFollowUpMessage({ prompt, scrollToBottom: true })`, on
+MCP Apps hosts it uses the `ui/message` bridge (`App.sendMessage`), and when
+neither is available (or the host rejects it) the card shows a user-visible error
+instead. It applies the host's theme and CSS variables (`useHostStyles`).
 
 Because `_meta.ui.csp` cannot declare `worker-src`, parsing prefers a Web Worker
 started from a `blob:` URL and falls back to the same parser on the main thread if
