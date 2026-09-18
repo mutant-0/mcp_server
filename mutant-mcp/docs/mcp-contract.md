@@ -239,8 +239,18 @@ Input: `{ hypothesis_id?, module_id?, gene?, rsids?, limit?, cursor? }`.
 - Free: `hypothesis_id` is required (`HYPOTHESIS_SCOPE_REQUIRED` otherwise) and
   must be accessible; selectors are limited to that hypothesis's stored evidence.
 - Full: at least one of `hypothesis_id`, `module_id`, `gene`, or `rsids` is required.
-- Returns `items[]`, `modules[]` (`score_state: scored | not_scored | retired`,
-  `score` null when not scored), and `page`.
+- Returns `items[]`, `modules[]`, `page`, and the module-support totals
+  `combined_module_support`, `module_base_support`, and
+  `module_supporting_lift` (null when the call is not scoped to a hypothesis).
+- Each `modules[]` row carries `score_state` (`scored | not_scored | retired`)
+  and `score` (the module's own genetic support; null when not scored). When a
+  hypothesis scopes the call, the row also carries the hypothesis relationship
+  (`role`, `effective_role`, `role_group` of `base | supporting | context`,
+  `weight`, `genetic_confidence`, `anchor`, `contributes`) plus `support` and
+  `contribution_pct`: the module's confidence- and weight-adjusted share of the
+  hypothesis's `combined_module_support` (so the `support` values sum to it).
+  `context` modules are explanatory and report `support = 0` even when they have
+  their own `score`.
 
 ## DNA import
 
