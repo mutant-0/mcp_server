@@ -27,7 +27,7 @@ const ANALYSIS_TOOLS = [
   "get_analysis_status",
   "get_analysis_context",
   "list_health_hypotheses",
-  "get_hypothesis_details",
+  "explain_health_hypothesis",
   "get_supporting_evidence",
   "get_genetic_context",
 ] as const;
@@ -116,7 +116,7 @@ describe("DNA import authorization", () => {
       get_analysis_status: {},
       get_analysis_context: {},
       list_health_hypotheses: {},
-      get_hypothesis_details: { hypothesis_id: "HYP_TEST" },
+      explain_health_hypothesis: { hypothesis_id: "HYP_TEST" },
       get_supporting_evidence: { hypothesis_id: "HYP_TEST" },
       get_genetic_context: { hypothesis_id: "HYP_TEST" },
     };

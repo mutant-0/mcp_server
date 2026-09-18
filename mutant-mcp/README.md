@@ -124,7 +124,7 @@ mutant-mcp/
 | `get_analysis_status` | `analysis.read` | Routing gate: `dna_status`, `analysis_status`, `plan`, `analysis_id`, `created_at`, and an explicit `next_action`. Polled by the DNA import component while an analysis is processing. |
 | `get_analysis_context` | `analysis.read` | **Start here.** Coverage, interpretation rules/limitations, top hypotheses. |
 | `list_health_hypotheses` | `analysis.read` | List/search hypotheses (Free: fixed top three; Full: whole set). |
-| `get_hypothesis_details` | `analysis.read` | Full interpretation: scoring, patterns, clinical correlation, guardrails. |
+| `explain_health_hypothesis` | `analysis.read` | Full interpretation: scoring, patterns, clinical correlation, guardrails. |
 | `get_supporting_evidence` | `analysis.read` | Stored patterns, variant contributions, or cited sources. |
 | `get_genetic_context` | `analysis.read` | Marker-level context by hypothesis (Free) or module/gene/rsIDs (Full). |
 | `show_dna_import` | `dna.import` | Renders the DNA import component, which owns import, submission, polling, and the completion UI. No backend call, no echoed status. |

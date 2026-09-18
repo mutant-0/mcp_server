@@ -15,7 +15,7 @@ export const ANALYSIS_TOOL_NAMES = [
   "get_analysis_status",
   "get_analysis_context",
   "list_health_hypotheses",
-  "get_hypothesis_details",
+  "explain_health_hypothesis",
   "get_supporting_evidence",
   "get_genetic_context",
 ] as const;

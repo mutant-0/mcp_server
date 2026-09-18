@@ -163,7 +163,7 @@ npx @modelcontextprotocol/inspector
 
 Connect to `http://localhost:8080/mcp` with `Bearer dev-paid` (or `dev-free`).
 All nine tools must be discoverable. Call `get_analysis_status`, then
-`get_analysis_context`, then `get_hypothesis_details` for a returned id.
+`get_analysis_context`, then `explain_health_hypothesis` for a returned id.
 
 To exercise the scope boundary locally, connect with `Bearer dev-readonly`
 (analysis only) or `Bearer dev-dna` (DNA import only) and confirm the other

@@ -80,7 +80,7 @@ describe("MCP server integration", () => {
       makeErrorResponse("PLAN_ACCESS_REQUIRED", "locked", { required_plan: "mutant_full" }),
     );
     const result = await client.callTool({
-      name: "get_hypothesis_details",
+      name: "explain_health_hypothesis",
       arguments: { hypothesis_id: "RC_D" },
     });
     expect(result.isError).toBe(true);
@@ -118,7 +118,7 @@ describe("MCP server integration", () => {
 
   it("rejects invalid arguments before calling the backend", async () => {
     const { client, backendClient } = await connectServer(() => makeSuccessResponse());
-    const result = await client.callTool({ name: "get_hypothesis_details", arguments: {} });
+    const result = await client.callTool({ name: "explain_health_hypothesis", arguments: {} });
     expect(result.isError).toBe(true);
     expect(backendClient.calls).toHaveLength(0);
   });

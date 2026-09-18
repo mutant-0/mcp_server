@@ -48,7 +48,7 @@ export const listHealthHypothesesInputSchema = {
   cursor: cursorSchema,
 };
 
-export const getHypothesisDetailsInputSchema = {
+export const explainHealthHypothesisInputSchema = {
   hypothesis_id: hypothesisIdSchema,
 };
 

@@ -6,7 +6,7 @@ import { createReportTool } from "./create-report.js";
 import { getAnalysisContextTool } from "./get-analysis-context.js";
 import { getAnalysisStatusTool } from "./get-analysis-status.js";
 import { getGeneticContextTool } from "./get-genetic-context.js";
-import { getHypothesisDetailsTool } from "./get-hypothesis-details.js";
+import { explainHealthHypothesisTool } from "./explain-health-hypothesis.js";
 import { getSnpCatalogTool } from "./get-snp-catalog.js";
 import { getSupportingEvidenceTool } from "./get-supporting-evidence.js";
 import { listHealthHypothesesTool } from "./list-health-hypotheses.js";
@@ -19,7 +19,7 @@ export const TOOL_DEFINITIONS: MutantToolDefinition[] = [
   getAnalysisStatusTool,
   getAnalysisContextTool,
   listHealthHypothesesTool,
-  getHypothesisDetailsTool,
+  explainHealthHypothesisTool,
   getSupportingEvidenceTool,
   getGeneticContextTool,
   showDnaImportTool,

@@ -11,7 +11,7 @@ import { makeErrorResponse, makeSuccessResponse, makeUser } from "./helpers.js";
 describe("buildBackendEvent", () => {
   it("emits the versioned internal contract with token-derived identity", () => {
     const event = buildBackendEvent(
-      "get_hypothesis_details",
+      "explain_health_hypothesis",
       { hypothesis_id: "RC_A" },
       makeUser({ userId: "sub-123" }),
       "req-1",
@@ -19,7 +19,7 @@ describe("buildBackendEvent", () => {
     expect(event).toEqual({
       source: "mutant-mcp",
       contract_version: CONTRACT_VERSION,
-      operation: "get_hypothesis_details",
+      operation: "explain_health_hypothesis",
       identity: { user_id: "sub-123" },
       arguments: { hypothesis_id: "RC_A" },
       request_context: { request_id: "req-1" },

@@ -197,7 +197,7 @@ Free returns its frozen top three in rank order; Full returns the whole set.
 }
 ```
 
-### `get_hypothesis_details`
+### `explain_health_hypothesis`
 
 Input: `{ hypothesis_id }`.
 
@@ -211,6 +211,18 @@ interpretation_guardrails } }`.
   the per-row pre-combination lift. When an older snapshot lacks the resolved
   contribution, `hypothesis_impact_points` is `null` with
   `contribution_reason: "not_available_in_snapshot"`.
+- `pattern_summaries[]` also carry the curated `pattern_type` and a derived
+  `requires_clinical_confirmation` boolean. It is `true` for context-gated
+  patterns (`pattern_type: "context_gate"`), whose curated copy states that
+  abnormal biomarkers — not genotype — decide whether the pattern is clinically
+  active. Present such a `matched` pattern as a *genetic* match that still
+  requires the named labs, never as an active or confirmed condition.
+- Each pattern's `variants[]` and the `variants` evidence kind carry the
+  catalog-declared `risk_genotypes` and `context_genotypes`. `context_genotypes`
+  lists genotypes the catalog keeps for interpretation without scoring them; a
+  marker whose only listed genotypes are context genotypes is reported as
+  `module_score_status: "not_scored"` with `status_reason: "context_only"`, not
+  as `genotype_dosage_zero`.
 - `clinical_correlation` contains `summary`, `tests[]`, and `interpretation`.
 - Questionnaire/phenotype-fit and internal fields (`phenotype_fit`, `driver_type`,
   `genetic_role`, `matched_signals`, `component_scores`) are not exposed.
