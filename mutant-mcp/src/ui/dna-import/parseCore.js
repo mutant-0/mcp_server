@@ -18,6 +18,7 @@
 
 import { buildCatalogIndexes } from "../genomics/catalog.js";
 import { detectBuild } from "../genomics/detect.js";
+import { normalizeChrom } from "../genomics/normalize.js";
 import { parseLines, PROVIDER_LABELS } from "../genomics/parse.js";
 import { readLines, supportsStreaming } from "../genomics/stream.js";
 
@@ -26,6 +27,54 @@ export const WGS_PROVIDER = "WGS";
 
 /** Cap on header lines retained for build detection, mirroring parseLines. */
 const MAX_HEADER_LINES = 500;
+
+const MALE_SEX_TOKENS = new Set(["male", "m", "man", "men", "boy", "xy", "1"]);
+const FEMALE_SEX_TOKENS = new Set(["female", "f", "woman", "women", "girl", "xx", "2"]);
+
+/** A declared sex/gender field in a raw-file header, e.g. `# sex\tmale`. */
+const SEX_HEADER_RE = /^#+\s*(?:sex|gender)\b[\s:=,;\t]+([A-Za-z0-9]+)/i;
+
+/** Genotype tokens that mean "no call" rather than an observed allele. */
+const NO_CALL_TOKENS = new Set(["", "--", "00", "NN", "II", "DD", "NULL", "NAN"]);
+
+/**
+ * Infer a sex-chromosome pattern from the raw file, used only to apply
+ * sex-specific scoring rules on the backend. Returns `null` when nothing can be
+ * inferred confidently; the caller then omits the context entirely.
+ *
+ * Two high-confidence sources, in order:
+ *  1. An explicit sex/gender header line (23andMe/AncestryDNA style).
+ *  2. An observed Y-chromosome genotype call for a catalog variant on chrY.
+ *
+ * Absence of either is not evidence of XX: many files simply omit the header,
+ * and chrY is not probed on some arrays, so ambiguity degrades to `null`
+ * (the backend treats a missing context as unknown).
+ */
+export function detectSexChromosomeContext(headerLines, snps, catalog) {
+  for (const line of headerLines || []) {
+    const match = SEX_HEADER_RE.exec(String(line || ""));
+    if (!match) continue;
+    const token = match[1].toLowerCase();
+    if (MALE_SEX_TOKENS.has(token)) {
+      return { pattern: "XY", confidence: "high" };
+    }
+    if (FEMALE_SEX_TOKENS.has(token)) {
+      return { pattern: "XX", confidence: "high" };
+    }
+  }
+
+  const snpMeta = (catalog && catalog.snps) || {};
+  for (const [rsid, gt] of Object.entries(snps || {})) {
+    const meta = snpMeta[rsid];
+    if (!meta || normalizeChrom(meta.chromosome) !== "Y") continue;
+    const token = String(gt || "").trim().toUpperCase();
+    if (token && !NO_CALL_TOKENS.has(token)) {
+      return { pattern: "XY", confidence: "high" };
+    }
+  }
+
+  return null;
+}
 
 /**
  * Tee the line stream so we can sniff the VCF header for the reference build
@@ -73,6 +122,7 @@ export async function parseDnaFileCore(
       provider: WGS_PROVIDER,
       providerLabel: WGS_PROVIDER,
       genomeBuild: null,
+      sexChromosome: null,
       fileName,
       fileSizeBytes,
       coverage: { matched: 0, total: 0 },
@@ -94,6 +144,7 @@ export async function parseDnaFileCore(
   // microarray files are matched by rsID, so reporting a build there would imply
   // a precision the parse does not use.
   const genomeBuild = isWgs ? detectBuild(headerLines) : null;
+  const sexChromosome = detectSexChromosomeContext(headerLines, snps, catalog);
 
   return {
     supported: true,
@@ -102,6 +153,7 @@ export async function parseDnaFileCore(
     provider: providerLabel,
     providerLabel,
     genomeBuild,
+    sexChromosome,
     fileName,
     fileSizeBytes,
     coverage: { matched: Object.keys(snps).length, total: indexes.primarySet.size },

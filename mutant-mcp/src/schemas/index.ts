@@ -166,6 +166,26 @@ const uploadMetaSchema = z
   .describe("Non-sensitive provenance for the import; never includes file contents.");
 
 /**
+ * Optional, request-only sex-chromosome context inferred locally from the raw
+ * DNA file. The backend consumes it transiently while evaluating sex-specific
+ * perfect-storm conditions and never persists, caches, logs, or echoes it. Only
+ * `XX`/`XY` with `high` confidence activate sex-specific scoring; every other
+ * combination is treated as unknown.
+ */
+const analysisContextSchema = z
+  .strictObject({
+    sex_chromosome_pattern: z
+      .enum(["XX", "XY", "unknown", "ambiguous"])
+      .optional()
+      .describe("Inferred sex-chromosome pattern from the upload, when confidently detected."),
+    sex_chromosome_confidence: z
+      .enum(["high", "medium", "low", "unknown"])
+      .optional()
+      .describe("Confidence in the inferred pattern. Only 'high' activates sex-specific scoring."),
+  })
+  .describe("Optional transient context; never stored, logged, or returned.");
+
+/**
  * Strict so that identity-bearing or scoping fields (`account_id`, `user_id`,
  * `email`, `sub`, `analysis_id`) are rejected as invalid arguments rather than
  * silently ignored. Identity is always derived from the verified token.
@@ -174,6 +194,7 @@ export const createReportInputSchema = z.strictObject({
   snps: snpsSchema,
   wgs_variant_calls: wgsVariantCallsSchema.optional(),
   upload_meta: uploadMetaSchema.optional(),
+  analysis_context: analysisContextSchema.optional(),
   report_id: z
     .string()
     .regex(REPORT_ID_PATTERN, "report_id must be a lowercase slug, for example 'core_systems'.")

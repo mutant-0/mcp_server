@@ -363,6 +363,30 @@ describe("create_report", () => {
       expect(record.importRequestId).toBe(VALID_IMPORT.import_request_id);
     }
   });
+  it("forwards the request-only analysis context without logging it", async () => {
+    const logger = makeCapturingLogger();
+    const { client, backendClient } = await connect({ logger });
+    const context = { sex_chromosome_pattern: "XY", sex_chromosome_confidence: "high" };
+
+    const result = await client.callTool({
+      name: "create_report",
+      arguments: { ...VALID_IMPORT, analysis_context: context },
+    });
+
+    expect(result.isError).toBe(false);
+    expect(backendClient.calls[0]?.arguments.analysis_context).toEqual(context);
+
+    // The transient context never reaches a log record or the log text.
+    const text = logger.text();
+    expect(text).not.toContain("sex_chromosome_pattern");
+    expect(text).not.toContain("sex_chromosome_confidence");
+    const records = logger.records().filter((entry) => entry.tool === "create_report");
+    expect(records.length).toBeGreaterThan(0);
+    for (const record of records) {
+      expect(record).not.toHaveProperty("analysis_context");
+      expect(record).not.toHaveProperty("sex_chromosome_pattern");
+    }
+  });
 });
 
 describe("transport size caps", () => {

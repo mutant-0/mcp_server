@@ -137,6 +137,12 @@ are enforced in the backend and returned as structured errors
 scope returns `INSUFFICIENT_SCOPE` with the missing scope, which makes ChatGPT
 re-consent instead of failing opaquely.
 
+`create_report` also accepts an optional, request-only `analysis_context`
+(`sex_chromosome_pattern` / `sex_chromosome_confidence`), derived locally from the
+raw file and sent only for a high-confidence `XX`/`XY` detection. The backend uses
+it in memory to evaluate sex-specific perfect-storm conditions and never persists,
+caches, queues, logs, traces, or echoes it; it is excluded from every log record.
+
 ### The shared DNA processor
 
 `src/ui/genomics/*` is **generated**: `scripts/sync-genomics.mjs` copies it

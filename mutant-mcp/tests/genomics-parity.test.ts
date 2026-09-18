@@ -353,6 +353,7 @@ describe("genomics parity: component payload contract", () => {
       "genomeBuild",
       "provider",
       "providerLabel",
+      "sexChromosome",
       "snps",
       "supported",
       "totalLines",

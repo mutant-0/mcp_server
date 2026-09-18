@@ -86,6 +86,39 @@ describe("DNA import tool input schemas", () => {
     }
   });
 
+  it("accepts an optional transient analysis_context and rejects malformed shapes", () => {
+    expect(
+      createReportInputSchema.safeParse({
+        ...validImport,
+        analysis_context: { sex_chromosome_pattern: "XY", sex_chromosome_confidence: "high" },
+      }).success,
+    ).toBe(true);
+    // Either field alone, including the documented non-high/unknown values.
+    expect(
+      createReportInputSchema.safeParse({
+        ...validImport,
+        analysis_context: { sex_chromosome_pattern: "unknown" },
+      }).success,
+    ).toBe(true);
+    expect(
+      createReportInputSchema.safeParse({
+        ...validImport,
+        analysis_context: { sex_chromosome_confidence: "low" },
+      }).success,
+    ).toBe(true);
+
+    const invalid = [
+      { analysis_context: { sex_chromosome_pattern: "ZZ" } },
+      { analysis_context: { sex_chromosome_confidence: "certain" } },
+      // Strict nested object: an unknown nested key must be rejected.
+      { analysis_context: { sex_chromosome_pattern: "XX", extra: "value" } },
+      { analysis_context: "XX" },
+    ];
+    for (const payload of invalid) {
+      expect(createReportInputSchema.safeParse({ ...validImport, ...payload }).success).toBe(false);
+    }
+  });
+
   it("rejects malformed rsIDs, genotypes, and idempotency keys", () => {
     const invalid = [
       { snps: { variant1: "AG" } },

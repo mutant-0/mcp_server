@@ -77,6 +77,11 @@ interface ParsedResult {
   provider: string;
   providerLabel: string;
   genomeBuild: string | null;
+  /**
+   * Locally inferred sex-chromosome pattern, sent to the backend as a transient
+   * `analysis_context` only when high confidence. Never persisted or echoed.
+   */
+  sexChromosome: { pattern: string; confidence: string } | null;
   fileName: string;
   fileSizeBytes: number;
   coverage: { matched: number; total: number };
@@ -961,6 +966,19 @@ export function DnaImportApp({
       if (Object.keys(parsed.wgsVariantCalls).length) {
         args.wgs_variant_calls = parsed.wgsVariantCalls;
       }
+      // Request-only context: only a high-confidence XX/XY detection is sent, so
+      // sex-specific storm conditions can be evaluated in memory. The backend
+      // never stores, logs, or returns it.
+      if (
+        parsed.sexChromosome &&
+        parsed.sexChromosome.confidence === "high" &&
+        (parsed.sexChromosome.pattern === "XX" || parsed.sexChromosome.pattern === "XY")
+      ) {
+        args.analysis_context = {
+          sex_chromosome_pattern: parsed.sexChromosome.pattern,
+          sex_chromosome_confidence: "high",
+        };
+      }
 
       try {
         const result = await client.callServerTool({ name: "create_report", arguments: args });
@@ -1497,6 +1515,14 @@ export function DnaImportApp({
             <div style={styles.summaryRow}>
               <span>Genome build</span>
               <strong>{parsed.genomeBuild}</strong>
+            </div>
+          ) : null}
+          {parsed.sexChromosome && parsed.sexChromosome.confidence === "high" ? (
+            <div style={styles.summaryRow}>
+              <span>Sex-chromosome context</span>
+              <strong>
+                {parsed.sexChromosome.pattern} · used for sex-specific rules only, not stored
+              </strong>
             </div>
           ) : null}
           <div style={styles.summaryRow}>

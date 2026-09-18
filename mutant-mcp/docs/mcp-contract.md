@@ -305,7 +305,7 @@ version, byte size, and marker count — never catalog contents.
 
 ### `create_report`
 
-Input: `{ snps, wgs_variant_calls?, upload_meta?, report_id?, import_request_id }`.
+Input: `{ snps, wgs_variant_calls?, upload_meta?, analysis_context?, report_id?, import_request_id }`.
 Scope `dna.import`. Visibility `["app"]`. Write annotations
 (`readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: true`).
 
@@ -317,6 +317,7 @@ verified token.
 - `snps`: `{ "^rs\\d+$": "^[ACGT]{2}$" }`, at most 20 000 entries.
 - `wgs_variant_calls`: `{ rsID: { schema_version, source_format, genome_build, records[] } }`, at most 500 entries, at most 1 000 records each. Records stay opaque: no variant semantics are re-implemented here.
 - `upload_meta`: `{ provider, file_name, file_size_bytes }` — provenance only.
+- `analysis_context`: optional, request-only `{ sex_chromosome_pattern?: "XX"|"XY"|"unknown"|"ambiguous", sex_chromosome_confidence?: "high"|"medium"|"low"|"unknown" }` (strict nested object; unknown nested keys are rejected). The component sends it only for a **high-confidence** `XX`/`XY` detection. The backend consumes it in memory while evaluating sex-specific perfect-storm conditions and **never** persists, caches, queues, logs, traces, or echoes it; both the raw context and any normalized sex value are discarded after scoring. A missing or non-high-confidence context is treated as unknown.
 - `report_id`: optional report selector slug; omit to target the account's primary report. Not an identity claim.
 - `import_request_id`: 8–128 character idempotency key, generated once per import attempt. The backend enforces idempotency on `(user_id, import_request_id)`, so a retry returns the existing analysis instead of creating another.
 
@@ -325,7 +326,7 @@ Handlers run in this order: request-size cap (`MUTANT_MAX_REQUEST_BYTES`, defaul
 `PAYLOAD_TOO_LARGE`; then `operation: "create_report"`; then a response narrowed
 to `{ analysis_id, status }`. Genotypes are never echoed back. Logs record counts,
 byte sizes, `import_request_id`, `analysis_id`, upstream status, and duration —
-never the payload.
+never the payload and never `analysis_context`.
 
 Upstream failures are remapped to the component-facing codes below so the UI does
 not parse backend messages.
