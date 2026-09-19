@@ -680,6 +680,46 @@ describe("DNA import component", () => {
     expect(JSON.stringify(bridge.messages[0])).toMatch(/refresh my analysis/i);
   });
 
+  it("opens the resubmission flow when the host selected a refresh", async () => {
+    await renderApp(
+      {
+        get_analysis_status: statusResponse("ready", {
+          regenerate: true,
+          regeneration: { required: false, current_results_usable: true },
+        }),
+      },
+      { mode: "regenerate" },
+    );
+
+    // A refresh needs DNA again, so the card must show the picker, not the ready
+    // screen whose banner would re-offer the refresh the user just accepted.
+    await screen.findByText(/Refresh your analysis/i);
+    expect(screen.getByText(/Resubmit your DNA to refresh/i)).toBeDefined();
+    expect(screen.getByText(/Drag and drop your DNA file here/i)).toBeDefined();
+    expect(screen.queryByText(/Analysis ready/i)).toBeNull();
+    expect(screen.queryByText(/newer analysis platform is available/i)).toBeNull();
+  });
+
+  it("moves off the ready card when a regenerate result arrives after mount", async () => {
+    const bridge = renderWith({
+      get_analysis_status: statusResponse("ready", {
+        regenerate: true,
+        regeneration: { required: false, current_results_usable: true },
+      }),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    expect(screen.getByRole("button", { name: /refresh analysis/i })).toBeDefined();
+
+    // The host pushes the result of the follow-up `show_dna_import` call. It must
+    // redirect to resubmission instead of re-rendering the same refresh banner.
+    bridge.sendToolResult(makeSuccessResponse({ ui_rendered: true, mode: "regenerate" }));
+
+    await screen.findByText(/Refresh your analysis/i);
+    expect(screen.getByText(/Drag and drop your DNA file here/i)).toBeDefined();
+    expect(screen.queryByText(/Analysis ready/i)).toBeNull();
+  });
+
   it("sends exactly one host follow-up per action and never renders the prompt", async () => {
     const bridge = renderWith({ get_analysis_status: statusResponse("ready") });
 

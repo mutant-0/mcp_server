@@ -105,6 +105,14 @@ type Stage =
 type LifecycleStatus = "not_started" | "processing" | "ready" | "failed";
 type DnaStatus = "missing" | "available" | "unknown";
 
+/**
+ * Why the host rendered this component. `regenerate` is an explicit
+ * user-selected refresh and always requires resubmitting DNA, so it must open
+ * the resubmission flow. Falling back to the ready card would re-offer the same
+ * refresh the user just accepted, and every click would loop.
+ */
+type ImportMode = "initial" | "regenerate";
+
 /** What `get_analysis_status` told us about the account. */
 interface StatusInfo {
   dnaStatus: DnaStatus;
@@ -325,6 +333,23 @@ function envelopeOf(result: {
   } catch {
     return null;
   }
+}
+
+/**
+ * Read the selected import mode out of a `show_dna_import` tool result. Only
+ * that tool echoes a `mode`, so a result without one (every other tool, or a
+ * host that strips the field) is ignored and the component keeps its current
+ * intent.
+ */
+function importModeFrom(result: {
+  structuredContent?: unknown;
+  content?: Array<{ type: string; text?: string }>;
+}): ImportMode | null {
+  const envelope = envelopeOf(result);
+  const data = envelope ? asRecord(envelope.data) : null;
+  const mode = data?.mode;
+  if (mode === "regenerate" || mode === "initial") return mode;
+  return null;
 }
 
 function toCatalog(response: ToolResponse): Catalog | null {
@@ -722,12 +747,20 @@ export interface DnaImportAppProps {
   maxPollingMs?: number;
   /** Consecutive transient poll failures tolerated before stopping. */
   maxPollFailures?: number;
+  /**
+   * Import intent at mount. A host that renders this component from a
+   * `show_dna_import` result delivers the mode through the tool-result
+   * notification; this prop exposes the same intent for tests and for hosts
+   * that mount the component directly.
+   */
+  mode?: ImportMode;
 }
 
 export function DnaImportApp({
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   maxPollingMs = DEFAULT_MAX_POLLING_MS,
   maxPollFailures = DEFAULT_MAX_POLL_FAILURES,
+  mode = "initial",
 }: DnaImportAppProps = {}) {
   const [stage, setStage] = useState<Stage>("loading_catalog");
   const [hostContext, setHostContext] = useState<HostContext | undefined>(undefined);
@@ -750,6 +783,17 @@ export function DnaImportApp({
   const [now, setNow] = useState(() => Date.now());
   /** Bumped to restart the polling loop after a recoverable stop. */
   const [resumeToken, setResumeToken] = useState(0);
+  /**
+   * The host-selected import intent. Held in a ref as well as state so the
+   * async `loadStatus` callback can read the latest value without a stale
+   * closure, and so a late tool result can still redirect the card.
+   */
+  const [importMode, setImportMode] = useState<ImportMode>(mode);
+  const importModeRef = useRef<ImportMode>(mode);
+  const selectImportMode = useCallback((next: ImportMode) => {
+    importModeRef.current = next;
+    setImportMode((current) => (current === next ? current : next));
+  }, []);
 
   const {
     app,
@@ -760,6 +804,13 @@ export function DnaImportApp({
     capabilities: {},
     onAppCreated: (created) => {
       created.onerror = logBridgeError;
+      // The `show_dna_import` result is the only place the host tells the
+      // component why it was rendered. Register before `connect` so the
+      // one-shot notification is not missed, and ignore every other result.
+      created.ontoolresult = (result) => {
+        const next = importModeFrom(result);
+        if (next) selectImportMode(next);
+      };
     },
   });
 
@@ -858,6 +909,14 @@ export function DnaImportApp({
         return;
       }
       if (info.analysisStatus === "ready") {
+        // A user-selected refresh must not bounce back to the ready card: the
+        // banner would re-offer the same refresh and loop. Send the user to the
+        // resubmission flow instead.
+        if (importModeRef.current === "regenerate") {
+          setDnaOnFile(true);
+          setStage("waiting_for_file");
+          return;
+        }
         setStage("analysis_ready");
         return;
       }
@@ -883,6 +942,16 @@ export function DnaImportApp({
     void loadCatalog(app);
     void loadStatus(app);
   }, [isConnected, app, loadCatalog, loadStatus]);
+
+  // A refresh selected after mount (the host pushes the `show_dna_import`
+  // result to the running view) must still leave the ready screen. Otherwise
+  // the refresh banner re-renders unchanged and the next click repeats it.
+  useEffect(() => {
+    if (importMode !== "regenerate") return;
+    setStage((current) =>
+      current === "loading_catalog" || current === "analysis_ready" ? "waiting_for_file" : current,
+    );
+  }, [importMode]);
 
   /** Tell the model the component owns this state, so it does not narrate it. */
   const reportToModel = useCallback(
@@ -1667,7 +1736,19 @@ export function DnaImportApp({
 
   return (
     <Shell>
-      <h1 style={styles.h1}>Add your DNA data</h1>
+      <h1 style={styles.h1}>
+        {importMode === "regenerate" ? "Refresh your analysis" : "Add your DNA data"}
+      </h1>
+
+      {importMode === "regenerate" && !accountMissing ? (
+        <div style={styles.notice} role="status">
+          <p style={{ margin: "0 0 4px", fontWeight: 600 }}>Resubmit your DNA to refresh</p>
+          <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>
+            Mutant cannot rescore a stored file, so submit your DNA again to include the newer
+            patterns. Your current results stay available until the refreshed analysis is ready.
+          </p>
+        </div>
+      ) : null}
 
       {accountMissing ? (
         <div style={styles.notice} role="status">
@@ -1679,7 +1760,7 @@ export function DnaImportApp({
         </div>
       ) : null}
 
-      {dnaOnFile && !accountMissing ? (
+      {dnaOnFile && !accountMissing && importMode !== "regenerate" ? (
         <div style={styles.notice} role="status">
           <p style={{ margin: "0 0 4px", fontWeight: 600 }}>DNA data is already on file</p>
           <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>

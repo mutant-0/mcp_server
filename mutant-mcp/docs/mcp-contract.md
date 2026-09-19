@@ -735,6 +735,12 @@ the moment the user picks a file, and the model would have to reconcile it.
 After calling this tool the model must not restate DNA status, analysis status,
 or import instructions.
 
+The component reads the mode back from the result (`data.mode`) and, for
+`regenerate`, opens the DNA resubmission flow rather than the ready card. That is
+what makes a refresh terminate: the mode is the one piece of routing state the
+component needs, and it must be honored in a host that updates the running view
+as well as in one that mounts a fresh one.
+
 The result and the tool descriptor both carry the UI descriptor, so a host can
 mount the component from either:
 
@@ -830,8 +836,12 @@ Two v2 additions to the completion view:
   chip label is shown; the prose is never rendered inside the card.
 - **Refresh banner.** When `get_analysis_status` reports `regenerate: true` with
   a usable current analysis, the card shows a refresh banner explaining that the
-  current results remain usable and why resubmission is requested. A required
-  refresh (failed analysis) is handled by the recovery card instead.
+  current results remain usable and why resubmission is requested. Choosing the
+  refresh action renders the component with `mode: "regenerate"`; the component
+  reads that mode from the `show_dna_import` result and opens the DNA
+  resubmission flow instead of the ready card, so the refresh is never re-offered
+  in a loop. A required refresh (failed analysis) is handled by the recovery card
+  instead.
 
 Because `_meta.ui.csp` cannot declare `worker-src`, parsing prefers a Web Worker
 started from a `blob:` URL and falls back to the same parser on the main thread if
