@@ -8,9 +8,15 @@ export const getAnalysisContextTool: MutantToolDefinition = {
   name: "get_analysis_context",
   title: "Get Analysis Context",
   description:
-    "Return a concise overview of a ready DNA analysis: marker coverage, interpretation " +
-    "boundaries, and the user's highest-ranked health hypotheses. Use after status reports the " +
-    "analysis is ready, or when the user asks for an overview or top findings. Never ask the user " +
+    "Return the interpretation contract and starting context for a ready Mutant analysis: " +
+    "how scores and evidence should be explained, important boundaries and limitations, access " +
+    "scope, a compact preview of the highest-ranked hypotheses, and useful next questions. Use " +
+    "once at the beginning of analysis exploration after status reports that the analysis is " +
+    "ready. Use list_health_hypotheses for subsequent browsing, searching, sorting, pagination, " +
+    "or comparisons. Tool selection: \"What can Mutant tell me?\" and \"What does my DNA say about " +
+    "my health?\" call get_analysis_status, then get_analysis_context; \"Show or compare my top " +
+    "three\" and \"Find thyroid-related hypotheses\" call list_health_hypotheses (with a query when " +
+    "searching); \"Explain the B12 finding\" calls explain_health_hypothesis. Never ask the user " +
     "for an analysis ID; the current analysis is resolved from the connection.",
   scope: "analysis.read",
   inputSchema: getAnalysisContextInputSchema,

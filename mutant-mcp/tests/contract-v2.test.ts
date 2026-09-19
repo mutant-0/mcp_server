@@ -40,6 +40,82 @@ const MINIMAL_ARGS: Record<ToolName, Record<string, unknown>> = {
   },
 };
 
+/** The `get_analysis_context` payload: the interpretation contract plus previews. */
+function contextData(): Record<string, unknown> {
+  return {
+    interpretation_contract: {
+      version: "2.0",
+      purpose:
+        "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
+      response_rules: [
+        "Lead with the plain-English meaning.",
+        "Distinguish genetic susceptibility from a current condition.",
+      ],
+      score_semantics: {
+        priority_score: "The ordering score; not disease probability.",
+        genetic_support: "Strength of genetic support within the analyzed evidence.",
+        genetic_evidence: "The weak/moderate/strong evidence category.",
+        coverage_confidence: "How completely the relevant markers were assessed.",
+        pattern_convergence: "How strongly independent patterns agree.",
+      },
+      evidence_boundaries: {
+        genetics_is_not_diagnosis: true,
+        genetic_support_does_not_establish_current_status: true,
+        clinical_correlation_is_catalog_guidance: true,
+        clinical_correlation_is_not_user_record_evidence: true,
+      },
+      health_context_usage: {
+        allowed: true,
+        performed_by: "chatgpt",
+        sent_to_mutant: false,
+        purpose: "relevance_filtering",
+      },
+      presentation_order: [
+        "bottom_line",
+        "why_ranked",
+        "interpretation_boundary",
+        "minimal_confirmation",
+        "strengthening_and_weakening_evidence",
+        "action_changing_guardrail",
+      ],
+      limitations: ["Not a diagnosis."],
+    },
+    coverage: { analyzed_markers: 1000 },
+    access_summary: {
+      plan: "mutant_full",
+      hypothesis_scope: "all",
+      total_ranked: 2,
+      returned: 2,
+      unlocked: 2,
+      locked: 0,
+      scope_message:
+        "Your complete ranked analysis is available. This response previews the top three; use hypothesis search or listing to explore the rest.",
+    },
+    top_hypotheses: [
+      {
+        id: "HYP_A",
+        rank: 1,
+        title: "Alpha finding",
+        bottom_line: "First summary.",
+        priority_score: 90,
+        genetic_evidence: "strong",
+        coverage_confidence: "high",
+        pattern_convergence: "strong",
+      },
+      {
+        id: "HYP_B",
+        rank: 2,
+        title: "Beta finding",
+        bottom_line: "Second summary.",
+        priority_score: 80,
+        genetic_evidence: "moderate",
+        coverage_confidence: "high",
+        pattern_convergence: "moderate",
+      },
+    ],
+  };
+}
+
 /** A response with the v2 shape the content builders expect for each tool. */
 function dataFor(operation: ToolName): Record<string, unknown> {
   switch (operation) {
@@ -51,15 +127,7 @@ function dataFor(operation: ToolName): Record<string, unknown> {
         next_action: { tool: "get_analysis_context", reason: "An analysis is ready." },
       };
     case "get_analysis_context":
-      return {
-        coverage: { analyzed_markers: 1000 },
-        interpretation: { summary: "Findings reviewed.", limitations: ["Not a diagnosis."] },
-        selection_scope: "all",
-        top_hypotheses: [
-          { id: "HYP_A", rank: 1, title: "Alpha finding", bottom_line: "First summary." },
-          { id: "HYP_B", rank: 2, title: "Beta finding", bottom_line: "Second summary." },
-        ],
-      };
+      return contextData();
     case "list_health_hypotheses":
       return {
         items: [{ id: "HYP_A", rank: 1, title: "Alpha finding", bottom_line: "First summary." }],
@@ -192,6 +260,64 @@ describe("contract v2.0 acceptance", () => {
         expect(String(prompt.prompt)).not.toMatch(/call_|_id=|\(\)/);
       }
     }
+  });
+
+  it("renders the context content from the interpretation contract without dumping it", async () => {
+    const { client } = await connect();
+    const result = await client.callTool({ name: "get_analysis_context", arguments: {} });
+    const text = textOf(result);
+    expect(text).toContain("assessed 1000 markers");
+    expect(text).toContain("Alpha finding");
+    expect(text).toContain("complete ranked analysis");
+    expect(text).toContain("Not a diagnosis.");
+    expect(text).toContain("You can ask me to explain one finding");
+    // The structured contract is not echoed into the model-facing text.
+    expect(text).not.toContain("interpretation_contract");
+    expect(text).not.toContain("score_semantics");
+    expect(text).not.toMatch(/^\s*[{[]/);
+    expect(text.length).toBeLessThan(1500);
+  });
+
+  it("selects context prompts from the access summary, not selection_scope", async () => {
+    const { client } = await connect();
+    const result = await client.callTool({ name: "get_analysis_context", arguments: {} });
+    const data = envelopeOf(result).data as {
+      suggested_prompts?: Array<{ id: string }>;
+    };
+    const ids = (data.suggested_prompts ?? []).map((prompt) => prompt.id);
+    expect(ids).toContain("explain-first");
+    expect(ids).toContain("compare-top-three");
+    expect(ids).toContain("match-health-context");
+    expect(ids).toContain("search-all");
+    expect(ids).not.toContain("full-scope");
+  });
+
+  it("offers a Full-scope prompt to Free accounts with locked hypotheses", async () => {
+    const { client } = await connect((operation) => {
+      if (operation !== "get_analysis_context") {
+        return makeSuccessResponse(dataFor(operation));
+      }
+      return makeSuccessResponse({
+        ...contextData(),
+        access_summary: {
+          plan: "mutant_free",
+          hypothesis_scope: "top_3",
+          total_ranked: 10,
+          returned: 3,
+          unlocked: 3,
+          locked: 7,
+          scope_message:
+            "Your top three ranked hypotheses are fully unlocked. Mutant Full can search 7 additional ranked hypotheses.",
+        },
+      });
+    });
+    const result = await client.callTool({ name: "get_analysis_context", arguments: {} });
+    const data = envelopeOf(result).data as {
+      suggested_prompts?: Array<{ id: string }>;
+    };
+    const ids = (data.suggested_prompts ?? []).map((prompt) => prompt.id);
+    expect(ids).toContain("full-scope");
+    expect(ids).not.toContain("search-all");
   });
 
   it("reports errors as short text without echoing the envelope", async () => {

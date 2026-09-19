@@ -24,6 +24,10 @@ function asText(value: unknown): string | null {
   return text.length > 0 ? text : null;
 }
 
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function statusPrompts(data: JsonObject): PromptSuggestion[] {
   const dna = asText(data.dna_status);
   const analysis = asText(data.analysis_status);
@@ -101,7 +105,10 @@ function statusPrompts(data: JsonObject): PromptSuggestion[] {
 }
 
 function contextPrompts(data: JsonObject): PromptSuggestion[] {
-  const scope = asText(data.selection_scope);
+  const access = asRecord(data.access_summary);
+  const isFull = access ? asText(access.hypothesis_scope) === "all" : false;
+  const locked = access ? asNumber(access.locked) : null;
+
   const out: PromptSuggestion[] = [
     {
       id: "explain-first",
@@ -110,30 +117,36 @@ function contextPrompts(data: JsonObject): PromptSuggestion[] {
       intent: "explain",
     },
     {
-      id: "compare-top",
+      id: "compare-top-three",
       label: "Compare top 3",
-      prompt: "Compare my top three findings.",
+      prompt: "Compare my top three findings and explain how they differ.",
+      intent: "comparison",
+    },
+    {
+      id: "match-health-context",
+      label: "Match my health context",
+      prompt:
+        "Which of my accessible findings are most relevant to the health context I have shared here?",
       intent: "comparison",
     },
   ];
-  out.unshift({
-    id: "all-findings",
-    label: scope === "all" ? "All my findings" : "My top findings",
-    prompt: scope === "all" ? "List all my health hypotheses." : "What are my top health hypotheses?",
-    intent: "overview",
-  });
-  out.push({
-    id: "evidence-first",
-    label: "Supporting evidence",
-    prompt: "Which variants and patterns support my top finding?",
-    intent: "evidence",
-  });
-  out.push({
-    id: "clinician-questions",
-    label: "Ask my clinician",
-    prompt: "What should I ask my clinician about my top findings?",
-    intent: "clinician_questions",
-  });
+
+  if (isFull) {
+    out.push({
+      id: "search-all",
+      label: "Search all findings",
+      prompt: "Search my complete analysis for findings by topic.",
+      intent: "overview",
+    });
+  } else if (locked !== null && locked > 0) {
+    out.push({
+      id: "full-scope",
+      label: "What Full unlocks",
+      prompt: "What additional hypotheses can Mutant Full search beyond my top three?",
+      intent: "overview",
+    });
+  }
+
   return out.slice(0, MAX_SUGGESTIONS);
 }
 

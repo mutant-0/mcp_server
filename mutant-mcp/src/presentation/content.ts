@@ -42,6 +42,13 @@ function joinNatural(items: string[]): string {
   return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
+/** Bound a single prose field so long catalog copy cannot blow the budget. */
+function clampText(value: string, max: number): string {
+  const text = value.trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 3).trimEnd()}...`;
+}
+
 function errorContent(response: ToolResponse): string {
   const error = response.error;
   const lines = [
@@ -103,29 +110,46 @@ function hypothesisLine(entry: unknown): string | null {
 
 function contextContent(data: JsonObject): string {
   const coverage = asRecord(data.coverage);
+  const contract = asRecord(data.interpretation_contract);
+  const access = asRecord(data.access_summary);
   const markers = coverage ? asNumber(coverage.analyzed_markers) : null;
-  const interpretation = asRecord(data.interpretation);
   const parts: string[] = [];
 
-  if (markers !== null) {
-    parts.push(`This analysis reviewed ${markers} markers from the Mutant panel.`);
-  }
-  const summary = interpretation ? asText(interpretation.summary) : null;
-  if (summary) parts.push(summary);
+  const purpose = contract ? asText(contract.purpose) : null;
+  const readiness =
+    markers !== null
+      ? `Your DNA analysis is ready and assessed ${markers} markers.`
+      : "Your DNA analysis is ready.";
+  parts.push(purpose ? `${readiness} ${purpose}` : readiness);
 
-  const lines = asList(data.top_hypotheses)
-    .map(hypothesisLine)
-    .filter((line): line is string => line !== null)
+  const previews = asList(data.top_hypotheses)
+    .map((entry) => asRecord(entry))
+    .filter((entry): entry is JsonObject => entry !== null)
     .slice(0, 3);
-  if (lines.length > 0) {
-    parts.push(`Leading findings: ${lines.join(" | ")}.`);
+  if (previews.length > 0) {
+    const lines = previews.map((preview, index) => {
+      const rank = asNumber(preview.rank) ?? index + 1;
+      const title = clampText(asText(preview.title) ?? "Untitled finding", 120);
+      const bottom = asText(preview.bottom_line);
+      return bottom ? `${rank}. ${title} - ${clampText(bottom, 200)}` : `${rank}. ${title}`;
+    });
+    parts.push(`Your highest-ranked findings are:\n${lines.join("\n")}`);
   }
 
-  const limitations = interpretation ? asList(interpretation.limitations) : [];
-  const firstLimitation = asText(limitations[0]);
-  if (firstLimitation) parts.push(firstLimitation);
+  // Access scope, stated by the server so the model cannot imply the previews
+  // are the whole analysis.
+  const scopeMessage = access ? asText(access.scope_message) : null;
+  if (scopeMessage) parts.push(scopeMessage);
 
-  return parts.join(" ");
+  // The most important interpretation boundary; never the whole contract.
+  const boundary = asText(asList(contract?.limitations)[0]);
+  if (boundary) parts.push(boundary);
+
+  parts.push(
+    "You can ask me to explain one finding, compare the three, or search accessible hypotheses by topic.",
+  );
+
+  return parts.join("\n\n");
 }
 
 function listContent(data: JsonObject): string {

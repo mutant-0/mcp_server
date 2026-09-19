@@ -627,8 +627,20 @@ describe("DNA import component", () => {
       get_analysis_status: statusResponse("ready"),
       get_analysis_context: makeSuccessResponse({
         coverage: { analyzed_markers: 1000 },
-        interpretation: { summary: "Boundaries.", limitations: [] },
-        selection_scope: "top_3",
+        interpretation_contract: {
+          version: "2.0",
+          purpose: "Boundaries.",
+          limitations: [],
+        },
+        access_summary: {
+          plan: "mutant_free",
+          hypothesis_scope: "top_3",
+          total_ranked: 0,
+          returned: 0,
+          unlocked: 0,
+          locked: 0,
+          scope_message: "Your top three ranked hypotheses are fully unlocked.",
+        },
         top_hypotheses: [],
         suggested_prompts: [
           {

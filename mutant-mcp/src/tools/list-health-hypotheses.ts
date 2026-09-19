@@ -8,7 +8,8 @@ export const listHealthHypothesesTool: MutantToolDefinition = {
   description:
     "List or search the health hypotheses in the current analysis. Send catalog-topic keywords " +
     "only, never patient-specific health information. Free accounts see their fixed top three; " +
-    "Full accounts can search the whole analyzed set.",
+    "Full accounts can search the whole analyzed set. Do not use this tool to initialize the " +
+    "overall interpretation experience; use get_analysis_context for that purpose.",
   scope: "analysis.read",
   inputSchema: listHealthHypothesesInputSchema,
   outputSchema: toolResponseOutputSchema,

@@ -129,7 +129,7 @@ mutant-mcp/
 | Tool | Scope | Purpose |
 |---|---|---|
 | `get_analysis_status` | `analysis.read` | Routing gate: `dna_status`, `analysis_status`, entitlement/capabilities, a mandatory `regenerate` flag (+ `regeneration` details), and an object `next_action`/`optional_actions`. Polled by the DNA import component while an analysis is processing. |
-| `get_analysis_context` | `analysis.read` | **Start here.** Coverage, interpretation summary/limitations, selection scope, top hypotheses, suggested prompts. |
+| `get_analysis_context` | `analysis.read` | **Start here.** The versioned interpretation contract, coverage, access scope, a compact top-three hypothesis preview, and suggested prompts. |
 | `list_health_hypotheses` | `analysis.read` | List/search hypotheses (`items` + `next_cursor`; Free: fixed top three, Full: whole set). |
 | `explain_health_hypothesis` | `analysis.read` | Explanation-ready projection: scores, why-ranked, contributing patterns, clinical context, confirmation plan, guardrails. |
 | `get_supporting_evidence` | `analysis.read` | Stored patterns, deduped variant contributions, cited sources, or full test guidance (`kind: "tests"`). |

@@ -111,7 +111,9 @@ add a `suggested_prompts` array to their `data`
 - At most **five**, ordered by likely usefulness.
 - State-aware: DNA missing (import format/privacy), ready (overview/explain/
   compare/clinician), processing (what happens next), regeneration available
-  (why refresh / start refresh), hypothesis detail (why ranked / evidence /
+  (why refresh / start refresh), analysis context (explain #1 / compare top
+  three / match health context, plus a Full-scope or what-Full-unlocks prompt
+  from the access summary), hypothesis detail (why ranked / evidence /
   confirmation / what changes it / clinician).
 - `prompt` is exact user-visible natural language. It must never contain an
   internal command, a tool name, or a raw hypothesis id. `explain_health_hypothesis`
@@ -121,6 +123,22 @@ add a `suggested_prompts` array to their `data`
   owns the typed facts; the Lambda owns the presentation.
 
 ## Tools
+
+Each tool maps to a distinct user goal. The routing contract is:
+
+| Tool | Responsibility |
+|---|---|
+| `get_analysis_status` | Establish connection, DNA readiness, analysis readiness, entitlement, and regeneration state. |
+| `get_analysis_context` | Bootstrap the experience: interpretation contract, scoring semantics, boundaries, access scope, compact top-hypothesis preview, and useful next questions. |
+| `list_health_hypotheses` | Browse, search, sort, paginate, and compare accessible hypotheses. |
+| `explain_health_hypothesis` | Explain one hypothesis in depth. |
+| `get_supporting_evidence` | Expand one evidence category for one hypothesis. |
+| `get_genetic_context` | Answer marker-, gene-, or module-level questions. |
+
+Call `get_analysis_status` first; call `get_analysis_context` once after status
+reports `analysis_status: "ready"`; use `list_health_hypotheses` for subsequent
+browsing, searching, sorting, pagination, and comparison; use
+`explain_health_hypothesis` or `get_supporting_evidence` for a single finding.
 
 ### `get_analysis_status`
 
@@ -208,28 +226,107 @@ finished, and should not narrate the status while that component is on screen.
 
 ### `get_analysis_context`
 
-Input: `{}`. Returns the compact interpretation frame plus the leading findings:
+Input: `{}`. The first analysis tool called after status reports the analysis is
+ready. It bootstraps the overall experience: the versioned interpretation
+contract, coverage, access scope, a compact preview of the top three hypotheses,
+and next-question prompts. It is not a listing tool.
 
 ```json
 {
-  "coverage": { "analyzed_markers": 1240, "classification": "…" },
-  "interpretation": {
-    "summary": "…",
+  "interpretation_contract": {
+    "version": "2.0",
+    "purpose": "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
+    "response_rules": ["… (1-6)"],
+    "score_semantics": {
+      "priority_score": "…",
+      "genetic_support": "…",
+      "genetic_evidence": "…",
+      "coverage_confidence": "…",
+      "pattern_convergence": "…"
+    },
+    "evidence_boundaries": {
+      "genetics_is_not_diagnosis": true,
+      "genetic_support_does_not_establish_current_status": true,
+      "clinical_correlation_is_catalog_guidance": true,
+      "clinical_correlation_is_not_user_record_evidence": true
+    },
+    "health_context_usage": {
+      "allowed": true,
+      "performed_by": "chatgpt",
+      "sent_to_mutant": false,
+      "purpose": "relevance_filtering"
+    },
+    "presentation_order": [
+      "bottom_line",
+      "why_ranked",
+      "interpretation_boundary",
+      "minimal_confirmation",
+      "strengthening_and_weakening_evidence",
+      "action_changing_guardrail"
+    ],
     "limitations": ["…", "…"]
   },
-  "selection_scope": "top_3",
-  "top_hypotheses": [ /* up to three HypothesisSummary, rank order */ ],
+  "coverage": { "analyzed_markers": 1240, "classification": "moderate" },
+  "access_summary": {
+    "plan": "mutant_free",
+    "hypothesis_scope": "top_3",
+    "total_ranked": 12,
+    "returned": 3,
+    "unlocked": 3,
+    "locked": 9,
+    "scope_message": "Your top three ranked hypotheses are fully unlocked. Mutant Full can search 9 additional ranked hypotheses."
+  },
+  "top_hypotheses": [ /* up to three HypothesisPreview, rank order */ ],
+  "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/cart" },
   "suggested_prompts": [ /* added by the Lambda, max 5 */ ]
 }
 ```
 
-`interpretation.limitations` is deduped and capped at four.
-`selection_scope` is `top_3` for Free and `all` for Full.
+- `interpretation_contract` is server-owned and versioned (`"2.0"`). It is
+  global product behavior, never per-hypothesis catalog prose and never
+  LLM-generated. `response_rules` is 1-6 unique strings; `limitations` is 0-4
+  unique strings; the boundary flags are literal `true`; `score_semantics` has
+  exactly the five published keys; `presentation_order` is the fixed order above.
+- `coverage.classification` is optional.
+- `access_summary.hypothesis_scope` is `top_3` for Free and `all` for Full.
+  `unlocked` is the count of accessible hypotheses; `locked` is the count the
+  current plan cannot reach (zero for Full). `scope_message` states the actual
+  scope and never implies the three previews are the whole of a Full analysis.
+- `upgrade` is present only for a Free account whose analysis has `locked > 0`.
+  Full never receives upgrade messaging.
+- Free never exposes locked hypothesis ids, titles, scores, ranks, or tags.
+
+For Full, `scope_message` reads: "Your complete ranked analysis is available.
+This response previews the top three; use hypothesis search or listing to
+explore the rest."
+
+#### `HypothesisPreview`
+
+The compact preview returned only by `get_analysis_context`:
+
+```json
+{
+  "id": "RC_A",
+  "rank": 1,
+  "title": "Alpha",
+  "bottom_line": "…",
+  "priority_score": 90.0,
+  "genetic_evidence": "strong",
+  "coverage_confidence": "high",
+  "pattern_convergence": "strong"
+}
+```
+
+- At most three records, in authoritative rank order. Free returns its three
+  unlocked hypotheses; Full also receives only the first three here.
+- Deliberately narrower than `HypothesisSummary`: no `genetic_support_score`, no
+  context tags, and no patterns, variants, tests, sources, or clinical detail.
+  The two DTOs are separate types so the context response cannot accumulate
+  list-only fields.
 
 #### `HypothesisSummary`
 
-The shared summary object returned by `get_analysis_context` and
-`list_health_hypotheses`:
+The richer browse/search DTO owned by `list_health_hypotheses`:
 
 ```json
 {
@@ -239,17 +336,43 @@ The shared summary object returned by `get_analysis_context` and
   "bottom_line": "…",
   "priority_score": 90.0,
   "genetic_support_score": 80.0,
-  "support_strength": "strong",
-  "coverage": "high",
-  "convergence": "strong"
+  "genetic_evidence": "strong",
+  "coverage_confidence": "high",
+  "pattern_convergence": "strong"
 }
 ```
 
-- `support_strength` maps the engine's `genetic_evidence`;
-  `coverage` maps `coverage_confidence`; `convergence` maps
-  `pattern_convergence`. No thresholds or scores are invented.
+- `genetic_evidence`, `coverage_confidence`, and `pattern_convergence` pass the
+  engine's published vocabulary through unchanged. No thresholds or scores are
+  invented.
+- `genetic_support_score` is the raw support score; it is intentionally absent
+  from `HypothesisPreview`.
 - `bottom_line` is the curated `presentation.bottom_line` when present, else the
   catalog `summary` or the hypothesis `user_description`.
+
+#### Model-facing `content`
+
+`get_analysis_context` `content` is deterministic prose, never JSON:
+
+```text
+Your DNA analysis is ready and assessed {analyzed_markers} markers. {purpose}
+
+Your highest-ranked findings are:
+1. {title} - {bottom_line}
+2. {title} - {bottom_line}
+3. {title} - {bottom_line}
+
+{scope_message}
+
+{first limitation}
+
+You can ask me to explain one finding, compare the three, or search accessible hypotheses by topic.
+```
+
+It carries the readiness/coverage sentence, the access scope, the preview list,
+the single most important interpretation boundary, and the next-question line.
+It never repeats the full contract, never serializes `structuredContent`, and
+stays under ~1,500 characters (titles and bottom lines are bounded).
 
 ### `list_health_hypotheses`
 
@@ -635,9 +758,9 @@ Engine vocabularies are mapped to the contract's published vocabulary:
 
 | Contract | Engine value |
 |---|---|
-| `support_strength: weak` | `genetic_evidence: limited` |
-| `coverage: low` | `coverage_confidence: limited` |
-| `convergence: weak` | `pattern_convergence: none` |
+| `genetic_evidence: weak` | engine `genetic_evidence: limited` |
+| `coverage_confidence: low` | engine `coverage_confidence: limited` |
+| `pattern_convergence: weak` | engine `pattern_convergence: none` |
 | `call_status: not_called` | `missing_genotype` / `unresolved_genotype` / `not_in_analyzed_catalog` |
 | `contribution_status: context_only` | `module_score_status: not_scored` |
 | `pattern contribution_status: context_only` | pattern requires clinical confirmation without a resolved contribution |
@@ -649,19 +772,30 @@ authoritative enums. No scores or thresholds are computed by the MCP layer.
 
 ## Interpretation guardrails
 
-`interpretation.summary` / `limitations` (returned at the top of
-`get_analysis_context`) state that scores are model support, not diagnosis; that
-missing calls are not reassuring; and that different `analysis_version` values
-must not be silently combined.
+`interpretation_contract` (returned at the top of `get_analysis_context`)
+carries the purpose, response rules, score semantics, literal evidence
+boundaries, and global limitations. It states that scores are model support, not
+diagnosis; that genetic support does not establish current status; that missing
+calls are not reassuring; that catalog clinical correlation is guidance, not
+evidence from the user's records; and that different `analysis_version` values
+must not be silently combined. Health-context relevance is performed by ChatGPT
+(`performed_by: "chatgpt"`) and is never sent to Mutant.
+
+The static MCP server instructions route tools; they do not replace
+`interpretation_contract`. The contract supplies the analysis-specific
+interpretation and scope that travel with the current result.
 
 ## Acceptance tests
 
 The contract is covered by:
 
 - `report-generator/mcp/tests/test_mcp_handlers.py` — status v2 shape (including
-  mandatory `regenerate: false`), context/list/details v2 shapes,
-  `kind: "tests"`, genetic-context rsID dedupe with `pattern_memberships`, and
-  the entitlement `hypothesis_markers` rename.
+  mandatory `regenerate: false`), the context interpretation-contract shape,
+  access-summary counts and Free/Full upgrade behavior, locked-hypothesis
+  non-leakage, preview-vs-summary separation, contract validation (unknown
+  score semantics, non-literal boundaries, wrong presentation order, duplicate
+  rules), `kind: "tests"`, genetic-context rsID dedupe with
+  `pattern_memberships`, and the entitlement `hypothesis_markers` rename.
 - `mutant-mcp/tests/tools.test.ts`, `schemas.test.ts` — nine tools, version,
   input schemas (including `show_dna_import.mode`).
 - `mutant-mcp/tests/dna-import.test.ts` — status pass-through (no Lambda
@@ -670,5 +804,7 @@ The contract is covered by:
   refresh banner.
 - `mutant-mcp/tests/contract-v2.test.ts` — a callable-tool smoke test asserting
   every advertised tool is callable, that `content` is a summary rather than a
-  JSON dump, that suggestions are capped at five natural-language prompts, and
-  that `_meta` stays widget-only.
+  JSON dump, that the context content is rendered from the interpretation
+  contract without echoing it, that context prompts follow the access summary,
+  that suggestions are capped at five natural-language prompts, and that `_meta`
+  stays widget-only.

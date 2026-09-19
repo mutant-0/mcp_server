@@ -315,26 +315,79 @@ function mockHypotheses(): Record<string, unknown>[] {
     rank: index + 1,
     title,
     bottom_line: bottomLine,
-    support_strength: "moderate",
-    coverage: "high",
-    convergence: "moderate",
+    priority_score: 90 - index * 10,
+    genetic_support_score: 80 - index * 10,
+    genetic_evidence: "moderate",
+    coverage_confidence: "high",
+    pattern_convergence: "moderate",
   }));
 }
 
 /** Synthetic analysis-context data, mirroring the v2 contract shape. */
 function mockContext(): Record<string, unknown> {
+  const hypotheses = mockHypotheses();
+  const previews = hypotheses.map((row) => ({
+    id: row.id,
+    rank: row.rank,
+    title: row.title,
+    bottom_line: row.bottom_line,
+    priority_score: row.priority_score,
+    genetic_evidence: row.genetic_evidence,
+    coverage_confidence: row.coverage_confidence,
+    pattern_convergence: row.pattern_convergence,
+  }));
   return {
-    coverage: { analyzed_markers: 1000 },
-    interpretation: {
-      summary:
-        "Mutant scores describe model support for a health hypothesis, not a diagnosis.",
+    interpretation_contract: {
+      version: "2.0",
+      purpose:
+        "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
+      response_rules: [
+        "Lead with the plain-English meaning.",
+        "Distinguish genetic susceptibility from a current condition.",
+      ],
+      score_semantics: {
+        priority_score: "The ordering score; not disease probability.",
+        genetic_support: "Strength of genetic support within the analyzed evidence.",
+        genetic_evidence: "The weak/moderate/strong evidence category.",
+        coverage_confidence: "How completely the relevant markers were assessed.",
+        pattern_convergence: "How strongly independent patterns agree.",
+      },
+      evidence_boundaries: {
+        genetics_is_not_diagnosis: true,
+        genetic_support_does_not_establish_current_status: true,
+        clinical_correlation_is_catalog_guidance: true,
+        clinical_correlation_is_not_user_record_evidence: true,
+      },
+      health_context_usage: {
+        allowed: true,
+        performed_by: "chatgpt",
+        sent_to_mutant: false,
+        purpose: "relevance_filtering",
+      },
+      presentation_order: [
+        "bottom_line",
+        "why_ranked",
+        "interpretation_boundary",
+        "minimal_confirmation",
+        "strengthening_and_weakening_evidence",
+        "action_changing_guardrail",
+      ],
       limitations: [
         "This analysis covers only the markers in the Mutant panel.",
         "Absence of a finding is not evidence of absence.",
       ],
     },
-    selection_scope: "top_3",
-    top_hypotheses: mockHypotheses(),
+    coverage: { analyzed_markers: 1000 },
+    access_summary: {
+      plan: "mutant_free",
+      hypothesis_scope: "top_3",
+      total_ranked: hypotheses.length,
+      returned: previews.length,
+      unlocked: previews.length,
+      locked: 0,
+      scope_message: "Your top three ranked hypotheses are fully unlocked.",
+    },
+    top_hypotheses: previews,
   };
 }
 
