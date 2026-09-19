@@ -234,15 +234,22 @@ and next-question prompts. It is not a listing tool.
 ```json
 {
   "interpretation_contract": {
-    "version": "2.0",
+    "version": "2.1",
     "purpose": "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
     "response_rules": ["… (1-6)"],
+    "evidence_explanation_rules": {
+      "organizing_level": "modules_then_patterns_then_variants",
+      "rules": ["… (1-9)"],
+      "module_first_instruction": "When explaining a hypothesis, do not begin with a gene or SNP. First state whether support is multi-module, single-module, pattern-led, or concentrated in one locus. Explain the contributing modules and retained patterns next. Mention individual genes and variants only after their actual scoring route is clear. If one driver dominates, disclose that concentration prominently."
+    },
     "score_semantics": {
       "priority_score": "…",
       "genetic_support": "…",
       "genetic_evidence": "…",
       "coverage_confidence": "…",
-      "pattern_convergence": "…"
+      "pattern_convergence": "…",
+      "module_support": "Genetic support from the underlying biological modules.",
+      "pattern_support": "Additional retained support from cross-module patterns, comparable to module_support on the same 0-100 scale."
     },
     "evidence_boundaries": {
       "genetics_is_not_diagnosis": true,
@@ -258,7 +265,10 @@ and next-question prompts. It is not a listing tool.
     },
     "presentation_order": [
       "bottom_line",
-      "why_ranked",
+      "support_architecture",
+      "module_contributions",
+      "pattern_contributions",
+      "key_scoring_genes_and_variants",
       "interpretation_boundary",
       "minimal_confirmation",
       "strengthening_and_weakening_evidence",
@@ -282,11 +292,17 @@ and next-question prompts. It is not a listing tool.
 }
 ```
 
-- `interpretation_contract` is server-owned and versioned (`"2.0"`). It is
+- `interpretation_contract` is server-owned and versioned (`"2.1"`). It is
   global product behavior, never per-hypothesis catalog prose and never
   LLM-generated. `response_rules` is 1-6 unique strings; `limitations` is 0-4
   unique strings; the boundary flags are literal `true`; `score_semantics` has
-  exactly the five published keys; `presentation_order` is the fixed order above.
+  exactly the seven published keys; `presentation_order` is the fixed order
+  above.
+- `evidence_explanation_rules` is the module-first contract: `organizing_level`
+  is `modules_then_patterns_then_variants`, `rules` carries the nine presentation
+  rules, and `module_first_instruction` is the stable server instruction the
+  model must apply to every hypothesis explanation. It is global behavior, not
+  per-hypothesis content, and is never echoed into `content`.
 - `coverage.classification` is optional.
 - `access_summary.hypothesis_scope` is `top_3` for Free and `all` for Full.
   `unlocked` is the count of accessible hypotheses; `locked` is the count the
@@ -395,7 +411,9 @@ set.
 ### `explain_health_hypothesis`
 
 Input: `{ hypothesis_id }`. The explanation-ready projection, with no nested
-variant records, no full test records, and no bespoke prose.
+variant records, no full test records, and no bespoke prose. It is organized
+module-first: the server states whether support is broad or concentrated, then
+the contributing modules, then retained patterns, then the key scoring drivers.
 
 ```json
 {
@@ -427,6 +445,64 @@ variant records, no full test records, and no bespoke prose.
       }
     ]
   },
+  "score_breakdown": {
+    "priority_score": 90.0,
+    "genetic_support": 80.0,
+    "module_support": 40.0,
+    "pattern_support": 32.0,
+    "converging_pattern_adjustment": 5.0
+  },
+  "support_architecture": {
+    "classification": "locus_concentrated",
+    "contributing_module_count": 1,
+    "module_scoring_gene_count": 2,
+    "module_scoring_variant_count": 2,
+    "pattern_participating_gene_count": 2,
+    "pattern_participating_variant_count": 2,
+    "dominant_driver": {
+      "type": "gene",
+      "id": "CYP19A1",
+      "name": "CYP19A1",
+      "contribution_fraction": 0.71
+    },
+    "summary": "Support is concentrated: CYP19A1 supplies 71% of the retained genetic support."
+  },
+  "module_contributions": [
+    {
+      "module_id": "steroid",
+      "module_name": "Sex Hormone Transport & Availability",
+      "scoring_status": "active",
+      "role": "primary",
+      "retained_support": 40.0,
+      "module_support_fraction": 1.0,
+      "module_scoring_gene_count": 2,
+      "module_scoring_variant_count": 2,
+      "top_scoring_genes": ["CYP19A1", "SHBG"],
+      "summary": "Sex Hormone Transport & Availability contributed 40 support points from 2 scoring variants across 2 genes.",
+      "caveats": []
+    }
+  ],
+  "pattern_contributions": [
+    {
+      "pattern_id": "STORM_A",
+      "pattern_name": "…",
+      "state": "matched",
+      "retained_support": 32.0,
+      "module_ids": ["steroid"],
+      "participating_gene_count": 2,
+      "participating_variant_count": 2,
+      "summary": "Retained matched pattern with 2 contributing variants."
+    }
+  ],
+  "converging_pattern_contributions": [
+    {
+      "pattern_id": "CONV_1",
+      "state": "observed",
+      "structural_fit": 0.9,
+      "pattern_confidence": 0.8,
+      "contribution": 5.0
+    }
+  ],
   "clinical_context": {
     "common_cofactors": ["…"],
     "common_confusers": ["…"],
@@ -451,6 +527,16 @@ variant records, no full test records, and no bespoke prose.
   `presentation` copy, then the catalog, and are omitted when no source exists.
 - `explanation.top_contributing_patterns` lists at most three matched or
   provisional patterns, strongest impact first.
+- `score_breakdown` carries the retained component scores on the comparable
+  0-100 genetic-support scale. It is read from the engine's retained
+  `scoring_trace` when present, and falls back to the stored totals for legacy
+  analyses.
+- `support_architecture`, `module_contributions` (max 3 by retained support),
+  and `pattern_contributions` (max 3 by retained support) come from the retained
+  `scoring_trace`. They are never reconstructed by the adapter. See
+  [Module-aware explanations](#module-aware-explanations).
+- `converging_pattern_adjustment` is a separate priority-only family and is
+  never summed into `module_support` or `pattern_support`.
 - `clinical_context` is bounded (5 / 5 / 4). `subtypes[].distinction` comes from
   the catalog `signature` (falling back to lab/clinical corroboration).
 - `confirmation.primary_checks` lists at most two tests in priority order.
@@ -464,8 +550,9 @@ variant records, no full test records, and no bespoke prose.
 
 ### `get_supporting_evidence`
 
-Input: `{ hypothesis_id, kind? ("patterns" | "variants" | "sources" | "tests"),
-pattern_id?, limit? (1–20), cursor? }`. Defaults to `patterns`.
+Input: `{ hypothesis_id, kind? ("patterns" | "variants" | "modules" |
+"sources" | "tests"), pattern_id?, include_context?, limit? (1–20), cursor? }`.
+Defaults to `patterns`.
 
 Output: `{ kind, items, next_cursor?, source_state? }`.
 
@@ -492,7 +579,8 @@ Output: `{ kind, items, next_cursor?, source_state? }`.
   returned.
 
 - `variants` → deduped `VariantEvidence`, one row per rsID with all pattern
-  memberships nested:
+  memberships nested. A variant's module-scoring role and its pattern
+  participation are reported separately (the dual-role model):
 
   ```json
   {
@@ -501,15 +589,61 @@ Output: `{ kind, items, next_cursor?, source_state? }`.
     "genotype": "AG",
     "call_status": "called",
     "contribution_status": "contributes",
-    "pattern_memberships": [{ "pattern_id": "P1", "role": "core" }]
+    "module_role": { "status": "contributes", "retained_contribution": 12.5 },
+    "pattern_memberships": [
+      {
+        "pattern_id": "P1",
+        "role": "core",
+        "pattern_name": "…",
+        "pattern_state": "matched",
+        "pattern_contributes": true
+      }
+    ]
   }
   ```
 
   `call_status` is `called | not_called | not_scored`;
   `contribution_status` is `contributes | context_only | excluded`; membership
-  `role` is `core | supporting | context`. A marker in several patterns appears
+  `role` is `core | supporting | context`. `module_role.status` is
+  `contributes | no_score_contribution | not_scored | not_assessed`, so a
+  zero-weight module variant can still be a retained-pattern participant
+  without either role being flattened. A marker in several patterns appears
   once, preferring its called genotype/status. Fields the stored data cannot
   support are omitted rather than invented.
+
+- `modules` → the expanded module scoring trace (the concise module breakdown is
+  already in `explain_health_hypothesis`):
+
+  ```json
+  {
+    "module_id": "histamine",
+    "module_name": "Histamine",
+    "scoring_status": "active",
+    "hypothesis_role": "primary",
+    "raw_module_score": 55.0,
+    "hypothesis_weight": 1.0,
+    "retained_support": 40.0,
+    "module_support_fraction": 1.0,
+    "module_scoring_gene_count": 1,
+    "module_scoring_variant_count": 1,
+    "summary": "Histamine contributed 40 support points from 1 scoring variant across 1 gene.",
+    "caveats": [],
+    "scoring_drivers": [
+      {
+        "rsid": "rs11558538",
+        "gene": "HNMT",
+        "module_contribution_status": "contributes",
+        "retained_contribution": 40.0,
+        "pattern_memberships": [{ "pattern_id": "STORM_A", "pattern_name": "…", "role": "core" }]
+      }
+    ]
+  }
+  ```
+
+  Scoring drivers are returned by default. Contextual, non-contributing markers
+  are returned only with `include_context: true`, under `contextual_markers`;
+  they are never presented as module score drivers. No genotypes or full variant
+  effect detail are nested here — those stay behind `kind: "variants"`.
 
 - `tests` → `TestEvidence` (the only place full assay guidance is returned):
 
@@ -556,7 +690,9 @@ Output:
 
 - Markers are aggregated by rsID: the former `(rsid, module_id, pattern_id)`
   dedupe is replaced by one row per rsID carrying a single nested
-  `pattern_memberships` list.
+  `pattern_memberships` list. When a hypothesis scopes the call and a retained
+  trace exists, each row also carries `module_role`, mirroring
+  `kind: "variants"`.
 - `modules` summarises module support and is returned only when
   `include_modules` is true or the request is module-scoped. Each row carries
   `score_state` (`scored | not_scored | retired`) and `score`. When a hypothesis
@@ -770,6 +906,208 @@ Engine vocabularies are mapped to the contract's published vocabulary:
 `genetic_confidence.level` and `assessment_state` pass through as the engine's
 authoritative enums. No scores or thresholds are computed by the MCP layer.
 
+## Module-aware explanations
+
+Hypothesis explanations are pathway-level, not single-SNP. The engine emits a
+retained `scoring_trace` per hypothesis; the MCP layer only projects it and
+never estimates contributions from raw catalog weights.
+
+### Module-first rule
+
+`get_analysis_context` returns `evidence_explanation_rules`
+(`organizing_level: "modules_then_patterns_then_variants"`). ChatGPT must:
+
+1. Start with the plain-English meaning and whether support is broad or
+   concentrated.
+2. Name the contributing biological modules and their retained support.
+3. Name the retained cross-module patterns.
+4. Only then mention the individual genes and variants that actually scored, and
+   state the route by which each contributed.
+5. Disclose a dominant single locus prominently rather than describing it as
+   broad pathway convergence.
+
+### Score semantics
+
+`module_support` and `pattern_support` share the same 0-100 genetic-support
+scale, so they are directly comparable. `pattern_support` is the engine's
+`storm_lift`. The converging-pattern family
+(`converging_pattern_adjustment`) is priority-only and must **never** be summed
+into either value.
+
+### `SupportArchitecture`
+
+```ts
+type SupportArchitectureClassification =
+  | "single_locus"
+  | "locus_concentrated"
+  | "multi_gene_single_module"
+  | "multi_module"
+  | "pattern_led"
+  | "unknown";
+
+interface SupportArchitecture {
+  classification: SupportArchitectureClassification;
+  contributing_module_count?: number;
+  module_scoring_gene_count?: number;
+  module_scoring_variant_count?: number;
+  pattern_participating_gene_count?: number;
+  pattern_participating_variant_count?: number;
+  dominant_driver?: {
+    type: "module" | "pattern" | "gene" | "variant" | null;
+    id: string | null;
+    name: string | null;
+    contribution_fraction?: number;
+  };
+  summary: string;
+}
+```
+
+The classification is deterministic. A gene or variant at or above the
+concentration threshold (default 60%) of the final retained support makes the
+result `locus_concentrated` (or `single_locus` when it is the only one); a
+pattern that dominates makes it `pattern_led`; otherwise the module and gene
+counts choose `multi_gene_single_module` or `multi_module`.
+
+### Contribution schemas
+
+```ts
+interface ModuleContribution {
+  module_id: string | null;
+  module_name: string | null;
+  scoring_status: "active" | "partially_active" | "context_only" | "retired" | null;
+  role: "primary" | "supporting" | "context" | null;
+  retained_support: number | null;
+  module_support_fraction?: number | null;
+  module_scoring_gene_count: number;
+  module_scoring_variant_count: number;
+  top_scoring_genes: string[];
+  summary: string | null;
+  caveats: string[];
+}
+
+interface PatternContribution {
+  pattern_id: string | null;
+  pattern_name: string | null;
+  state: "matched" | "provisional" | null;
+  retained_support: number | null;
+  module_ids: string[];
+  participating_gene_count: number;
+  participating_variant_count: number;
+  summary: string | null;
+}
+
+interface ScoreBreakdown {
+  priority_score: number | null;
+  genetic_support: number | null;
+  module_support: number | null;
+  pattern_support: number | null;
+  converging_pattern_adjustment: number | null;
+}
+
+interface ConvergingPatternContribution {
+  pattern_id: string | null;
+  state: string | null;
+  structural_fit: number | null;
+  pattern_confidence: number | null;
+  contribution: number | null;
+}
+```
+
+A module's `scoring_status` is derived from its catalog, never a display name.
+`active` means every positive-weight marker scores; `partially_active` means
+part of the catalog is deliberately excluded; `context_only` and `retired`
+cannot contribute module support. A contradictory catalog (`retired` /
+`context_only` with a nonzero weight, or a declared status disagreeing with the
+derived one) fails analysis validation rather than silently contributing.
+
+### Dual-role variants
+
+Module scoring and pattern participation are separate layers for the same
+variant. `kind: "variants"` reports both: `module_role`
+(`contributes | no_score_contribution | not_scored | not_assessed`) and
+`pattern_memberships[]` (with `pattern_name`, `pattern_state`,
+`pattern_contributes`). A zero-weight or context-only variant is never a module
+scoring driver, but it may still be a retained-pattern participant.
+
+### Examples
+
+Locus-concentrated (one gene dominates a single module):
+
+```json
+{
+  "classification": "locus_concentrated",
+  "contributing_module_count": 1,
+  "module_scoring_gene_count": 2,
+  "dominant_driver": { "type": "gene", "id": "CYP19A1", "contribution_fraction": 0.71 },
+  "summary": "Support is concentrated: CYP19A1 supplies 71% of the retained genetic support."
+}
+```
+
+Multi-module (broad support spread across pathway modules):
+
+```json
+{
+  "classification": "multi_module",
+  "contributing_module_count": 3,
+  "module_scoring_gene_count": 4,
+  "dominant_driver": { "type": "gene", "id": "MTHFR", "contribution_fraction": 0.28 },
+  "summary": "Support is distributed across 3 contributing modules and 4 scoring genes."
+}
+```
+
+### Legacy analyses
+
+An analysis generated before the retained trace existed returns the explicit
+fallback rather than a reconstructed breakdown:
+
+```json
+{
+  "support_architecture": {
+    "classification": "unknown",
+    "summary": "This analysis predates module-contribution tracing. Regenerate it to see the module breakdown."
+  },
+  "module_contributions": [],
+  "pattern_contributions": []
+}
+```
+
+`score_breakdown` still carries the stored component totals. Nothing in the
+adapter fabricates a trace.
+
+### Model behavior evaluations
+
+Run these against both a single-locus and a truly multi-module fixture so the
+assistant does not overcorrect by calling every result broad:
+
+| Prompt | Required answer behavior |
+|---|---|
+| "Explain this finding." | Start with meaning and support architecture, then modules and patterns; do not begin with an SNP. |
+| "Which modules caused this to rank?" | Name contributing modules and retained support; distinguish context modules. |
+| "Is this mostly one gene?" | Use architecture counts and dominant-driver data. |
+| "How much does CYP19A1 contribute?" | Separate module points from pattern participation. |
+| "Which SNP is responsible?" | Reject single-SNP framing unless classification is `single_locus`; explain the evidence structure. |
+
+Content assertions: a locus-concentrated result must contain phrases
+mechanically equivalent to "support is concentrated" and the dominant gene or
+locus name; a multi-module result must name at least two contributing modules
+and must not claim one SNP explains the result unless the dominant-driver data
+supports it.
+
+### Catalog regression note
+
+The plan's Steroid fixture described a retired-or-active contradiction that does
+not match the shipped `modules_v2/steroid.json`. That fixture was treated as
+stale; the generic `scoring_status` validation above is the enforcement
+mechanism, and the Steroid catalog was intentionally not rewritten.
+
+### OpenAI tool guidance
+
+Tools should map to distinct user goals and return concise, relevant structured
+outputs:
+
+- [Define tools](https://developers.openai.com/plugins/plan/tools)
+- [Plugin reference](https://developers.openai.com/plugins/reference)
+
 ## Interpretation guardrails
 
 `interpretation_contract` (returned at the top of `get_analysis_context`)
@@ -789,22 +1127,33 @@ interpretation and scope that travel with the current result.
 
 The contract is covered by:
 
+- `report-generator/test/test_scoring_v3_trace.py` — retained module/pattern
+  reconciliation, context-only variants excluded from module drivers while still
+  allowed as retained-pattern participants, duplicate pattern memberships not
+  inflating counts, support-architecture classification boundaries, missing
+  fraction handling, and contradictory `scoring_status` rejection.
 - `report-generator/mcp/tests/test_mcp_handlers.py` — status v2 shape (including
-  mandatory `regenerate: false`), the context interpretation-contract shape,
-  access-summary counts and Free/Full upgrade behavior, locked-hypothesis
-  non-leakage, preview-vs-summary separation, contract validation (unknown
-  score semantics, non-literal boundaries, wrong presentation order, duplicate
-  rules), `kind: "tests"`, genetic-context rsID dedupe with
-  `pattern_memberships`, and the entitlement `hypothesis_markers` rename.
+  mandatory `regenerate: false`), the context interpretation-contract shape
+  (version `2.1` incl. `evidence_explanation_rules`), access-summary counts and
+  Free/Full upgrade behavior, locked-hypothesis non-leakage, preview-vs-summary
+  separation, contract validation (unknown score semantics, non-literal
+  boundaries, wrong presentation order, duplicate rules), `kind: "tests"`,
+  `kind: "modules"` with and without `include_context`, dual module/pattern
+  roles on `kind: "variants"`, the legacy `unknown` fallback, genetic-context
+  rsID dedupe with `pattern_memberships`, and the entitlement
+  `hypothesis_markers` rename.
 - `mutant-mcp/tests/tools.test.ts`, `schemas.test.ts` — nine tools, version,
-  input schemas (including `show_dna_import.mode`).
+  input schemas (including `show_dna_import.mode`, the `modules` evidence kind,
+  and `include_context`).
 - `mutant-mcp/tests/dna-import.test.ts` — status pass-through (no Lambda
   routing shim), prompt injection, `show_dna_import` mode.
 - `mutant-mcp/tests/dna-import-ui.test.tsx` — prompt chips and the optional
   refresh banner.
+- `mutant-mcp/tests/mcp-server.test.ts` — `modules`/`include_context`
+  pass-through and that `structuredContent` is never duplicated into `content`.
 - `mutant-mcp/tests/contract-v2.test.ts` — a callable-tool smoke test asserting
   every advertised tool is callable, that `content` is a summary rather than a
-  JSON dump, that the context content is rendered from the interpretation
-  contract without echoing it, that context prompts follow the access summary,
-  that suggestions are capped at five natural-language prompts, and that `_meta`
-  stays widget-only.
+  JSON dump, the module-first contract and content order, that the context
+  content is rendered from the interpretation contract without echoing it, that
+  context prompts follow the access summary, that suggestions are capped at five
+  natural-language prompts, and that `_meta` stays widget-only.

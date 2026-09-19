@@ -2,10 +2,30 @@ import { describe, expect, it } from "vitest";
 import {
   createReportInputSchema,
   getSnpCatalogInputSchema,
+  getSupportingEvidenceInputSchema,
   showDnaImportInputSchema,
   toolResponseOutputSchema,
 } from "../src/schemas/index.js";
 import { makeErrorResponse, makeSuccessResponse } from "./helpers.js";
+
+const evidenceKindSchema = getSupportingEvidenceInputSchema.kind;
+const includeContextSchema = getSupportingEvidenceInputSchema.include_context;
+
+describe("get_supporting_evidence input schema", () => {
+  it("accepts every contracted evidence kind including modules", () => {
+    for (const kind of ["patterns", "variants", "modules", "sources", "tests"]) {
+      expect(evidenceKindSchema.safeParse(kind).success, kind).toBe(true);
+    }
+    expect(evidenceKindSchema.safeParse("genes").success).toBe(false);
+  });
+
+  it("accepts an optional include_context boolean only", () => {
+    expect(includeContextSchema.safeParse(true).success).toBe(true);
+    expect(includeContextSchema.safeParse(false).success).toBe(true);
+    expect(includeContextSchema.safeParse(undefined).success).toBe(true);
+    expect(includeContextSchema.safeParse("yes").success).toBe(false);
+  });
+});
 
 describe("toolResponseOutputSchema", () => {
   it("accepts a success envelope", () => {

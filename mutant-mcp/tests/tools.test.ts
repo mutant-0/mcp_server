@@ -40,6 +40,18 @@ describe("tool definitions", () => {
     }
   });
 
+  it("documents the module-first explanation and the modules evidence kind", () => {
+    const details = TOOL_DEFINITIONS.find((tool) => tool.name === "explain_health_hypothesis");
+    expect(details?.description).toContain("broad or concentrated");
+    expect(details?.description).toContain("modules and retained patterns");
+    expect(details?.description).toContain("Explain modules and patterns before individual genes");
+
+    const evidence = TOOL_DEFINITIONS.find((tool) => tool.name === "get_supporting_evidence");
+    expect(evidence?.description).toContain('"modules"');
+    expect(evidence?.description).toContain("include_context");
+    expect(inputKeys(evidence!)).toContain("include_context");
+  });
+
   it("keeps every tool except create_report read-only and idempotent", () => {
     for (const tool of TOOL_DEFINITIONS) {
       if (tool.name === "create_report") continue;

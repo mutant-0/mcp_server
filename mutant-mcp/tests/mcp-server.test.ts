@@ -132,4 +132,28 @@ describe("MCP server integration", () => {
     expect(SERVER_NAME).toBe("mutant-mcp");
     expect(client).toBeDefined();
   });
+
+  it("passes the modules evidence kind and include_context to the backend", async () => {
+    const { client, backendClient } = await connectServer(() => makeSuccessResponse());
+    await client.callTool({
+      name: "get_supporting_evidence",
+      arguments: { hypothesis_id: "RC_A", kind: "modules", include_context: true },
+    });
+    expect(backendClient.calls[0]?.arguments).toEqual({
+      hypothesis_id: "RC_A",
+      kind: "modules",
+      include_context: true,
+    });
+  });
+
+  it("never duplicates structuredContent into the model-facing content", async () => {
+    const { client } = await connectServer(() => makeSuccessResponse());
+    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    const structured = JSON.stringify(result.structuredContent);
+    const content = ((result.content as Array<{ text?: string }> | undefined) ?? [])
+      .map((block) => block.text ?? "")
+      .join("\n");
+    expect(content).not.toContain(structured);
+    expect(content).not.toMatch(/^\s*[{[]/);
+  });
 });

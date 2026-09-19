@@ -44,19 +44,31 @@ const MINIMAL_ARGS: Record<ToolName, Record<string, unknown>> = {
 function contextData(): Record<string, unknown> {
   return {
     interpretation_contract: {
-      version: "2.0",
+      version: "2.1",
       purpose:
         "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
       response_rules: [
         "Lead with the plain-English meaning.",
         "Distinguish genetic susceptibility from a current condition.",
       ],
+      evidence_explanation_rules: {
+        organizing_level: "modules_then_patterns_then_variants",
+        rules: [
+          "Explain the hypothesis as pathway-level support, not a single SNP.",
+          "Start from the contributing biological modules.",
+        ],
+        module_first_instruction:
+          "Explain a finding by its contributing modules first, then retained cross-module patterns, then the individual genes and variants.",
+      },
       score_semantics: {
         priority_score: "The ordering score; not disease probability.",
         genetic_support: "Strength of genetic support within the analyzed evidence.",
         genetic_evidence: "The weak/moderate/strong evidence category.",
         coverage_confidence: "How completely the relevant markers were assessed.",
         pattern_convergence: "How strongly independent patterns agree.",
+        module_support: "Genetic support from the underlying biological modules.",
+        pattern_support:
+          "Additional retained support from cross-module patterns; comparable to module_support on the same 0-100 scale.",
       },
       evidence_boundaries: {
         genetics_is_not_diagnosis: true,
@@ -72,7 +84,10 @@ function contextData(): Record<string, unknown> {
       },
       presentation_order: [
         "bottom_line",
-        "why_ranked",
+        "support_architecture",
+        "module_contributions",
+        "pattern_contributions",
+        "key_scoring_genes_and_variants",
         "interpretation_boundary",
         "minimal_confirmation",
         "strengthening_and_weakening_evidence",
@@ -142,6 +157,58 @@ function dataFor(operation: ToolName): Record<string, unknown> {
           interpretation_boundary: "This is not a diagnosis.",
           top_contributing_patterns: [{ id: "PAT_A", name: "Pattern A" }],
         },
+        score_breakdown: {
+          priority_score: 90,
+          genetic_support: 72,
+          module_support: 40,
+          pattern_support: 32,
+          converging_pattern_adjustment: 5,
+        },
+        support_architecture: {
+          classification: "single_locus",
+          contributing_module_count: 1,
+          module_scoring_gene_count: 1,
+          module_scoring_variant_count: 1,
+          pattern_participating_gene_count: 2,
+          pattern_participating_variant_count: 2,
+          summary: "Support is concentrated in a single locus.",
+        },
+        module_contributions: [
+          {
+            module_id: "histamine",
+            module_name: "Histamine",
+            scoring_status: "active",
+            role: "primary",
+            retained_support: 40,
+            module_support_fraction: 1,
+            module_scoring_gene_count: 1,
+            module_scoring_variant_count: 1,
+            top_scoring_genes: ["HNMT"],
+            summary: "Histamine contributed 40 support points from 1 scoring variant across 1 gene.",
+            caveats: [],
+          },
+        ],
+        pattern_contributions: [
+          {
+            pattern_id: "PAT_A",
+            pattern_name: "Pattern A",
+            state: "matched",
+            retained_support: 32,
+            module_ids: ["histamine"],
+            participating_gene_count: 2,
+            participating_variant_count: 2,
+            summary: "Retained matched pattern with 2 contributing variants.",
+          },
+        ],
+        converging_pattern_contributions: [
+          {
+            pattern_id: "CONV_1",
+            state: "observed",
+            structural_fit: 0.9,
+            pattern_confidence: 0.8,
+            contribution: 5,
+          },
+        ],
         confirmation: {
           primary_checks: [{ id: "test-1", short_name: "Ferritin", role: "First-line check" }],
           stronger_support: "A high ferritin would strengthen this.",
@@ -343,5 +410,104 @@ describe("contract v2.0 acceptance", () => {
 
     const context = await client.callTool({ name: "get_analysis_context", arguments: {} });
     expect((context._meta as Record<string, unknown> | undefined)?.mutant).toBeUndefined();
+  });
+
+  it("carries the module-first explanation contract without dumping it into text", async () => {
+    const { client } = await connect();
+    const result = await client.callTool({ name: "get_analysis_context", arguments: {} });
+    const contract = (envelopeOf(result).data as { interpretation_contract: Record<string, unknown> })
+      .interpretation_contract;
+
+    expect(contract.version).toBe("2.1");
+    const rules = contract.evidence_explanation_rules as {
+      organizing_level: string;
+      rules: string[];
+      module_first_instruction: string;
+    };
+    expect(rules.organizing_level).toBe("modules_then_patterns_then_variants");
+    expect(rules.module_first_instruction).toContain("modules first");
+
+    const semantics = contract.score_semantics as Record<string, string>;
+    expect(semantics.module_support).toBeTruthy();
+    expect(semantics.pattern_support).toBeTruthy();
+
+    const order = contract.presentation_order as string[];
+    expect(order.slice(0, 4)).toEqual([
+      "bottom_line",
+      "support_architecture",
+      "module_contributions",
+      "pattern_contributions",
+    ]);
+
+    // The structured rules stay structured; the model-facing text is prose.
+    const text = textOf(result);
+    expect(text).not.toContain("modules_then_patterns_then_variants");
+    expect(text).not.toContain("evidence_explanation_rules");
+  });
+
+  it("explains a finding module-first in deterministic content order", async () => {
+    const { client } = await connect();
+    const result = await client.callTool({
+      name: "explain_health_hypothesis",
+      arguments: { hypothesis_id: "HYP_A" },
+    });
+    const text = textOf(result);
+
+    const architecture = text.indexOf("Evidence architecture:");
+    const modules = text.indexOf("Module contributions:");
+    const patterns = text.indexOf("Retained patterns:");
+    const drivers = text.indexOf("key scoring drivers");
+    expect(architecture).toBeGreaterThan(-1);
+    expect(modules).toBeGreaterThan(architecture);
+    expect(patterns).toBeGreaterThan(modules);
+    expect(drivers).toBeGreaterThan(patterns);
+
+    // Module and pattern summary values are surfaced from the retained trace.
+    expect(text).toContain("Histamine contributed 40 support points");
+    expect(text).toContain("Pattern A");
+    expect(text).toContain("HNMT");
+    // Converging patterns are reported as a separate priority-only family.
+    expect(text).toContain("Converging patterns adjusted priority only");
+    // Dual module/pattern roles are stated explicitly rather than blurred.
+    expect(text).toContain("Pattern participation is separate from module scoring");
+    // The trace is never dumped as JSON into the model-facing text.
+    expect(text).not.toMatch(/^\s*[{[]/);
+  });
+
+  it("renders the modules evidence kind without dumping the trace", async () => {
+    const { client } = await connect((operation) => {
+      if (operation !== "get_supporting_evidence") {
+        return makeSuccessResponse(dataFor(operation));
+      }
+      return makeSuccessResponse({
+        kind: "modules",
+        items: [
+          {
+            module_id: "histamine",
+            module_name: "Histamine",
+            scoring_status: "active",
+            retained_support: 40,
+            scoring_drivers: [
+              {
+                rsid: "rs100",
+                gene: "HNMT",
+                module_contribution_status: "contributes",
+                retained_contribution: 40,
+              },
+            ],
+          },
+        ],
+      });
+    });
+    const result = await client.callTool({
+      name: "get_supporting_evidence",
+      arguments: { hypothesis_id: "HYP_A", kind: "modules", include_context: true },
+    });
+    const text = textOf(result);
+    expect(text).toContain("modules");
+    expect(text).toContain("Histamine");
+    expect(text).toContain("40 retained points");
+    expect(text).not.toMatch(/^\s*[{[]/);
+    expect(text).not.toContain("scoring_drivers");
   });
 });

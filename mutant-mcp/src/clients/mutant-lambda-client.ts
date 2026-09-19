@@ -338,19 +338,32 @@ function mockContext(): Record<string, unknown> {
   }));
   return {
     interpretation_contract: {
-      version: "2.0",
+      version: "2.1",
       purpose:
         "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
       response_rules: [
         "Lead with the plain-English meaning.",
         "Distinguish genetic susceptibility from a current condition.",
       ],
+      evidence_explanation_rules: {
+        organizing_level: "modules_then_patterns_then_variants",
+        rules: [
+          "Explain contributing biological modules before individual genes or variants.",
+          "State whether support is broad, concentrated, single-module, multi-module, or pattern-led.",
+        ],
+        module_first_instruction:
+          "When explaining a hypothesis, do not begin with a gene or SNP. First state whether support is multi-module, single-module, pattern-led, or concentrated in one locus.",
+      },
       score_semantics: {
         priority_score: "The ordering score; not disease probability.",
         genetic_support: "Strength of genetic support within the analyzed evidence.",
         genetic_evidence: "The weak/moderate/strong evidence category.",
         coverage_confidence: "How completely the relevant markers were assessed.",
         pattern_convergence: "How strongly independent patterns agree.",
+        module_support:
+          "Support contributed by score-eligible variants aggregated through biological modules and hypothesis-specific module weights.",
+        pattern_support:
+          "Additional retained support from a defined combination of modules or variants. Pattern participation does not imply module-score contribution.",
       },
       evidence_boundaries: {
         genetics_is_not_diagnosis: true,
@@ -366,7 +379,10 @@ function mockContext(): Record<string, unknown> {
       },
       presentation_order: [
         "bottom_line",
-        "why_ranked",
+        "support_architecture",
+        "module_contributions",
+        "pattern_contributions",
+        "key_scoring_genes_and_variants",
         "interpretation_boundary",
         "minimal_confirmation",
         "strengthening_and_weakening_evidence",
@@ -556,6 +572,56 @@ export class MockMutantBackendClient implements MutantBackendClient {
               "It ranked #1 because it has moderate genetic support, high coverage and moderate convergence.",
             top_contributing_patterns: [],
           },
+          score_breakdown: {
+            priority_score: 72,
+            genetic_support: 74,
+            module_support: 62,
+            pattern_support: 12,
+            converging_pattern_adjustment: 0,
+          },
+          support_architecture: {
+            classification: "multi_module",
+            contributing_module_count: 2,
+            module_scoring_gene_count: 2,
+            module_scoring_variant_count: 2,
+            pattern_participating_gene_count: 2,
+            pattern_participating_variant_count: 2,
+            dominant_driver: {
+              type: "module",
+              id: "lipid",
+              name: "Lipid metabolism",
+              contribution_fraction: 0.5,
+            },
+            summary:
+              "Support is distributed across 2 contributing modules and 2 scoring genes.",
+          },
+          module_contributions: [
+            {
+              module_id: "lipid",
+              module_name: "Lipid metabolism",
+              scoring_status: "active",
+              role: "primary",
+              retained_support: 37,
+              module_support_fraction: 0.5968,
+              module_scoring_gene_count: 1,
+              module_scoring_variant_count: 1,
+              top_scoring_genes: ["APOE"],
+              summary: "Lipid metabolism contributed 37 support points.",
+              caveats: [],
+            },
+          ],
+          pattern_contributions: [
+            {
+              pattern_id: "PAT_MOCK",
+              pattern_name: "Lipid handling convergence",
+              state: "matched",
+              retained_support: 12,
+              module_ids: ["lipid"],
+              participating_gene_count: 1,
+              participating_variant_count: 1,
+              summary: "Retained matched pattern with 1 contributing variant.",
+            },
+          ],
           clinical_context: { common_cofactors: [], common_confusers: [], subtypes: [] },
           confirmation: { primary_checks: [] },
           guardrails: [],

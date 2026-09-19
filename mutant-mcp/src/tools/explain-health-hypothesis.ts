@@ -11,11 +11,12 @@ export const explainHealthHypothesisTool: MutantToolDefinition = {
     "Explain one ranked Mutant finding. Use when the user asks what a finding means, why it " +
     "ranked, how strong it is, what supports it, what would strengthen or weaken it, or asks " +
     'questions such as "What is the B12 one?" or "Explain my #1 finding." Returns an ' +
-    "explanation-ready summary: the plain-English bottom line, why it ranked, the boundary " +
-    "between genetic support and an established condition, the strongest contributing patterns, " +
-    "at most two short primary confirmation checks, and what would strengthen or weaken the " +
-    "interpretation. Use get_supporting_evidence only when the user asks for detailed patterns, " +
-    "variants, sources, or tests.",
+    "explanation-ready summary: the plain-English bottom line, whether the genetic support is " +
+    "broad or concentrated, which biological modules and retained patterns contributed, why it " +
+    "ranked, the boundary between genetic support and an established condition, at most two short " +
+    "primary confirmation checks, and what would strengthen or weaken the interpretation. Explain " +
+    "modules and patterns before individual genes or variants. Use get_supporting_evidence only " +
+    "when the user asks for detailed modules, patterns, variants, sources, or tests.",
   scope: "analysis.read",
   inputSchema: explainHealthHypothesisInputSchema,
   outputSchema: toolResponseOutputSchema,

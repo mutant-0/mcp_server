@@ -163,28 +163,28 @@ function detailsPrompts(data: JsonObject): PromptSuggestion[] {
       intent: "explain",
     },
     {
+      id: "support-architecture",
+      label: "Broad or concentrated?",
+      prompt: `Is the genetic support for my ${ref} finding broad or concentrated?`,
+      intent: "explain",
+    },
+    {
+      id: "module-contributions",
+      label: "Which modules?",
+      prompt: `Which biological modules contributed to my ${ref} finding, and which were contextual only?`,
+      intent: "evidence",
+    },
+    {
       id: "supporting-evidence",
       label: "Supporting evidence",
       prompt: `Which variants and patterns support my ${ref} finding?`,
       intent: "evidence",
     },
     {
-      id: "confirmation-plan",
-      label: "How to confirm",
-      prompt: `What would help confirm or rule out my ${ref} finding?`,
-      intent: "confirmation",
-    },
-    {
       id: "strengthen-weaken",
       label: "What changes it?",
       prompt: `What would strengthen or weaken my ${ref} finding?`,
       intent: "evidence",
-    },
-    {
-      id: "clinician-questions",
-      label: "Ask my clinician",
-      prompt: `What should I ask my clinician about my ${ref} finding?`,
-      intent: "clinician_questions",
     },
   ];
   return base

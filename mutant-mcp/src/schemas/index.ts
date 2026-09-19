@@ -59,7 +59,7 @@ export const explainHealthHypothesisInputSchema = {
 export const getSupportingEvidenceInputSchema = {
   hypothesis_id: hypothesisIdSchema,
   kind: z
-    .enum(["patterns", "variants", "sources", "tests"])
+    .enum(["patterns", "variants", "modules", "sources", "tests"])
     .describe("Evidence kind to return. Defaults to 'patterns'.")
     .optional(),
   pattern_id: z
@@ -67,6 +67,12 @@ export const getSupportingEvidenceInputSchema = {
     .min(1)
     .max(160)
     .describe("Optional pattern id to restrict the evidence to a single matched pattern.")
+    .optional(),
+  include_context: z
+    .boolean()
+    .describe(
+      "For kind 'modules': also return contextual markers that did not contribute module support. Defaults to false.",
+    )
     .optional(),
   limit: boundedLimitSchema(20),
   cursor: cursorSchema,
