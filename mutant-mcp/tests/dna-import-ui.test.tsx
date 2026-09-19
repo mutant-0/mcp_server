@@ -381,6 +381,18 @@ describe("DNA import component", () => {
     expect(screen.getByText(/Drag and drop your DNA file here/i)).toBeDefined();
   });
 
+  it("treats the v2 'unavailable' analysis status as no analysis yet", async () => {
+    renderWith({
+      get_analysis_status: statusResponse("not_started", {
+        analysis_status: "unavailable",
+        analysis: { status: "unavailable" },
+      }),
+    });
+
+    await screen.findByText(/DNA data is already on file/i);
+    expect(screen.getByText(/Drag and drop your DNA file here/i)).toBeDefined();
+  });
+
   it("ignores the show_dna_import result, which carries no routing state", async () => {
     const bridge = await renderApp();
 
@@ -604,9 +616,56 @@ describe("DNA import component", () => {
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
     const sent = JSON.stringify(bridge.messages[0]);
     expect(sent).toMatch(/Alpha finding/);
-    expect(sent).toMatch(/HYP_A/);
+    // Prompts are user-visible natural language, never internal ids.
+    expect(sent).not.toMatch(/HYP_A/);
     // Requesting the findings again must not refetch or re-message.
     expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
+  });
+
+  it("renders state-aware prompt chips and sends one on click", async () => {
+    const bridge = renderWith({
+      get_analysis_status: statusResponse("ready"),
+      get_analysis_context: makeSuccessResponse({
+        coverage: { analyzed_markers: 1000 },
+        interpretation: { summary: "Boundaries.", limitations: [] },
+        selection_scope: "top_3",
+        top_hypotheses: [],
+        suggested_prompts: [
+          {
+            id: "explain-first",
+            label: "Explain #1",
+            prompt: "Explain my #1 finding in plain English.",
+            intent: "explain",
+          },
+        ],
+      }),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+    await screen.findByText(/Alpha finding/i);
+
+    const chip = await screen.findByRole("button", { name: "Explain #1" });
+    fireEvent.click(chip);
+    await waitFor(() => expect(bridge.messages).toHaveLength(1));
+    expect(JSON.stringify(bridge.messages[0])).toContain(
+      "Explain my #1 finding in plain English.",
+    );
+  });
+
+  it("offers an optional refresh when regeneration is available", async () => {
+    const bridge = renderWith({
+      get_analysis_status: statusResponse("ready", {
+        regenerate: true,
+        regeneration: { required: false, current_results_usable: true },
+      }),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    expect(screen.getByText(/newer analysis platform is available/i)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /refresh analysis/i }));
+    await waitFor(() => expect(bridge.messages).toHaveLength(1));
+    expect(JSON.stringify(bridge.messages[0])).toMatch(/refresh my analysis/i);
   });
 
   it("sends exactly one host follow-up per action and never renders the prompt", async () => {

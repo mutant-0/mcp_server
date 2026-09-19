@@ -172,18 +172,30 @@ describe("show_dna_import", () => {
     expect((resultMeta.ui as { resourceUri?: string }).resourceUri).toBe(DNA_IMPORT_UI_URI);
   });
 
-  it("returns only a rendered flag and never genetic data or account state", async () => {
+  it("returns only a rendered flag, the mode, and never genetic data or account state", async () => {
     const { client, backendClient } = await connect({});
     const result = await client.callTool({ name: "show_dna_import", arguments: {} });
     const envelope = structured(result);
     expect(envelope.ok).toBe(true);
     // No routing state is echoed back: the component reads the authoritative
     // state itself, so there is nothing here for the model to narrate.
-    expect(envelope.data).toEqual({ ui_rendered: true });
+    expect(envelope.data).toEqual({ ui_rendered: true, mode: "initial" });
     // Rendering the UI must not require a backend round trip.
     expect(backendClient.calls).toHaveLength(0);
     // No genotypes anywhere in the result.
     expect(JSON.stringify(result)).not.toMatch(/rs\d{3,}/);
+  });
+
+  it("echoes the regenerate mode for an explicit refresh", async () => {
+    const { client } = await connect({});
+    const result = await client.callTool({
+      name: "show_dna_import",
+      arguments: { mode: "regenerate" },
+    });
+    const envelope = structured(result);
+    expect(envelope.data).toEqual({ ui_rendered: true, mode: "regenerate" });
+    const meta = result._meta as { mutant?: { mode?: string } };
+    expect(meta.mutant?.mode).toBe("regenerate");
   });
 });
 
@@ -415,46 +427,8 @@ describe("transport size caps", () => {
 });
 
 describe("get_analysis_status", () => {
-  it("points at show_dna_import when no analysis exists", async () => {
-    const { client } = await connect({
-      responder: () => ok({ data: { analysis: { status: "none" } }, analysis_version: null }),
-    });
-    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
-    const data = structured(result).data as Record<string, unknown>;
-    expect(data.dna_status).toBe("missing");
-    expect(data.analysis_status).toBe("not_started");
-    expect(data.next_action).toEqual({
-      tool: "show_dna_import",
-      reason: "DNA data is required before an analysis can be generated.",
-    });
-  });
-
-  it("reports a ready analysis and points at the analysis tools", async () => {
-    const { client } = await connect({
-      responder: () =>
-        ok({ data: { analysis: { status: "ready" }, entitlement: { plan: "mutant_free" } } }),
-    });
-    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
-    const data = structured(result).data as Record<string, unknown>;
-    expect(data.dna_status).toBe("available");
-    expect(data.analysis_status).toBe("ready");
-    expect(data.plan).toBe("Mutant Free");
-    expect((data.next_action as { tool?: string }).tool).toBe("get_analysis_context");
-  });
-
-  it("asks the model to check again while an analysis is processing", async () => {
-    const { client } = await connect({
-      responder: () => ok({ data: { analysis: { status: "processing" } } }),
-    });
-    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
-    const data = structured(result).data as Record<string, unknown>;
-    expect(data.dna_status).toBe("available");
-    expect(data.analysis_status).toBe("processing");
-    expect((data.next_action as { tool?: string }).tool).toBe("get_analysis_status");
-  });
-
-  it("prefers backend-provided routing fields over the derived shim", async () => {
-    const providedNextAction = {
+  it("passes the backend routing fields through unchanged", async () => {
+    const nextAction = {
       tool: "show_dna_import",
       reason: "DNA data is required before an analysis can be generated.",
     };
@@ -462,72 +436,60 @@ describe("get_analysis_status", () => {
       responder: () =>
         ok({
           data: {
-            analysis: { status: "ready" },
             dna_status: "missing",
-            analysis_status: "processing",
-            plan: "Mutant Full",
-            next_action: providedNextAction,
+            analysis_status: "unavailable",
+            next_action: nextAction,
+            regenerate: false,
           },
+          analysis_version: null,
         }),
     });
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
     const data = structured(result).data as Record<string, unknown>;
     expect(data.dna_status).toBe("missing");
-    expect(data.analysis_status).toBe("processing");
-    expect(data.plan).toBe("Mutant Full");
-    expect(data.next_action).toEqual(providedNextAction);
+    expect(data.analysis_status).toBe("unavailable");
+    expect(data.next_action).toEqual(nextAction);
+    expect(data.regenerate).toBe(false);
   });
 
-  it("treats a queued analysis as processing with DNA on file", async () => {
-    // A lifecycle word the DNA import component does not know would otherwise
-    // leave it showing "no DNA data" for an account that just imported.
-    for (const upstream of ["queued", "pending", "running", "in_progress"]) {
-      const { client } = await connect({
-        responder: () => ok({ data: { analysis: { status: upstream } } }),
-      });
-      const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
-      const data = structured(result).data as Record<string, unknown>;
-      expect(data.analysis_status, upstream).toBe("processing");
-      expect(data.dna_status, upstream).toBe("available");
-    }
+  it("adds suggested prompts for a ready analysis", async () => {
+    const { client } = await connect({
+      responder: () =>
+        ok({ data: { dna_status: "available", analysis_status: "ready", regenerate: false } }),
+    });
+    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    const data = structured(result).data as Record<string, unknown>;
+    const prompts = data.suggested_prompts as Array<{ id: string; prompt: string }>;
+    expect(prompts.length).toBeGreaterThan(0);
+    expect(prompts.some((prompt) => prompt.id === "top-findings")).toBe(true);
   });
 
-  it("carries the analysis id and creation time for the import component", async () => {
+  it("suggests a refresh only when regeneration is available", async () => {
     const { client } = await connect({
       responder: () =>
         ok({
           data: {
-            analysis_status: "processing",
-            analysis_id: "analysis_123",
-            created_at: "2026-09-16T23:00:00Z",
+            dna_status: "available",
+            analysis_status: "ready",
+            regenerate: true,
+            regeneration: { required: false, current_results_usable: true },
           },
         }),
     });
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
-    const data = structured(result).data as Record<string, unknown>;
-    // Both are needed to resume the same analysis and to compute elapsed time.
-    expect(data.analysis_id).toBe("analysis_123");
-    expect(data.created_at).toBe("2026-09-16T23:00:00Z");
+    const prompts = (structured(result).data as { suggested_prompts: Array<{ id: string }> })
+      .suggested_prompts;
+    expect(prompts.some((prompt) => prompt.id === "why-refresh")).toBe(true);
   });
 
-  it("reads the id and creation time out of a nested analysis, and reports null when absent", async () => {
-    const nested = await connect({
-      responder: () =>
-        ok({ data: { analysis: { status: "processing", id: "analysis_9", started_at: "t0" } } }),
-    });
-    const nestedData = structured(
-      await nested.client.callTool({ name: "get_analysis_status", arguments: {} }),
-    ).data as Record<string, unknown>;
-    expect(nestedData.analysis_id).toBe("analysis_9");
-    expect(nestedData.created_at).toBe("t0");
-
-    const missing = await connect({ responder: () => ok({ data: { analysis: { status: "none" } } }) });
-    const missingData = structured(
-      await missing.client.callTool({ name: "get_analysis_status", arguments: {} }),
-    ).data as Record<string, unknown>;
-    // Explicit nulls distinguish "no analysis" from "the backend did not say".
-    expect(missingData.analysis_id).toBeNull();
-    expect(missingData.created_at).toBeNull();
+  it("never rewrites or infers fields the backend omitted", async () => {
+    const { client } = await connect({ responder: () => ok({ data: {} }) });
+    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    const data = structured(result).data as Record<string, unknown>;
+    expect(data.dna_status).toBeUndefined();
+    expect(data.analysis_status).toBeUndefined();
+    expect(data.next_action).toBeUndefined();
+    expect(data.regenerate).toBeUndefined();
   });
 });
 

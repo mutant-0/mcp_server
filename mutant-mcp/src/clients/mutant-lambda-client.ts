@@ -304,21 +304,37 @@ export function resetMockAnalyses(): void {
 }
 
 /** Synthetic hypotheses so the ready-state CTA renders in dev mode. */
-function mockHypotheses(): Record<string, unknown> {
+function mockHypotheses(): Record<string, unknown>[] {
   const rows = [
     ["HYP_MOCK_A", "Lipid metabolism", "Model support for how your variants influence lipid handling."],
     ["HYP_MOCK_B", "Folate metabolism", "Patterns in your variants related to folate and homocysteine."],
     ["HYP_MOCK_C", "Caffeine clearance", "Reported variant support for how you metabolize caffeine."],
   ];
+  return rows.map(([id, title, bottomLine], index) => ({
+    id,
+    rank: index + 1,
+    title,
+    bottom_line: bottomLine,
+    support_strength: "moderate",
+    coverage: "high",
+    convergence: "moderate",
+  }));
+}
+
+/** Synthetic analysis-context data, mirroring the v2 contract shape. */
+function mockContext(): Record<string, unknown> {
   return {
-    items: rows.map(([id, title, summary], index) => ({
-      id,
-      rank: index + 1,
-      title,
-      summary,
-      assessment_state: "assessed",
-    })),
-    page: { has_more: false, next_cursor: null },
+    coverage: { analyzed_markers: 1000 },
+    interpretation: {
+      summary:
+        "Mutant scores describe model support for a health hypothesis, not a diagnosis.",
+      limitations: [
+        "This analysis covers only the markers in the Mutant panel.",
+        "Absence of a finding is not evidence of absence.",
+      ],
+    },
+    selection_scope: "top_3",
+    top_hypotheses: mockHypotheses(),
   };
 }
 
@@ -370,10 +386,14 @@ export class MockMutantBackendClient implements MutantBackendClient {
         ok: true,
         data: {
           dna_status: "missing",
-          analysis_status: "not_started",
-          analysis: { status: "none", created_at: null },
+          analysis_status: "unavailable",
           entitlement: { plan: "mutant_free", hypothesis_scope: "top_3" },
-          plan: "Mutant Free",
+          capabilities: { clinical_correlation: true, supporting_evidence: true },
+          regenerate: false,
+          next_action: {
+            tool: "show_dna_import",
+            reason: "DNA data is required before an analysis can be generated.",
+          },
         },
         error: null,
       };
@@ -391,9 +411,16 @@ export class MockMutantBackendClient implements MutantBackendClient {
         analysis_status: status,
         analysis_id: record.analysisId,
         created_at: createdAt,
-        analysis: { status, created_at: createdAt, generated_at: ready ? createdAt : null },
+        analysis: {
+          generated_at: ready ? createdAt : null,
+          scoring_engine_version: "mock",
+        },
         entitlement: { plan: "mutant_free", hypothesis_scope: "top_3" },
-        plan: "Mutant Free",
+        capabilities: { clinical_correlation: true, supporting_evidence: true },
+        regenerate: false,
+        next_action: ready
+          ? { tool: "get_analysis_context", reason: "The current analysis is ready." }
+          : { tool: "get_analysis_status", reason: "The analysis is still processing." },
       },
       error: null,
     };
@@ -437,12 +464,49 @@ export class MockMutantBackendClient implements MutantBackendClient {
       return this.analysisStatus(ctx);
     }
 
+    if (operation === "get_analysis_context") {
+      return {
+        contract_version: CONTRACT_VERSION,
+        analysis_version: "mock",
+        ok: true,
+        data: mockAnalyses.has(ctx.userId) ? mockContext() : {},
+        error: null,
+      };
+    }
+
     if (operation === "list_health_hypotheses") {
       return {
         contract_version: CONTRACT_VERSION,
         analysis_version: "mock",
         ok: true,
-        data: mockAnalyses.has(ctx.userId) ? mockHypotheses() : { items: [], page: { has_more: false } },
+        data: { items: mockAnalyses.has(ctx.userId) ? mockHypotheses() : [] },
+        error: null,
+      };
+    }
+
+    if (operation === "explain_health_hypothesis") {
+      return {
+        contract_version: CONTRACT_VERSION,
+        analysis_version: "mock",
+        ok: true,
+        data: {
+          hypothesis: {
+            id: "HYP_MOCK_A",
+            rank: 1,
+            title: "Lipid metabolism",
+            assessment_state: "assessed",
+            scores: { priority: 72, genetic_support: 74, coverage: "high", convergence: "moderate" },
+          },
+          explanation: {
+            bottom_line: "Model support for how your variants influence lipid handling.",
+            why_ranked:
+              "It ranked #1 because it has moderate genetic support, high coverage and moderate convergence.",
+            top_contributing_patterns: [],
+          },
+          clinical_context: { common_cofactors: [], common_confusers: [], subtypes: [] },
+          confirmation: { primary_checks: [] },
+          guardrails: [],
+        },
         error: null,
       };
     }

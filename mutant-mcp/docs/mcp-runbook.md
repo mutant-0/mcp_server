@@ -326,7 +326,7 @@ worker is skipped, and every parse happens on the UI thread. `tests/ui-resource.
 catches it by asserting the served document still contains the worker's own
 strings, and `npm run build:ui` logs both byte sizes.
 
-Because the internal contract is versioned (`contract_version: "1.0.0"`), the
+Because the internal contract is versioned (`contract_version: "2.0.0"`), the
 MCP Lambda rejects a mismatched backend with `DATA_INCOMPATIBLE` rather than
 serving partial data. Deploy backend first when changing the contract, then MCP.
 

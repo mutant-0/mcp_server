@@ -6,9 +6,11 @@ export const getGeneticContextTool: MutantToolDefinition = {
   name: "get_genetic_context",
   title: "Get Genetic Context",
   description:
-    "Explore marker-level genetic context: call status, module scoring status, and pattern roles. " +
-    "Full accounts can query by module, gene, or specific rsIDs across the analyzed marker set. " +
-    "Free accounts must pass a hypothesis they can access and are limited to its evidence.",
+    "Inspect unique analyzed markers by hypothesis, gene, module, or rsID, including call state, " +
+    "contribution status, and all pattern memberships (a marker appears once, with every pattern " +
+    "membership nested). Use for marker-level questions or independent genetic exploration " +
+    "permitted by the user's plan; do not use it for a plain-language hypothesis explanation. " +
+    "Module summaries are returned only with include_modules or when the request is module-scoped.",
   scope: "analysis.read",
   inputSchema: getGeneticContextInputSchema,
   outputSchema: toolResponseOutputSchema,
@@ -17,5 +19,6 @@ export const getGeneticContextTool: MutantToolDefinition = {
     respond(
       await runtime.client.invoke("get_genetic_context", args, runtime.user, runtime.requestId),
       runtime,
+      { operation: "get_genetic_context" },
     ),
 };

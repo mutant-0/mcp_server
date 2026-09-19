@@ -1,30 +1,25 @@
 import type { CallToolResult, TextContent } from "@modelcontextprotocol/sdk/types.js";
-import type { ToolErrorPayload, ToolResponse } from "../contract.js";
+import { CONTRACT_VERSION, type ToolErrorPayload, type ToolName, type ToolResponse } from "../contract.js";
+import { buildContent } from "../presentation/content.js";
 
 function textContent(text: string): TextContent {
   return { type: "text", text };
 }
 
 /**
- * Build a single text content block mirroring the structured envelope. The
- * structured envelope is authoritative; the text is a fallback for hosts that
- * do not render `structuredContent`.
+ * Build the single text content block for a result.
+ *
+ * The block is a concise deterministic summary assembled from the typed data
+ * (see `buildContent`); it is never a serialized copy of `structuredContent`.
+ * `operation` selects the summary; without it a generic summary is used.
  */
-export function textMirror(response: ToolResponse): string {
-  const header = [
-    `contract: ${response.contract_version}`,
-    `analysis_version: ${response.analysis_version ?? "null"}`,
-    `ok: ${response.ok}`,
-  ].join("\n");
-
-  if (response.ok) {
-    return `${header}\n\ndata:\n${JSON.stringify(response.data, null, 2)}`;
-  }
-  const error = response.error;
-  return `${header}\n\nerror: ${error?.code ?? "UNKNOWN"}\n${error?.message ?? "Unknown error"}`;
+export function textMirror(response: ToolResponse, operation?: ToolName): string {
+  return buildContent(operation, response);
 }
 
 export interface ToolResultOptions {
+  /** Tool that produced the response, selecting the deterministic summary. */
+  operation?: ToolName;
   /** Tool-level auth challenge for `_meta["mcp/www_authenticate"]`. */
   challenge?: Record<string, unknown>;
   /**
@@ -36,15 +31,15 @@ export interface ToolResultOptions {
 
 /**
  * Convert a backend `ToolResponse` envelope into an MCP `CallToolResult`:
- * mirrors the envelope into `structuredContent`, adds one text block, and sets
- * `isError` from `ok`.
+ * mirrors the envelope into `structuredContent`, adds one deterministic text
+ * block, and sets `isError` from `ok`.
  */
 export function toolResultFromResponse(
   response: ToolResponse,
   options: ToolResultOptions = {},
 ): CallToolResult {
   const result: CallToolResult = {
-    content: [textContent(textMirror(response))],
+    content: [textContent(buildContent(options.operation, response))],
     structuredContent: response as unknown as Record<string, unknown>,
     isError: !response.ok,
   };
@@ -62,7 +57,7 @@ export function errorToolResult(
   analysisVersion: string | null = null,
 ): CallToolResult {
   return toolResultFromResponse({
-    contract_version: "1.0.0",
+    contract_version: CONTRACT_VERSION,
     analysis_version: analysisVersion,
     ok: false,
     data: null,

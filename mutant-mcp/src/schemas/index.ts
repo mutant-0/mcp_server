@@ -15,6 +15,16 @@ const limitSchema = z
   .describe("Maximum number of items to return (1-50).")
   .optional();
 
+/** A bounded limit for tools with a narrower contract maximum. */
+const boundedLimitSchema = (max: number) =>
+  z
+    .number()
+    .int()
+    .min(1)
+    .max(max)
+    .describe(`Maximum number of items to return (1-${max}).`)
+    .optional();
+
 const cursorSchema = z
   .string()
   .max(4096)
@@ -38,13 +48,7 @@ export const listHealthHypothesesInputSchema = {
     .max(120)
     .describe("Optional catalog-topic keyword search across hypothesis names and summaries.")
     .optional(),
-  module_id: z
-    .string()
-    .min(1)
-    .max(160)
-    .describe("Optional filter to hypotheses associated with a module id.")
-    .optional(),
-  limit: limitSchema,
+  limit: boundedLimitSchema(20),
   cursor: cursorSchema,
 };
 
@@ -55,7 +59,7 @@ export const explainHealthHypothesisInputSchema = {
 export const getSupportingEvidenceInputSchema = {
   hypothesis_id: hypothesisIdSchema,
   kind: z
-    .enum(["patterns", "variants", "sources"])
+    .enum(["patterns", "variants", "sources", "tests"])
     .describe("Evidence kind to return. Defaults to 'patterns'.")
     .optional(),
   pattern_id: z
@@ -64,7 +68,7 @@ export const getSupportingEvidenceInputSchema = {
     .max(160)
     .describe("Optional pattern id to restrict the evidence to a single matched pattern.")
     .optional(),
-  limit: limitSchema,
+  limit: boundedLimitSchema(20),
   cursor: cursorSchema,
 };
 
@@ -95,6 +99,10 @@ export const getGeneticContextInputSchema = {
     .max(50)
     .describe("Specific rsIDs to look up (Full accounts only).")
     .optional(),
+  include_modules: z
+    .boolean()
+    .describe("Include module summaries alongside the markers. Defaults to false.")
+    .optional(),
   limit: limitSchema,
   cursor: cursorSchema,
 };
@@ -104,7 +112,14 @@ export const getGeneticContextInputSchema = {
 // ---------------------------------------------------------------------------
 
 /** No arguments: the component renders from the tool result alone. */
-export const showDnaImportInputSchema = {};
+export const showDnaImportInputSchema = {
+  mode: z
+    .enum(["initial", "regenerate"])
+    .describe(
+      "Import mode. Use 'regenerate' only when a refresh is required or the user asks to refresh.",
+    )
+    .optional(),
+};
 
 /** No arguments: the component needs the whole catalog or none of it. */
 export const getSnpCatalogInputSchema = {};

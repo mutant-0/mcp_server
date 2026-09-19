@@ -4,7 +4,7 @@ A deployable, stateless [Model Context Protocol](https://modelcontextprotocol.io
 server for Mutant Genomics. It runs as an AWS Lambda behind API Gateway at a
 custom domain (e.g. `https://dev-api.mutantbiotech.com/mcp`), authenticates users
 with Mutant's Cognito OAuth (authorization code + PKCE S256), and exposes the
-**nine-tool contract 1.0.0** backed by the existing `report-generator` Lambda,
+**nine-tool contract 2.0.0** backed by the existing `report-generator` Lambda,
 plus a [ChatGPT Apps SDK](https://developers.openai.com/apps-sdk) component for
 DNA import.
 
@@ -28,8 +28,14 @@ in-flight analysis instead of starting a new one), polls that tool itself after
 `create_report` until the analysis is `ready` or `failed`, shows an elapsed timer
 rather than a countdown or a simulated percentage, and transforms the same card
 in place into the completion view. The user never has to ask ChatGPT whether
-processing finished. `show_dna_import` returns only `{ ui_rendered: true }`, so
-there is no stale status for the model to narrate.
+processing finished. `show_dna_import` returns only `{ ui_rendered: true, mode }`
+(plus widget-only `_meta.mutant.mode`), so there is no stale status for the model
+to narrate.
+
+The completion view also renders state-aware `suggested_prompts` as chips (from
+`get_analysis_context`), and — when `get_analysis_status` reports
+`regenerate: true` with a usable current analysis — an optional refresh banner.
+A required refresh (failed analysis) is handled by the recovery card instead.
 
 Two scopes gate the surface: the six analysis tools require `analysis.read`, and
 `show_dna_import` / `get_snp_catalog` / `create_report` require `dna.import`.
@@ -49,9 +55,9 @@ API Gateway HTTP API  $default (catch-all)
    v
 Mutant MCP Lambda (Node HTTP server on :8080)
    |-- OAuth discovery + token validation (jose / OIDC JWKS)
-   |-- Nine MCP tools (schemas, envelope, text mirror, per-tool scopes)
+   |-- Nine MCP tools (schemas, envelope, deterministic content, per-tool scopes)
    |-- Apps SDK resource ui://mutant/dna-import/v1.html
-   `-- Versioned internal contract 1.0.0 (direct InvokeCommand, IAM-scoped)
+   `-- Versioned internal contract 2.0.0 (direct InvokeCommand, IAM-scoped)
           |
           v
 Report-generator Lambda  (mcp package)
@@ -59,7 +65,7 @@ Report-generator Lambda  (mcp package)
    |-- Free top-three / Full scope
    |-- v3 projection, pagination, cursors
    |-- get_snp_catalog / create_report (DNA import)
-   `-- ToolResponse envelope (ok/data/error, analysis_version, page)
+   `-- ToolResponse envelope (ok/data/error, analysis_version, next_cursor)
 ```
 
 The DNA import component runs entirely inside the host iframe and declares an
@@ -79,7 +85,7 @@ mutant-mcp/
 │   ├── server.ts                  # McpServer + instructions + UI resource
 │   ├── logger.ts                  # pino with genotype redaction
 │   ├── config.ts                  # env loading/validation (Zod)
-│   ├── contract.ts                # contract 1.0.0 constants + types
+│   ├── contract.ts                # contract 2.0.0 constants + types
 │   ├── auth/
 │   │   ├── token-validator.ts     # JWT/JWKS + client/scope/resource checks
 │   │   ├── oauth-metadata.ts      # RFC 9728 PRM + AS metadata mirror
@@ -87,6 +93,7 @@ mutant-mcp/
 │   ├── tools/                     # nine tool definitions + registration
 │   │   └── scope-guard.ts         # per-tool scope enforcement
 │   ├── schemas/                   # Zod input + shared envelope schemas
+│   ├── presentation/              # deterministic content builders + prompts
 │   ├── clients/
 │   │   └── mutant-lambda-client.ts# versioned internal contract + envelope parse
 │   ├── ui/
@@ -103,7 +110,7 @@ mutant-mcp/
 │   │   └── api.js                 # GENERATED: portal-free fetchSnpCatalog shim
 │   └── responses/
 │       ├── errors.ts              # JSON-RPC + WWW-Authenticate challenges
-│       └── tool-result.ts         # envelope -> CallToolResult + text mirror
+│       └── tool-result.ts         # envelope -> CallToolResult + deterministic content
 ├── scripts/
 │   ├── build-ui.mjs               # esbuild -> generated/html.ts
 │   └── sync-genomics.mjs          # vendor front-end-web/src/genomics (+ --check)
@@ -121,12 +128,12 @@ mutant-mcp/
 
 | Tool | Scope | Purpose |
 |---|---|---|
-| `get_analysis_status` | `analysis.read` | Routing gate: `dna_status`, `analysis_status`, `plan`, `analysis_id`, `created_at`, and an explicit `next_action`. Polled by the DNA import component while an analysis is processing. |
-| `get_analysis_context` | `analysis.read` | **Start here.** Coverage, interpretation rules/limitations, top hypotheses. |
-| `list_health_hypotheses` | `analysis.read` | List/search hypotheses (Free: fixed top three; Full: whole set). |
-| `explain_health_hypothesis` | `analysis.read` | Full interpretation: scoring, patterns, clinical correlation, guardrails. |
-| `get_supporting_evidence` | `analysis.read` | Stored patterns, variant contributions, or cited sources. |
-| `get_genetic_context` | `analysis.read` | Marker-level context by hypothesis (Free) or module/gene/rsIDs (Full). |
+| `get_analysis_status` | `analysis.read` | Routing gate: `dna_status`, `analysis_status`, entitlement/capabilities, a mandatory `regenerate` flag (+ `regeneration` details), and an object `next_action`/`optional_actions`. Polled by the DNA import component while an analysis is processing. |
+| `get_analysis_context` | `analysis.read` | **Start here.** Coverage, interpretation summary/limitations, selection scope, top hypotheses, suggested prompts. |
+| `list_health_hypotheses` | `analysis.read` | List/search hypotheses (`items` + `next_cursor`; Free: fixed top three, Full: whole set). |
+| `explain_health_hypothesis` | `analysis.read` | Explanation-ready projection: scores, why-ranked, contributing patterns, clinical context, confirmation plan, guardrails. |
+| `get_supporting_evidence` | `analysis.read` | Stored patterns, deduped variant contributions, cited sources, or full test guidance (`kind: "tests"`). |
+| `get_genetic_context` | `analysis.read` | Markers aggregated by rsID with pattern memberships (Free) or module/gene/rsIDs (Full); optional `modules`. |
 | `show_dna_import` | `dna.import` | Renders the DNA import component, which owns import, submission, polling, and the completion UI. No backend call, no echoed status. |
 | `get_snp_catalog` | `dna.import` | Returns the SNP catalog to the component (`app` visibility only). |
 | `create_report` | `dna.import` | Creates an analysis from locally processed variants (`app` visibility only). |

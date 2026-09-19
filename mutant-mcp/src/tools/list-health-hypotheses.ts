@@ -17,5 +17,6 @@ export const listHealthHypothesesTool: MutantToolDefinition = {
     respond(
       await runtime.client.invoke("list_health_hypotheses", args, runtime.user, runtime.requestId),
       runtime,
+      { operation: "list_health_hypotheses" },
     ),
 };

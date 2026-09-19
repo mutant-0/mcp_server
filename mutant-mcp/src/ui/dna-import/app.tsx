@@ -115,6 +115,12 @@ interface StatusInfo {
   planSlug: string | null;
   hypothesisScope: string | null;
   upgradeUrl: string | null;
+  /** A refreshed analysis is available; current results stay usable unless required. */
+  regenerate: boolean;
+  /** Resubmission is required (the current analysis is not usable). */
+  regenerationRequired: boolean;
+  /** Whether the current results remain usable while the refresh is offered. */
+  regenerationUsable: boolean;
 }
 
 interface AnalysisState {
@@ -124,6 +130,16 @@ interface AnalysisState {
   planSlug: string | null;
   hypothesisScope: string | null;
   upgradeUrl: string | null;
+  regenerate: boolean;
+  regenerationRequired: boolean;
+  regenerationUsable: boolean;
+}
+
+/** A host-rendered follow-up chip from the server's `suggested_prompts`. */
+interface PromptChip {
+  id: string;
+  label: string;
+  prompt: string;
 }
 
 /** Why polling is not running, when it is not: each is a recoverable notice. */
@@ -338,7 +354,8 @@ function firstString(...values: unknown[]): string | null {
  */
 function normalizeStatus(value: unknown): LifecycleStatus | null {
   if (typeof value !== "string") return null;
-  if (value === "not_started" || value === "ready" || value === "failed") return value;
+  if (value === "not_started" || value === "unavailable") return "not_started";
+  if (value === "ready" || value === "failed") return value;
   if (
     value === "processing" ||
     value === "queued" ||
@@ -362,6 +379,7 @@ function statusOf(envelope: ToolResponse): StatusInfo {
   const analysis = asRecord(data.analysis);
   const entitlement = asRecord(data.entitlement);
   const upgrade = asRecord(data.upgrade);
+  const regeneration = asRecord(data.regeneration);
 
   const analysisStatus = normalizeStatus(data.analysis_status) ?? normalizeStatus(analysis?.status);
   const rawDna = data.dna_status;
@@ -386,6 +404,9 @@ function statusOf(envelope: ToolResponse): StatusInfo {
     planSlug: firstString(data.plan_slug, entitlement?.plan),
     hypothesisScope: firstString(entitlement?.hypothesis_scope, data.hypothesis_scope),
     upgradeUrl: firstString(upgrade?.url, data.upgrade_url),
+    regenerate: data.regenerate === true,
+    regenerationRequired: regeneration?.required === true,
+    regenerationUsable: regeneration?.current_results_usable !== false,
   };
 }
 
@@ -398,6 +419,9 @@ function analysisFromStatus(previous: AnalysisState | null, info: StatusInfo): A
     planSlug: info.planSlug ?? previous?.planSlug ?? null,
     hypothesisScope: info.hypothesisScope ?? previous?.hypothesisScope ?? null,
     upgradeUrl: info.upgradeUrl ?? previous?.upgradeUrl ?? null,
+    regenerate: info.regenerate,
+    regenerationRequired: info.regenerationRequired,
+    regenerationUsable: info.regenerationUsable,
   };
 }
 
@@ -433,6 +457,22 @@ function findingsFrom(data: unknown): Finding[] {
     });
   });
   return findings;
+}
+
+/** Pull the state-aware suggestion chips out of a context envelope. */
+function promptsFrom(data: unknown): PromptChip[] {
+  const row = asRecord(data);
+  const raw = Array.isArray(row?.suggested_prompts) ? row.suggested_prompts : [];
+  const chips: PromptChip[] = [];
+  raw.forEach((entry) => {
+    const item = asRecord(entry);
+    if (!item) return;
+    const label = firstString(item.label);
+    const prompt = firstString(item.prompt);
+    if (!label || !prompt) return;
+    chips.push({ id: firstString(item.id) ?? String(chips.length), label, prompt });
+  });
+  return chips.slice(0, 5);
 }
 
 /**
@@ -604,6 +644,23 @@ const styles = {
     color: "var(--mutant-error-text, #7f1d1d)",
     fontSize: 13,
   } as const,
+  refreshBanner: {
+    background: "var(--color-background-secondary, #f5f7f6)",
+    border: "1px solid var(--color-border-secondary, #ced4da)",
+    borderRadius: 8,
+    padding: "12px 14px",
+    margin: "0 0 14px",
+  } as const,
+  chipRow: { display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" } as const,
+  chip: {
+    background: "transparent",
+    color: "var(--mutant-accent, #1f7a3f)",
+    border: "1px solid var(--mutant-accent, #1f7a3f)",
+    borderRadius: 999,
+    padding: "6px 12px",
+    fontSize: 13,
+    cursor: "pointer",
+  } as const,
 };
 
 /** The three broad stages that are always true after `create_report` succeeds. */
@@ -684,6 +741,8 @@ export function DnaImportApp({
   const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
   const [poll, setPoll] = useState<PollState>(INITIAL_POLL);
   const [findings, setFindings] = useState<FindingsState>({ status: "idle" });
+  /** State-aware follow-up chips from `get_analysis_context`. */
+  const [prompts, setPrompts] = useState<PromptChip[]>([]);
   /** Set when a follow-up handoff failed; holds copy, never the prompt itself. */
   const [handoffError, setHandoffError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -1012,6 +1071,9 @@ export function DnaImportApp({
             planSlug: null,
             hypothesisScope: null,
             upgradeUrl: null,
+            regenerate: false,
+            regenerationRequired: false,
+            regenerationUsable: true,
           }),
           id: data.analysis_id ?? null,
           createdAt: null,
@@ -1174,6 +1236,18 @@ export function DnaImportApp({
     void submit(app);
   }, [app, openFilePicker, parsed, submit]);
 
+  const loadPromptChips = useCallback(async () => {
+    if (!app) return;
+    try {
+      const result = await app.callServerTool({ name: "get_analysis_context", arguments: {} });
+      const envelope = envelopeOf(result);
+      if (result.isError || !envelope || !envelope.ok) return;
+      setPrompts(promptsFrom(envelope.data));
+    } catch {
+      // Chips are an enhancement; a failure must not disturb the findings card.
+    }
+  }, [app]);
+
   const loadFindings = useCallback(async () => {
     if (!app) return;
     if (findingsRef.current.status === "loading" || findingsRef.current.status === "loaded") return;
@@ -1200,10 +1274,11 @@ export function DnaImportApp({
         return;
       }
       setFindingsState({ status: "loaded", items });
+      void loadPromptChips();
     } catch {
       setFindingsState({ status: "error", message: messageFor("service_unavailable") });
     }
-  }, [app, isFull, setFindingsState]);
+  }, [app, isFull, loadPromptChips, setFindingsState]);
 
   /**
    * Hand control back to ChatGPT only when the user asks for interpretation.
@@ -1342,6 +1417,25 @@ export function DnaImportApp({
         <h1 style={styles.h1}>Analysis ready</h1>
         <p style={styles.subtitle}>Your DNA analysis is complete.</p>
 
+        {analysis?.regenerate ? (
+          <div style={styles.refreshBanner} role="status">
+            <p style={{ ...styles.meta, margin: "0 0 8px" }}>
+              {analysis.regenerationRequired
+                ? "A refreshed analysis is needed to include the newer patterns. Resubmit your DNA to refresh it."
+                : "A newer analysis platform is available. Your current results are still usable, and refreshing is optional."}
+            </p>
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={() =>
+                void askChatGpt("I'd like to refresh my analysis with the newer platform.")
+              }
+            >
+              Refresh analysis
+            </button>
+          </div>
+        ) : null}
+
         {loaded ? (
           <ol style={styles.findingList}>
             {loaded.map((finding) => (
@@ -1355,9 +1449,7 @@ export function DnaImportApp({
                   style={styles.subtleButton}
                   onClick={() =>
                     void askChatGpt(
-                      `Explain my "${finding.title}" finding${
-                        finding.id ? ` (hypothesis ${finding.id})` : ""
-                      } from my Mutant analysis.`,
+                      `Explain my "${finding.title}" finding from my Mutant analysis.`,
                     )
                   }
                 >
@@ -1397,6 +1489,21 @@ export function DnaImportApp({
           <p role="alert" style={styles.handoffError}>
             {handoffError}
           </p>
+        ) : null}
+
+        {prompts.length > 0 ? (
+          <div style={styles.chipRow}>
+            {prompts.map((chip) => (
+              <button
+                key={chip.id}
+                type="button"
+                style={styles.chip}
+                onClick={() => void askChatGpt(chip.prompt)}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
         ) : null}
 
         <div style={{ ...styles.buttonRow, marginTop: 14 }}>

@@ -1,12 +1,12 @@
 /**
- * Shared Mutant MCP contract (version 1.0.0).
+ * Shared Mutant MCP contract (version 2.0.0).
  *
  * These constants, error codes, and envelope types mirror the backend
  * implementation in `report-generator/mcp/contract.py`. The backend owns all
  * business semantics; the MCP Lambda is a thin, authenticated transport.
  */
 
-export const CONTRACT_VERSION = "1.0.0";
+export const CONTRACT_VERSION = "2.0.0";
 
 /**
  * Model-facing analysis tools. These require `analysis.read`.
@@ -113,6 +113,26 @@ export function isToolResponse(value: unknown): value is ToolResponse {
 }
 
 export const SCOPE_HINT = "mutant/analysis.read";
+
+/**
+ * A state-aware, user-visible follow-up the widget can render as a chip. The
+ * `prompt` is exact natural language; it must never contain internal commands.
+ */
+export interface PromptSuggestion {
+  id: string;
+  label: string;
+  prompt: string;
+  intent:
+    | "overview"
+    | "explain"
+    | "evidence"
+    | "confirmation"
+    | "comparison"
+    | "clinician_questions"
+    | "regeneration"
+    | "import_help";
+  hypothesis_id?: string;
+}
 
 /**
  * Stable application-level error vocabulary surfaced to the DNA import

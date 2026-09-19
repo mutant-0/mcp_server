@@ -52,27 +52,31 @@ describe("MCP server integration", () => {
     expect(client.getServerCapabilities()?.resources).toBeDefined();
   });
 
-  it("relays a success envelope into structuredContent", async () => {
+  it("relays a success envelope into structuredContent with deterministic content", async () => {
     const { client } = await connectServer(() =>
-      makeSuccessResponse({ analysis: { status: "ready" } }),
+      makeSuccessResponse({
+        dna_status: "available",
+        analysis_status: "ready",
+        analysis: { generated_at: "2026-01-01" },
+      }),
     );
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
     expect(result.isError).toBe(false);
     const structured = result.structuredContent as { ok: boolean; data: unknown };
     expect(structured.ok).toBe(true);
-    // The routing fields are derived in the MCP layer until the backend sends them.
-    expect(structured.data).toEqual({
-      analysis: { status: "ready" },
-      dna_status: "available",
-      analysis_status: "ready",
-      plan: "unknown",
-      analysis_id: null,
-      created_at: null,
-      next_action: {
-        tool: "get_analysis_context",
-        reason: "The analysis is ready; start with the analysis context.",
-      },
-    });
+    // The tool is a pass-through: the backend owns every status field.
+    expect(structured.data).toMatchObject({ dna_status: "available", analysis_status: "ready" });
+    // Suggested prompts are injected at the MCP boundary.
+    expect(
+      (structured.data as { suggested_prompts?: unknown[] }).suggested_prompts,
+    ).toBeDefined();
+
+    // The model-facing text is deterministic prose, never a serialized envelope.
+    const content = result.content as Array<{ type: string; text: string }>;
+    expect(content[0]?.type).toBe("text");
+    expect(content[0]?.text).toContain("ready");
+    expect(content[0]?.text).not.toContain("contract_version");
+    expect(content[0]?.text).not.toContain('"data"');
   });
 
   it("relays a structured error envelope and sets isError", async () => {
