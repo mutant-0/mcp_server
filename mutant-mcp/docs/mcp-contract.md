@@ -899,6 +899,26 @@ these with stable lowercase names: `unauthorized`, `insufficient_scope`,
 `unsupported_format`, `unsupported_genome_build`, `report_generation_failed`, and
 `service_unavailable` (the fallback).
 
+`ANALYSIS_NOT_READY` additionally carries `error.reason`, because one code covers
+two conditions with opposite remedies. A regeneration bumps the account revision
+when it *starts* but writes the saved causes payload when it *finishes*, so a call
+in between sees a pending payload; that clears on its own. A changed scoring
+engine never clears without regenerating.
+
+| `error.reason` | Meaning | `retryable` |
+|---|---|---|
+| `analysis_payload_pending` | No saved payload yet; a regeneration may be running. | `true` |
+| `analysis_payload_stale` | Payload predates the account's latest revision, or its fragments are mid-rewrite. | `true` |
+| `analysis_engine_changed` | Payload was produced by a different scoring engine and will never be served. | `false` |
+| `analysis_payload_empty` | Saved payload carries no hypotheses. | `false` |
+| `analysis_user_version_unavailable` | The account's cache revision could not be read, so the lookup was skipped. | `true` |
+| `analysis_cache_unavailable` | The cache read itself failed. | `true` |
+
+The two permanent reasons set `next_action` to the app so the user can regenerate,
+and deliberately omit `retry_after_seconds` — polling cannot clear either. The
+backend logs the same value as
+`[MCP][COLD_CACHE] user=<8 chars> report=<id> reason=<reason>`.
+
 Two further app codes are derived by the DNA import component from the analysis
 lifecycle rather than returned by any tool: `analysis_failed` when the analysis
 reaches a failed state, and `analysis_timeout` when polling stops without a

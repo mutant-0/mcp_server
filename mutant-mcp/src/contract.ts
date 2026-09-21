@@ -91,6 +91,14 @@ export interface ToolErrorPayload {
    * this; the envelope `code` remains the stable MCP contract value.
    */
   app_code?: string;
+  /**
+   * Readiness diagnostic for a saved analysis that could not be served
+   * (e.g. `analysis_payload_pending`, `analysis_engine_changed`).
+   * `ANALYSIS_NOT_READY` covers both a regeneration still in flight and a
+   * permanent engine change — which have opposite remedies — so this reports
+   * which one actually applied.
+   */
+  reason?: string;
 }
 
 export interface ToolResponse<T = Record<string, unknown>> {

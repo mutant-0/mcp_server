@@ -245,6 +245,11 @@ export const toolErrorOutputSchema = z.object({
   retry_after_seconds: z.number().optional(),
   required_scope: z.string().optional(),
   app_code: z.string().optional(),
+  /**
+   * Why a saved analysis could not be served. Distinguishes a regeneration that
+   * is still in flight from a permanent engine change.
+   */
+  reason: z.string().optional(),
 });
 
 /**
