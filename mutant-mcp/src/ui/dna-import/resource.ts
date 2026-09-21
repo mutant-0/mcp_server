@@ -3,8 +3,16 @@ import { registerAppResource, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/e
 import type { AppConfig } from "../../config.js";
 import { DNA_IMPORT_HTML } from "./generated/html.js";
 
-/** Canonical Apps SDK UI resource URI for the DNA import experience. */
-export const DNA_IMPORT_UI_URI = "ui://mutant/dna-import/v2.html";
+/**
+ * Canonical Apps SDK UI resource URI for the DNA import experience.
+ *
+ * Deliberately stable — do not add a version token. ChatGPT resolves a widget
+ * through a stored template snapshot keyed by this pointer, so changing the URI
+ * (even to bust a CSS cache) makes the app hard-fail with
+ * "Failed to fetch template" until OpenAI re-ingests the template. Layout and
+ * CSS changes ride along with the document under this one URI.
+ */
+export const DNA_IMPORT_UI_URI = "ui://mutant/dna-import/v1.html";
 
 /**
  * Legacy alias keys for the UI descriptor. `ui/resourceUri` is the pre-`_meta.ui`

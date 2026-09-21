@@ -82,17 +82,24 @@ function renderHtml(js) {
 <title>Mutant DNA Import</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; }
-  html, body {
+  /*
+   * The whole mount chain is pinned full width. The !important flags are
+   * deliberate: the host can inject its own shell stylesheet into this document,
+   * and one max-width on html/body/#root is enough to reintroduce the empty
+   * right-hand column this layout exists to remove.
+   */
+  html, body, #root {
     margin: 0;
     padding: 0;
-    width: 100%;
-    max-width: none;
-    min-width: 0;
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
     background: transparent;
-    overflow-x: hidden;
   }
+  html, body { overflow-x: hidden; }
   body { -webkit-font-smoothing: antialiased; }
-  #root { width: 100%; max-width: none; min-width: 0; }
+  /* The component root fills the mount node however deep the host nests it. */
+  #root > * { width: 100% !important; max-width: none !important; box-sizing: border-box; }
 </style>
 </head>
 <body>
@@ -133,7 +140,7 @@ async function build() {
 // is inlined into that document as a string and started from a \`blob:\` URL, with
 // a main-thread fallback for hosts that block it.
 
-/** Self-contained HTML document for the ${"ui://mutant/dna-import/v2.html"} resource. */
+/** Self-contained HTML document for the ${"ui://mutant/dna-import/v1.html"} resource. */
 export const DNA_IMPORT_HTML = ${JSON.stringify(html)};
 
 /** Byte size of the rendered document, for logging and size assertions. */

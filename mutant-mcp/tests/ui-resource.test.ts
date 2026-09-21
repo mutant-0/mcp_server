@@ -66,10 +66,11 @@ describe("DNA import UI resource", () => {
     expect(html).toContain("worker never completed its startup handshake");
   });
 
-  it("versions the URI and serves a full-width, single-column document", async () => {
-    // The document is cached by the host, so a layout-only change must bump the
-    // version token to invalidate the cached CSS.
-    expect(DNA_IMPORT_UI_URI).toBe("ui://mutant/dna-import/v2.html");
+  it("serves a full-width, single-column document under a stable URI", async () => {
+    // The pointer must not move. ChatGPT keys its stored widget snapshot by this
+    // URI, so a version bump makes the app fail with "Failed to fetch template"
+    // instead of refreshing anything. Layout changes ship under this same URI.
+    expect(DNA_IMPORT_UI_URI).toBe("ui://mutant/dna-import/v1.html");
 
     const client = await connect();
     const { contents } = await client.readResource({ uri: DNA_IMPORT_UI_URI });
@@ -78,7 +79,10 @@ describe("DNA import UI resource", () => {
     // The whole mount chain fills the host card, and the boxes that used to sit
     // in a reserved right-hand column are full width with no fixed ceiling.
     expect(html).toContain("box-sizing: border-box");
-    expect(html).toContain("#root { width: 100%; max-width: none; min-width: 0; }");
+    // `!important` keeps a host-injected shell stylesheet from re-capping the chain.
+    expect(html).toContain("width: 100% !important");
+    expect(html).toContain("max-width: none !important");
+    expect(html).toContain("#root > *");
     expect(html).toContain('maxWidth:"none"');
     // One full-width track; a two-track template would reserve an empty column.
     expect(html).toContain("minmax(0, 1fr)");
