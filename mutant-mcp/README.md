@@ -56,7 +56,7 @@ API Gateway HTTP API  $default (catch-all)
 Mutant MCP Lambda (Node HTTP server on :8080)
    |-- OAuth discovery + token validation (jose / OIDC JWKS)
    |-- Nine MCP tools (schemas, envelope, deterministic content, per-tool scopes)
-   |-- Apps SDK resource ui://mutant/dna-import/v1.html
+   |-- Apps SDK resource ui://mutant/dna-import/v2.html
    `-- Versioned internal contract 2.0.0 (direct InvokeCommand, IAM-scoped)
           |
           v
@@ -104,7 +104,7 @@ mutant-mcp/
 │   │   │   ├── parseCore.js       # shared parse core (both entries call it)
 │   │   │   ├── workerEntry.js     # parser worker script (bundled separately)
 │   │   │   ├── worker-protocol.js # worker <-> client message types
-│   │   │   ├── resource.ts        # registers ui://mutant/dna-import/v1.html
+│   │   │   ├── resource.ts        # registers ui://mutant/dna-import/v2.html
 │   │   │   └── generated/html.ts  # GENERATED: bundled component document
 │   │   ├── genomics/              # GENERATED: vendored portal DNA processor
 │   │   └── api.js                 # GENERATED: portal-free fetchSnpCatalog shim

@@ -553,7 +553,26 @@ const styles = {
     color: "var(--color-text-primary, #1a1a1a)",
     background: "var(--color-background-primary, #ffffff)",
     padding: "20px 22px",
-    maxWidth: 520,
+    // Fill the host card instead of centering a fixed column: the component is
+    // the whole body of the iframe, so a bounded width would reserve an empty
+    // right-hand column the host is not painting anything into.
+    width: "100%",
+    maxWidth: "none",
+    minWidth: 0,
+    boxSizing: "border-box",
+  } as const,
+  /**
+   * Single full-width column. There is no optional sidebar in this component, so
+   * the grid never opens a second (empty) track; `minmax(0, 1fr)` stops a wide
+   * child from forcing a horizontal scrollbar.
+   */
+  main: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    width: "100%",
+    maxWidth: "none",
+    minWidth: 0,
+    boxSizing: "border-box",
   } as const,
   h1: { fontSize: 17, fontWeight: 600, margin: "0 0 4px" } as const,
   subtitle: { margin: "0 0 16px", color: "var(--color-text-secondary, #5f6368)" } as const,
@@ -563,6 +582,10 @@ const styles = {
     padding: "26px 20px",
     textAlign: "center",
     background: "var(--color-background-secondary, #fafbfc)",
+    width: "100%",
+    maxWidth: "none",
+    minWidth: 0,
+    boxSizing: "border-box",
   } as const,
   primaryButton: {
     display: "inline-block",
@@ -600,6 +623,10 @@ const styles = {
     padding: "12px 14px",
     margin: "16px 0",
     fontSize: 13,
+    width: "100%",
+    maxWidth: "none",
+    minWidth: 0,
+    boxSizing: "border-box",
   } as const,
   notice: {
     background: "var(--color-background-secondary, #f5f7f6)",
@@ -608,6 +635,10 @@ const styles = {
     padding: "12px 14px",
     margin: "0 0 14px",
     fontSize: 13,
+    width: "100%",
+    maxWidth: "none",
+    minWidth: 0,
+    boxSizing: "border-box",
   } as const,
   summaryRow: {
     display: "flex",
@@ -704,7 +735,11 @@ const STAGE_STEPS = [
 function Shell({ children }: { children: ReactNode }) {
   const theme = useDocumentTheme();
   const palette = theme === "dark" ? DARK_PALETTE : LIGHT_PALETTE;
-  return <div style={{ ...styles.card, ...paletteVars(palette) }}>{children}</div>;
+  return (
+    <div style={{ ...styles.card, ...paletteVars(palette) }}>
+      <main style={styles.main}>{children}</main>
+    </div>
+  );
 }
 
 function Loading({ label }: { label: string }) {

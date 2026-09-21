@@ -66,6 +66,27 @@ describe("DNA import UI resource", () => {
     expect(html).toContain("worker never completed its startup handshake");
   });
 
+  it("versions the URI and serves a full-width, single-column document", async () => {
+    // The document is cached by the host, so a layout-only change must bump the
+    // version token to invalidate the cached CSS.
+    expect(DNA_IMPORT_UI_URI).toBe("ui://mutant/dna-import/v2.html");
+
+    const client = await connect();
+    const { contents } = await client.readResource({ uri: DNA_IMPORT_UI_URI });
+    const html = (contents[0] as { text?: string }).text ?? "";
+
+    // The whole mount chain fills the host card, and the boxes that used to sit
+    // in a reserved right-hand column are full width with no fixed ceiling.
+    expect(html).toContain("box-sizing: border-box");
+    expect(html).toContain("#root { width: 100%; max-width: none; min-width: 0; }");
+    expect(html).toContain('maxWidth:"none"');
+    // One full-width track; a two-track template would reserve an empty column.
+    expect(html).toContain("minmax(0, 1fr)");
+    expect(html).not.toContain("grid-template-columns: 3fr 1fr");
+    // The old bounded width is gone.
+    expect(html).not.toContain("maxWidth:520");
+  });
+
   it("declares no CSP domains, because the component only uses the host bridge", async () => {
     const client = await connect();
     const { contents } = await client.readResource({ uri: DNA_IMPORT_UI_URI });

@@ -81,8 +81,18 @@ function renderHtml(js) {
 <meta name="color-scheme" content="light dark" />
 <title>Mutant DNA Import</title>
 <style>
-  html, body { margin: 0; padding: 0; background: transparent; }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    background: transparent;
+    overflow-x: hidden;
+  }
   body { -webkit-font-smoothing: antialiased; }
+  #root { width: 100%; max-width: none; min-width: 0; }
 </style>
 </head>
 <body>
@@ -123,7 +133,7 @@ async function build() {
 // is inlined into that document as a string and started from a \`blob:\` URL, with
 // a main-thread fallback for hosts that block it.
 
-/** Self-contained HTML document for the ${"ui://mutant/dna-import/v1.html"} resource. */
+/** Self-contained HTML document for the ${"ui://mutant/dna-import/v2.html"} resource. */
 export const DNA_IMPORT_HTML = ${JSON.stringify(html)};
 
 /** Byte size of the rendered document, for logging and size assertions. */

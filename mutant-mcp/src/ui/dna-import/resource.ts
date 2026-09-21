@@ -4,7 +4,7 @@ import type { AppConfig } from "../../config.js";
 import { DNA_IMPORT_HTML } from "./generated/html.js";
 
 /** Canonical Apps SDK UI resource URI for the DNA import experience. */
-export const DNA_IMPORT_UI_URI = "ui://mutant/dna-import/v1.html";
+export const DNA_IMPORT_UI_URI = "ui://mutant/dna-import/v2.html";
 
 /**
  * Legacy alias keys for the UI descriptor. `ui/resourceUri` is the pre-`_meta.ui`

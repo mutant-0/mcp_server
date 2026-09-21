@@ -746,9 +746,9 @@ mount the component from either:
 
 ```json
 {
-  "ui": { "resourceUri": "ui://mutant/dna-import/v1.html", "visibility": ["model", "app"] },
-  "ui/resourceUri": "ui://mutant/dna-import/v1.html",
-  "openai/outputTemplate": "ui://mutant/dna-import/v1.html"
+  "ui": { "resourceUri": "ui://mutant/dna-import/v2.html", "visibility": ["model", "app"] },
+  "ui/resourceUri": "ui://mutant/dna-import/v2.html",
+  "openai/outputTemplate": "ui://mutant/dna-import/v2.html"
 }
 ```
 
@@ -793,7 +793,12 @@ never the payload and never `analysis_context`.
 Upstream failures are remapped to the component-facing codes below so the UI does
 not parse backend messages.
 
-### UI resource `ui://mutant/dna-import/v1.html`
+### UI resource `ui://mutant/dna-import/v2.html`
+
+The URI is versioned: the widget document is cached by the host, so the version
+was bumped from `v1` when the layout changed to remove the fixed-width column and
+fill the host card. Any layout-only change to the component must bump this token
+again to invalidate the cached CSS.
 
 Served by `resources/read` as a single self-contained `text/html;profile=mcp-app`
 document, identical for every authenticated account. Its `_meta.ui.csp` is
