@@ -9,7 +9,7 @@
  * Text is normalised to LF before it is hashed or written. Git checks this
  * repository out with `core.autocrlf` on Windows and with LF everywhere else, so
  * hashing raw bytes would make one commit pass locally and fail in CI (which is
- * exactly what happened: all eight modules reported as "modified" on
+ * exactly what happened: every vendored module reported as "modified" on
  * ubuntu-latest while `npm run check:genomics` passed on Windows). `.gitattributes`
  * pins the vendored tree to LF; normalising here keeps the check correct even in
  * a working tree git has not renormalised yet.
@@ -30,6 +30,13 @@ export const SOURCE = "front-end-web/src/genomics";
  * runs the same `parse.js` / `stream.js` / `catalog.js` through its own worker
  * entry (`src/ui/dna-import/workerEntry.js`) with an injected catalog, so keeping
  * the portal's copies would only add a second, divergent code path.
+ *
+ * `sexChromosome.js` IS vendored because `parse.js` imports it: the per-line
+ * parsers fold X/Y evidence into it during the same pass. The component does not
+ * read that evidence (it derives its own context in
+ * `src/ui/dna-import/parseCore.js`), but the module has to be present for the
+ * vendored `parse.js` to resolve. Keeping it out of the set would make the
+ * vendored processor a broken subset of upstream.
  */
 export const MODULES = [
   "catalog.js",
@@ -39,6 +46,7 @@ export const MODULES = [
   "parse23andMe.js",
   "parseAncestry.js",
   "parseVcf.js",
+  "sexChromosome.js",
   "stream.js",
 ];
 

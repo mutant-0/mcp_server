@@ -11,12 +11,16 @@ import { detectProvider, detectBuild } from './detect';
 import { parse23andMeLine } from './parse23andMe';
 import { parseAncestryLine } from './parseAncestry';
 import { parseVcfLine } from './parseVcf';
+import { createSexChromosomeStats } from './sexChromosome';
 
 export const PROVIDER_LABELS = { vcf: 'WGS', '23andme': '23andMe', ancestry: 'Ancestry' };
 
 export async function parseLines(iterable, indexes) {
   const snps = {};
   const wgsVariantCalls = {};
+  // Chromosome X/Y counters are collected during this same pass, from raw
+  // records, so no second scan of the file is required.
+  const sexChromosomeStats = createSexChromosomeStats();
   const headerLines = [];
   let provider = null;
   let build = 'GRCh38';
@@ -37,13 +41,13 @@ export async function parseLines(iterable, indexes) {
     totalLines += 1;
 
     if (provider === 'vcf') {
-      parseVcfLine(line, { indexes, snps, build, wgsVariantCalls });
+      parseVcfLine(line, { indexes, snps, build, wgsVariantCalls, sexChromosomeStats });
     } else if (provider === 'ancestry') {
-      parseAncestryLine(line, { indexes, snps });
+      parseAncestryLine(line, { indexes, snps, sexChromosomeStats });
     } else {
-      parse23andMeLine(line, { indexes, snps });
+      parse23andMeLine(line, { indexes, snps, sexChromosomeStats });
     }
   }
 
-  return { snps, provider, totalLines, wgsVariantCalls };
+  return { snps, provider, totalLines, wgsVariantCalls, sexChromosomeStats };
 }

@@ -301,7 +301,8 @@ then choose staged submission or an S3 handoff. `MUTANT_MAX_REQUEST_BYTES` and
 **Vendored processor.** `src/ui/genomics/*` is generated from
 `front-end-web/src/genomics`. If the component starts parsing differently from
 the portal, run `npm run check:genomics` first; it fails when the vendored copy
-was edited by hand or drifted from upstream. The vendored set is eight modules;
+was edited by hand or drifted from upstream. The vendored set is nine modules
+(the format parsers plus `catalog.js`, `sexChromosome.js`, and `stream.js`);
 the portal's `parseInWorker.js` / `parse.worker.js` are intentionally excluded
 (they fetch a catalog over the portal session, and this component injects the one
 `get_snp_catalog` returned).

@@ -155,8 +155,9 @@ caches, queues, logs, traces, or echoes it; it is excluded from every log record
 `src/ui/genomics/*` is **generated**: `scripts/sync-genomics.mjs` copies it
 verbatim from `front-end-web/src/genomics/`, so the portal and the ChatGPT
 component parse 23andMe / Ancestry / VCF / gzipped VCF input with the same code.
-The vendored set is deliberately eight modules — the loader and the format
-parsers, `catalog.js` (indexes only), and `stream.js`. The portal's own
+The vendored set is deliberately nine modules — the loader and the format
+parsers, `catalog.js` (indexes only), `sexChromosome.js` (`parse.js` imports it),
+and `stream.js`. The portal's own
 `parseInWorker.js` / `parse.worker.js` are **not** vendored: they fetch a catalog
 over the portal's HTTP session and return a different result shape, whereas this
 component injects the catalog `get_snp_catalog` gave it and runs everything

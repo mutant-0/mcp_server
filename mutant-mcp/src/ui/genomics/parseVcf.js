@@ -5,11 +5,13 @@
 
 import { normalizeChrom, normalizeGenotype } from './normalize';
 import { resolvePrimary, normalizeRsid } from './catalog';
+import { recordSexChromosomeEvidence } from './sexChromosome';
 
 // Resolve a GT field against [REF, ...ALT] into a normalized genotype, or null.
 // Handles multi-allelic, haploid (single index -> homozygous), and phased "|" ==
 // unphased "/". No-call / missing / multi-base alleles return null.
-function genotypeFromGt(ref, alts, format, sample) {
+// Exported so sex-chromosome evidence collection resolves GT identically.
+export function genotypeFromGt(ref, alts, format, sample) {
   const gtIndex = format.split(':').indexOf('GT');
   if (gtIndex < 0) return null;
 
@@ -172,6 +174,18 @@ export function parseVcfLine(line, ctx) {
   // gVCF reference block: only emit for explicit variant rows, never synthesize.
   const endMatch = info.match(/END=(\d+)/);
   if (endMatch && Number(endMatch[1]) > pos) return;
+
+  // Sex-chromosome evidence. Guarded to X/Y (and to explicit variant rows) so
+  // the autosomal hot path of a multi-million-line VCF pays nothing. PAR
+  // positions are excluded inside recordSexChromosomeEvidence.
+  if ((chrom === 'X' || chrom === 'Y') && alts && alts !== '.') {
+    recordSexChromosomeEvidence(
+      ctx.sexChromosomeStats,
+      chrom,
+      genotypeFromGt(ref, alts, format, sample),
+      pos
+    );
+  }
 
   // Non-SNV capture runs independently of (and before) the SNV coordinate
   // lookup, so variable-length alleles that the SNV compatibility check would

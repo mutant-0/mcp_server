@@ -5,10 +5,15 @@
 
 import { normalizeGenotype } from './normalize';
 import { resolvePrimary } from './catalog';
+import { recordSexChromosomeEvidence } from './sexChromosome';
 
 export function parse23andMeLine(line, ctx) {
   const parts = line.split('\t');
   if (parts.length < 4) return;
+
+  // Collect X/Y evidence before catalog filtering: the catalog holds too few
+  // markers to characterize a chromosome, and most X/Y records are not targets.
+  recordSexChromosomeEvidence(ctx.sexChromosomeStats, parts[1], parts[3], parts[2]);
 
   const primary = resolvePrimary(parts[0], ctx.indexes);
   if (!primary) return;
