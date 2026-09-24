@@ -1736,22 +1736,6 @@ export function DnaImportApp({
               </strong>
             </div>
           ) : null}
-          <div style={styles.summaryRow}>
-            <span>Relevant variants found</span>
-            <strong>{formatCount(parsed.coverage.matched)}</strong>
-          </div>
-          {Object.keys(parsed.wgsVariantCalls).length ? (
-            <div style={styles.summaryRow}>
-              <span>Non-SNV capture targets</span>
-              <strong>{formatCount(Object.keys(parsed.wgsVariantCalls).length)}</strong>
-            </div>
-          ) : null}
-          <div style={{ ...styles.summaryRow, borderBottom: "none" }}>
-            <span>Panels covered</span>
-            <strong>
-              {formatCount(parsed.coverage.matched)} of {formatCount(parsed.coverage.total)}
-            </strong>
-          </div>
         </div>
         <div style={styles.buttonRow}>
           <button
