@@ -342,10 +342,12 @@ function envelopeOf(result: {
 function importModeFrom(result: {
   structuredContent?: unknown;
   content?: Array<{ type: string; text?: string }>;
+  _meta?: unknown;
 }): ImportMode | null {
   const envelope = envelopeOf(result);
   const data = envelope ? asRecord(envelope.data) : null;
-  const mode = data?.mode;
+  const metaMode = asRecord(asRecord(result._meta)?.mutant)?.mode;
+  const mode = data?.mode ?? metaMode;
   if (mode === "regenerate" || mode === "initial" || mode === "overview") return mode;
   return null;
 }
@@ -1550,9 +1552,11 @@ export function DnaImportApp({
             <button
               type="button"
               style={styles.secondaryButton}
-              onClick={() =>
-                void askChatGpt("I'd like to refresh my analysis with the newer platform.")
-              }
+              onClick={() => {
+                selectImportMode("regenerate");
+                setDnaOnFile(true);
+                setStage("waiting_for_file");
+              }}
             >
               Refresh analysis
             </button>

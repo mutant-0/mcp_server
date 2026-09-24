@@ -1,6 +1,7 @@
 import type { ToolResponse } from "../contract.js";
 import { withSuggestedPrompts } from "../presentation/prompts.js";
 import { getAnalysisStatusInputSchema, toolResponseOutputSchema } from "../schemas/index.js";
+import { dnaImportUiMeta } from "../ui/dna-import/resource.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
 
@@ -23,9 +24,9 @@ export const getAnalysisStatusTool: MutantToolDefinition = {
     'If analysis_status="ready" and the user is opening Mutant or asking for an overview, ' +
     "call show_analysis_overview in the same turn. Its card shows findings and hints; do not " +
     "write a duplicate prose summary.\n\n" +
-    "A regenerate=true result means an optional refreshed analysis is available after DNA " +
-    "resubmission; it does not invalidate the current results. Offer the refresh but continue " +
-    "to the existing analysis unless the user asks for it or required is true.\n\n" +
+    "When a ready result has regenerate=true, this tool result mounts the Apps SDK card with a " +
+    "refresh button. Let the card present the update option instead of asking which finding " +
+    "to explore in prose. The current results remain usable until the user selects refresh.\n\n" +
     "The DNA import component polls this tool itself while analysis_status is processing, so do " +
     "not tell the user to keep asking whether processing has finished and do not narrate the " +
     "analysis status while that component is active.",
@@ -40,8 +41,16 @@ export const getAnalysisStatusTool: MutantToolDefinition = {
       runtime.user,
       runtime.requestId,
     );
+    const data = response.data;
+    const showRefreshCard =
+      response.ok &&
+      data?.analysis_status === "ready" &&
+      data.regenerate === true;
     return respond(withSuggestedPrompts(response, "get_analysis_status"), runtime, {
       operation: "get_analysis_status",
+      ...(showRefreshCard
+        ? { meta: { ...dnaImportUiMeta(), mutant: { mode: "overview" } } }
+        : {}),
     });
   },
 };

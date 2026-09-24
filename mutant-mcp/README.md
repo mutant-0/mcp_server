@@ -37,6 +37,8 @@ ready analysis and loads accessible findings and hints immediately. The
 completion view also renders state-aware `suggested_prompts` as chips (from
 `get_analysis_context`), and — when `get_analysis_status` reports
 `regenerate: true` with a usable current analysis — an optional refresh banner.
+That ready status result carries the UI descriptor so the card opens directly;
+its refresh button starts DNA resubmission inside the card.
 A required refresh (failed analysis) is handled by the recovery card instead.
 
 Two scopes gate the surface: the seven analysis tools require `analysis.read`, and

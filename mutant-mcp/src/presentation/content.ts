@@ -93,7 +93,11 @@ function statusContent(data: JsonObject): string {
   const nextAction = asRecord(data.next_action);
   const nextTool = nextAction ? asText(nextAction.tool) : null;
   if (analysis === "ready") {
-    parts.push("For an overview, open the analysis card with show_analysis_overview.");
+    parts.push(
+      data.regenerate === true
+        ? "The analysis card offers a refresh action."
+        : "For an overview, open the analysis card with show_analysis_overview.",
+    );
   } else if (nextTool) {
     parts.push(`Next: call ${nextTool}.`);
   }

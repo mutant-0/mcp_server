@@ -47,13 +47,14 @@ function deliverToApp(data: unknown): void {
 }
 
 /** The tool-result notification shape the host pushes after a tool returns. */
-function toolResultNotification(structured: ToolResponse) {
+function toolResultNotification(structured: ToolResponse, meta?: Record<string, unknown>) {
   return {
     method: "ui/notifications/tool-result",
     params: {
       content: [{ type: "text", text: JSON.stringify(structured) }],
       structuredContent: structured as unknown as Record<string, unknown>,
-      isError: false,
+    isError: false,
+    ...(meta ? { _meta: meta } : {}),
     },
   };
 }
@@ -148,7 +149,7 @@ interface HostBridge {
   messages: Array<Record<string, unknown>>;
   openLinks: string[];
   callsTo(name: string): ToolCall[];
-  sendToolResult(structured: ToolResponse): void;
+  sendToolResult(structured: ToolResponse, meta?: Record<string, unknown>): void;
   /** Detach the listener, so a finished test cannot answer the next one's calls. */
   stop(): void;
 }
@@ -237,8 +238,8 @@ function installHostBridge(responders: Responders = {}, options: BridgeOptions =
     messages,
     openLinks,
     callsTo: (name) => toolCalls.filter((call) => call.name === name),
-    sendToolResult: (structured) => {
-      deliverToApp({ jsonrpc: "2.0", ...toolResultNotification(structured) });
+    sendToolResult: (structured, meta) => {
+      deliverToApp({ jsonrpc: "2.0", ...toolResultNotification(structured, meta) });
     },
     stop: () => window.removeEventListener("message", onMessage),
   };
@@ -777,8 +778,36 @@ describe("DNA import component", () => {
     await screen.findByText(/Analysis ready/i);
     expect(screen.getByText(/newer analysis platform is available/i)).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /refresh analysis/i }));
-    await waitFor(() => expect(bridge.messages).toHaveLength(1));
-    expect(JSON.stringify(bridge.messages[0])).toMatch(/refresh my analysis/i);
+    await screen.findByText(/Resubmit your DNA to refresh/i);
+    expect(screen.getByRole("button", { name: /choose dna file/i })).toBeDefined();
+    expect(bridge.messages).toHaveLength(0);
+  });
+
+  it("loads hints when a refresh status result mounts the card", async () => {
+    const status = statusResponse("ready", {
+      regenerate: true,
+      regeneration: { required: false, current_results_usable: true },
+    });
+    const bridge = renderWith({
+      get_analysis_status: status,
+      get_analysis_context: makeSuccessResponse({
+        suggested_prompts: [
+          {
+            id: "compare-medical-records",
+            label: "Compare with my records",
+            prompt: "Compare my findings with records I shared.",
+            intent: "comparison",
+          },
+        ],
+      }),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    bridge.sendToolResult(status, { mutant: { mode: "overview" } });
+
+    await screen.findByText(/Alpha finding/i);
+    await screen.findByRole("button", { name: "Compare with my records" });
+    expect(screen.getByRole("button", { name: /refresh analysis/i })).toBeDefined();
   });
 
   it("opens the resubmission flow when the host selected a refresh", async () => {

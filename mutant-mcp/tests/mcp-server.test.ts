@@ -103,6 +103,25 @@ describe("MCP server integration", () => {
     expect(content[0]?.text).toContain("show_analysis_overview");
     expect(content[0]?.text).not.toContain("contract_version");
     expect(content[0]?.text).not.toContain('"data"');
+    expect((result._meta as { ui?: unknown } | undefined)?.ui).toBeUndefined();
+  });
+
+  it("mounts the refresh card from a ready status with an available update", async () => {
+    const { client } = await connectServer(() =>
+      makeSuccessResponse({
+        dna_status: "available",
+        analysis_status: "ready",
+        regenerate: true,
+        regeneration: { required: false, current_results_usable: true },
+      }),
+    );
+    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    const meta = result._meta as { ui?: { resourceUri?: string }; mutant?: { mode?: string } };
+    expect(meta.ui?.resourceUri).toBe("ui://mutant/dna-import/v1.html");
+    expect(meta.mutant?.mode).toBe("overview");
+    expect((result.content as Array<{ text: string }>)[0]?.text).toContain(
+      "The analysis card offers a refresh action.",
+    );
   });
 
   it("relays a structured error envelope and sets isError", async () => {

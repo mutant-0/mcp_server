@@ -88,6 +88,9 @@ block without the envelope.
 UI descriptor, the security schemes, and widget hydration state (currently
 `mutant.mode` for `show_dna_import`). No tool data, genotypes, or account state
 is placed in `_meta`.
+When a ready status reports `regenerate: true`, its result also carries the
+shared UI descriptor and widget-only `mutant.mode: "overview"`, so the refresh
+card opens with findings and hints without a second tool call.
 
 `analysis_version` is opaque. It changes when returned content changes
 (account cache revision + scoring config version). Clients that cache must
@@ -860,12 +863,11 @@ Two v2 additions to the completion view:
   `Upgrade to Mutant Full` action that asks the host to open that URL.
 - **Refresh banner.** When `get_analysis_status` reports `regenerate: true` with
   a usable current analysis, the card shows a refresh banner explaining that the
-  current results remain usable and why resubmission is requested. Choosing the
-  refresh action renders the component with `mode: "regenerate"`; the component
-  reads that mode from the `show_dna_import` result and opens the DNA
-  resubmission flow instead of the ready card, so the refresh is never re-offered
-  in a loop. A required refresh (failed analysis) is handled by the recovery card
-  instead.
+  current results remain usable and why resubmission is requested. The ready
+  status result mounts this card directly when a refresh is available. Choosing
+  the refresh action switches the card into its DNA resubmission flow without a
+  ChatGPT follow-up; the banner is no longer shown once selected. A required
+  refresh (failed analysis) is handled by the recovery card instead.
 
 Because `_meta.ui.csp` cannot declare `worker-src`, parsing prefers a Web Worker
 started from a `blob:` URL and falls back to the same parser on the main thread if
