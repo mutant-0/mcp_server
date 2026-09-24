@@ -406,9 +406,9 @@ describe("DNA import component", () => {
   it("parses locally, reviews the summary, and submits only relevant variants", async () => {
     const bridge = await renderToReview();
 
-    // Local coverage: one of the two markers was found (rs4680 is not in the panel).
-    expect(screen.getByText("1 of 2")).toBeDefined();
+    expect(screen.queryByText(/Relevant variants found/)).toBeNull();
     expect(screen.queryByText(/Non-SNV capture targets/)).toBeNull();
+    expect(screen.queryByText(/Panels covered/)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
 
