@@ -1,5 +1,6 @@
 import type { ToolResponse } from "../contract.js";
 import { withSuggestedPrompts } from "../presentation/prompts.js";
+import { withPublicUpgradeUrl } from "../presentation/upgrade.js";
 import { getAnalysisStatusInputSchema, toolResponseOutputSchema } from "../schemas/index.js";
 import { dnaImportUiMeta } from "../ui/dna-import/resource.js";
 import { respond } from "./respond.js";
@@ -43,14 +44,16 @@ export const getAnalysisStatusTool: MutantToolDefinition = {
     );
     const data = response.data;
     const showRefreshCard =
-      response.ok &&
-      data?.analysis_status === "ready" &&
-      data.regenerate === true;
-    return respond(withSuggestedPrompts(response, "get_analysis_status"), runtime, {
-      operation: "get_analysis_status",
-      ...(showRefreshCard
-        ? { meta: { ...dnaImportUiMeta(), mutant: { mode: "overview" } } }
-        : {}),
-    });
+      response.ok && data?.analysis_status === "ready" && data.regenerate === true;
+    return respond(
+      withSuggestedPrompts(withPublicUpgradeUrl(response, runtime.config), "get_analysis_status"),
+      runtime,
+      {
+        operation: "get_analysis_status",
+        ...(showRefreshCard
+          ? { meta: { ...dnaImportUiMeta(), mutant: { mode: "overview" } } }
+          : {}),
+      },
+    );
   },
 };

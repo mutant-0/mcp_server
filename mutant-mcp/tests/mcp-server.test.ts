@@ -92,9 +92,7 @@ describe("MCP server integration", () => {
     // The tool is a pass-through: the backend owns every status field.
     expect(structured.data).toMatchObject({ dna_status: "available", analysis_status: "ready" });
     // Suggested prompts are injected at the MCP boundary.
-    expect(
-      (structured.data as { suggested_prompts?: unknown[] }).suggested_prompts,
-    ).toBeDefined();
+    expect((structured.data as { suggested_prompts?: unknown[] }).suggested_prompts).toBeDefined();
 
     // The model-facing text is deterministic prose, never a serialized envelope.
     const content = result.content as Array<{ type: string; text: string }>;
@@ -104,6 +102,29 @@ describe("MCP server integration", () => {
     expect(content[0]?.text).not.toContain("contract_version");
     expect(content[0]?.text).not.toContain('"data"');
     expect((result._meta as { ui?: unknown } | undefined)?.ui).toBeUndefined();
+  });
+
+  it("replaces backend-local checkout URLs with the public portal URL", async () => {
+    const { client } = await connectServer((operation) =>
+      makeSuccessResponse(
+        operation === "get_analysis_context"
+          ? { upgrade: { label: "Unlock Full Analysis", url: "http://localhost:3000/cart" } }
+          : {
+              dna_status: "available",
+              analysis_status: "ready",
+              upgrade_url: "http://localhost:3000/cart",
+            },
+      ),
+    );
+    const context = await client.callTool({ name: "get_analysis_context", arguments: {} });
+    const status = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    expect((context.structuredContent as ToolResponse).data?.upgrade).toEqual({
+      label: "Unlock Full Analysis",
+      url: "https://mutantgenomics.com/cart",
+    });
+    expect((status.structuredContent as ToolResponse).data?.upgrade_url).toBe(
+      "https://mutantgenomics.com/cart",
+    );
   });
 
   it("mounts the refresh card from a ready status with an available update", async () => {

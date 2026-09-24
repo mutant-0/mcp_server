@@ -271,10 +271,7 @@ type FollowUpOutcome = "sent" | "failed" | "unavailable";
  * The prompt is only ever handed to the host. Nothing here renders it in the
  * widget: a missing or rejected API is reported back to the caller instead.
  */
-export async function deliverFollowUp(
-  app: App | null,
-  prompt: string,
-): Promise<FollowUpOutcome> {
+export async function deliverFollowUp(app: App | null, prompt: string): Promise<FollowUpOutcome> {
   const host = chatGptHost();
   if (host && typeof host.sendFollowUpMessage === "function") {
     try {
@@ -305,8 +302,7 @@ export async function deliverFollowUp(
 /** User-visible copy for a handoff the host could not perform. Never a prompt. */
 const FOLLOW_UP_UNAVAILABLE_MESSAGE =
   "ChatGPT can't send a follow-up message from this panel. Reopen the panel and try again.";
-const FOLLOW_UP_FAILED_MESSAGE =
-  "ChatGPT couldn't send that follow-up message. Please try again.";
+const FOLLOW_UP_FAILED_MESSAGE = "ChatGPT couldn't send that follow-up message. Please try again.";
 
 /**
  * Read the envelope out of a bridge tool result. The structured envelope is
@@ -687,8 +683,16 @@ const styles = {
   } as const,
   stageItem: { display: "flex", gap: 8, padding: "3px 0", alignItems: "baseline" } as const,
   stageMarker: { width: 12, color: "var(--mutant-accent, #1f7a3f)" } as const,
-  meta: { margin: "0 0 12px", fontSize: 13, color: "var(--color-text-secondary, #5f6368)" } as const,
-  small: { margin: "0 0 12px", fontSize: 13, color: "var(--color-text-secondary, #5f6368)" } as const,
+  meta: {
+    margin: "0 0 12px",
+    fontSize: 13,
+    color: "var(--color-text-secondary, #5f6368)",
+  } as const,
+  small: {
+    margin: "0 0 12px",
+    fontSize: 13,
+    color: "var(--color-text-secondary, #5f6368)",
+  } as const,
   findingList: { listStyle: "none", margin: "14px 0", padding: 0 } as const,
   finding: {
     border: "1px solid var(--color-border-secondary, #eceff1)",
@@ -1633,24 +1637,6 @@ export function DnaImportApp({
           </div>
         ) : null}
 
-        {upgradeUrl ? (
-          <button
-            type="button"
-            style={styles.subtleButton}
-            onClick={() => {
-              if (!app) return;
-              void app.openLink({ url: upgradeUrl }).then(
-                (result) => {
-                  if (result.isError) setHandoffError("The upgrade page could not be opened.");
-                },
-                () => setHandoffError("The upgrade page could not be opened."),
-              );
-            }}
-          >
-            Upgrade to Mutant Full
-          </button>
-        ) : null}
-
         <div style={{ ...styles.buttonRow, marginTop: 14 }}>
           {loaded ? (
             <button
@@ -1665,6 +1651,28 @@ export function DnaImportApp({
             Replace DNA data
           </button>
         </div>
+        {upgradeUrl ? (
+          <div style={{ marginTop: 12 }}>
+            <a
+              href={upgradeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={styles.subtleButton}
+              onClick={(event) => {
+                if (!app) return;
+                event.preventDefault();
+                void app.openLink({ url: upgradeUrl }).then(
+                  (result) => {
+                    if (result.isError) setHandoffError("The upgrade page could not be opened.");
+                  },
+                  () => setHandoffError("The upgrade page could not be opened."),
+                );
+              }}
+            >
+              Upgrade to Mutant Full
+            </a>
+          </div>
+        ) : null}
         {fileInput}
       </Shell>
     );
@@ -1779,11 +1787,7 @@ export function DnaImportApp({
           ) : null}
         </div>
         <div style={styles.buttonRow}>
-          <button
-            type="button"
-            style={styles.primaryButton}
-            onClick={() => void submit(app)}
-          >
+          <button type="button" style={styles.primaryButton} onClick={() => void submit(app)}>
             Create my Mutant analysis
           </button>
           <button type="button" style={styles.secondaryButton} onClick={openFilePicker}>

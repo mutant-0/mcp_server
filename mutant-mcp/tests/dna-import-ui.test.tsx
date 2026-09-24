@@ -53,8 +53,8 @@ function toolResultNotification(structured: ToolResponse, meta?: Record<string, 
     params: {
       content: [{ type: "text", text: JSON.stringify(structured) }],
       structuredContent: structured as unknown as Record<string, unknown>,
-    isError: false,
-    ...(meta ? { _meta: meta } : {}),
+      isError: false,
+      ...(meta ? { _meta: meta } : {}),
     },
   };
 }
@@ -342,7 +342,9 @@ describe("DNA import component", () => {
   it("sets the 2-3 minute expectation before a file is chosen", async () => {
     await renderApp();
 
-    expect(screen.getByText(/Generating your analysis usually takes about 2.3 minutes/i)).toBeDefined();
+    expect(
+      screen.getByText(/Generating your analysis usually takes about 2.3 minutes/i),
+    ).toBeDefined();
     expect(screen.getByRole("button", { name: /choose dna file/i })).toBeDefined();
     // The marker count comes from the catalog, so it proves the catalog was used.
     expect(screen.getByText(/2 markers in the Mutant panel/)).toBeDefined();
@@ -492,8 +494,7 @@ describe("DNA import component", () => {
     const bridge = await renderToProcessing({
       // The mount check opens on the picker; every later read reports the
       // analysis this component just created.
-      get_analysis_status: (_args, call) =>
-        call === 1 ? STATUS_MISSING : statusResponse(status),
+      get_analysis_status: (_args, call) => (call === 1 ? STATUS_MISSING : statusResponse(status)),
     });
 
     expect(bridge.callsTo("create_report")).toHaveLength(1);
@@ -672,9 +673,7 @@ describe("DNA import component", () => {
     const chip = await screen.findByRole("button", { name: "Explain #1" });
     fireEvent.click(chip);
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
-    expect(JSON.stringify(bridge.messages[0])).toContain(
-      "Explain my #1 finding in plain English.",
-    );
+    expect(JSON.stringify(bridge.messages[0])).toContain("Explain my #1 finding in plain English.");
   });
 
   it("opens the overview route with findings and hints already visible", async () => {
@@ -738,7 +737,10 @@ describe("DNA import component", () => {
     fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
     await screen.findByRole("button", { name: "Compare with my records" });
     expect(screen.getByRole("button", { name: "Compare all with Full" })).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Upgrade to Mutant Full" }));
+    const upgradeLink = screen.getByRole("link", { name: "Upgrade to Mutant Full" });
+    expect(upgradeLink.getAttribute("href")).toBe("https://mutantgenomics.com/cart");
+    expect(upgradeLink.getAttribute("target")).toBe("_blank");
+    fireEvent.click(upgradeLink);
     await waitFor(() => expect(bridge.openLinks).toEqual(["https://mutantgenomics.com/cart"]));
   });
 
@@ -763,7 +765,7 @@ describe("DNA import component", () => {
     await screen.findByText(/Analysis ready/i);
     fireEvent.click(screen.getByRole("button", { name: /view my findings/i }));
     await screen.findByRole("button", { name: "Compare all findings" });
-    expect(screen.queryByRole("button", { name: "Upgrade to Mutant Full" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Upgrade to Mutant Full" })).toBeNull();
     expect(bridge.openLinks).toHaveLength(0);
   });
 
