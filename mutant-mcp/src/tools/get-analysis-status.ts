@@ -20,6 +20,9 @@ export const getAnalysisStatusTool: MutantToolDefinition = {
     "permits, and what to do next. Use this first when readiness is unknown.\n\n" +
     'If the result has dna_status="missing", do not answer with import instructions: call ' +
     "show_dna_import in the same turn so the DNA import UI is rendered.\n\n" +
+    'If analysis_status="ready" and the user is opening Mutant or asking for an overview, ' +
+    "call show_analysis_overview in the same turn. Its card shows findings and hints; do not " +
+    "write a duplicate prose summary.\n\n" +
     "A regenerate=true result means an optional refreshed analysis is available after DNA " +
     "resubmission; it does not invalidate the current results. Offer the refresh but continue " +
     "to the existing analysis unless the user asks for it or required is true.\n\n" +

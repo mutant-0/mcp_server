@@ -12,11 +12,13 @@ import { getSupportingEvidenceTool } from "./get-supporting-evidence.js";
 import { listHealthHypothesesTool } from "./list-health-hypotheses.js";
 import { respond } from "./respond.js";
 import { enforceScope } from "./scope-guard.js";
+import { showAnalysisOverviewTool } from "./show-analysis-overview.js";
 import { showDnaImportTool } from "./show-dna-import.js";
 import type { MutantToolDefinition, ToolRuntime } from "./types.js";
 
 export const TOOL_DEFINITIONS: MutantToolDefinition[] = [
   getAnalysisStatusTool,
+  showAnalysisOverviewTool,
   getAnalysisContextTool,
   listHealthHypothesesTool,
   explainHealthHypothesisTool,

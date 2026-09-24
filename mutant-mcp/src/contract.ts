@@ -13,6 +13,7 @@ export const CONTRACT_VERSION = "2.0.0";
  */
 export const ANALYSIS_TOOL_NAMES = [
   "get_analysis_status",
+  "show_analysis_overview",
   "get_analysis_context",
   "list_health_hypotheses",
   "explain_health_hypothesis",

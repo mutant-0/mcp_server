@@ -37,7 +37,7 @@ export function dnaImportUiMeta(): Record<string, unknown> {
 }
 
 /**
- * Register the DNA import UI resource.
+ * Register the shared analysis overview and DNA import UI resource.
  *
  * The component is served as a single self-contained HTML document so the host
  * can cache it independently of tool results. Its Content Security Policy is
@@ -55,12 +55,12 @@ export function registerDnaImportUi(
 ): void {
   registerAppResource(
     server,
-    "Mutant DNA Import",
+    "Mutant Genomics",
     DNA_IMPORT_UI_URI,
     {
-      title: "Mutant DNA Import",
+      title: "Mutant Genomics",
       description:
-        "Upload a raw DNA file and submit only the Mutant-relevant variants, processed locally in the browser.",
+        "View your analysis findings and hints, or import DNA processed locally in the browser.",
       _meta: { ui: { prefersBorder: true } },
     },
     async () => ({

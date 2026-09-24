@@ -92,7 +92,11 @@ function statusContent(data: JsonObject): string {
 
   const nextAction = asRecord(data.next_action);
   const nextTool = nextAction ? asText(nextAction.tool) : null;
-  if (nextTool) parts.push(`Next: call ${nextTool}.`);
+  if (analysis === "ready") {
+    parts.push("For an overview, open the analysis card with show_analysis_overview.");
+  } else if (nextTool) {
+    parts.push(`Next: call ${nextTool}.`);
+  }
 
   return parts.join(" ");
 }
@@ -408,6 +412,8 @@ export function buildContent(operation: ToolName | undefined, response: ToolResp
       return geneticContextContent(data);
     case "show_dna_import":
       return "DNA import component displayed.";
+    case "show_analysis_overview":
+      return "Analysis overview card displayed.";
     case "get_snp_catalog":
       return "SNP catalog returned for the DNA import component.";
     case "create_report":

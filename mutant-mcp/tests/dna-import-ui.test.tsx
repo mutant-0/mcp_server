@@ -676,6 +676,41 @@ describe("DNA import component", () => {
     );
   });
 
+  it("opens the overview route with findings and hints already visible", async () => {
+    const bridge = renderWith(
+      {
+        get_analysis_status: statusResponse("ready"),
+        get_analysis_context: makeSuccessResponse({
+          suggested_prompts: [
+            {
+              id: "compare-medical-records",
+              label: "Compare with my records",
+              prompt: "Compare my findings with records I shared.",
+              intent: "comparison",
+            },
+          ],
+        }),
+      },
+      { mode: "overview" },
+    );
+
+    await screen.findByText(/Alpha finding/i);
+    await screen.findByRole("button", { name: "Compare with my records" });
+    expect(screen.queryByRole("button", { name: /view my top 3 findings/i })).toBeNull();
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
+    expect(bridge.callsTo("get_analysis_context")).toHaveLength(1);
+  });
+
+  it("opens findings when the host delivers the overview tool result", async () => {
+    const bridge = renderWith({ get_analysis_status: statusResponse("ready") });
+
+    await screen.findByText(/Analysis ready/i);
+    bridge.sendToolResult(makeSuccessResponse({ ui_rendered: true, mode: "overview" }));
+
+    await screen.findByText(/Alpha finding/i);
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
+  });
+
   it("offers record comparison and the Full upgrade only to Free accounts", async () => {
     const bridge = renderWith({
       get_analysis_status: statusResponse("ready"),

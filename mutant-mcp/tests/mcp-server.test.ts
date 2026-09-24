@@ -25,11 +25,11 @@ async function connectServer(responder: (operation: string) => ToolResponse) {
 }
 
 describe("MCP server integration", () => {
-  it("lists the nine contract tools with schemas", async () => {
+  it("lists the ten contract tools with schemas", async () => {
     const { client } = await connectServer(() => makeSuccessResponse());
     const result = await client.listTools();
     expect(result.tools.map((tool) => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
-    expect(result.tools).toHaveLength(9);
+    expect(result.tools).toHaveLength(10);
     for (const tool of result.tools) {
       expect(tool.inputSchema).toBeDefined();
       expect(tool.outputSchema).toBeDefined();
@@ -45,6 +45,31 @@ describe("MCP server integration", () => {
       const expected = dnaTools.has(tool.name) ? DNA_SCOPE : ANALYSIS_SCOPE;
       expect(meta?.securitySchemes?.[0]?.scopes).toEqual([expected]);
     }
+  });
+
+  it("renders the overview card with analysis.read and without a backend call", async () => {
+    const backendClient = new StubBackendClient(() => makeSuccessResponse());
+    const server = createMcpServer(
+      makeUser({ scopes: [ANALYSIS_SCOPE] }),
+      makeConfig(),
+      "req-overview",
+      backendClient,
+    );
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({ name: "show_analysis_overview", arguments: {} });
+    expect(result.isError).toBe(false);
+    expect((result.structuredContent as ToolResponse).data).toEqual({
+      ui_rendered: true,
+      mode: "overview",
+    });
+    expect((result._meta as { ui?: { resourceUri?: string } }).ui?.resourceUri).toBe(
+      "ui://mutant/dna-import/v1.html",
+    );
+    expect(backendClient.calls).toHaveLength(0);
   });
 
   it("advertises the resources capability for the Apps SDK component", async () => {
@@ -75,6 +100,7 @@ describe("MCP server integration", () => {
     const content = result.content as Array<{ type: string; text: string }>;
     expect(content[0]?.type).toBe("text");
     expect(content[0]?.text).toContain("ready");
+    expect(content[0]?.text).toContain("show_analysis_overview");
     expect(content[0]?.text).not.toContain("contract_version");
     expect(content[0]?.text).not.toContain('"data"');
   });

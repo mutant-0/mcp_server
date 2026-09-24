@@ -11,7 +11,7 @@ One-time setup (Cognito console or CLI):
 1. **Resource server + scopes.** Create a resource server whose identifier is the
    MCP resource URI (`MUTANT_MCP_RESOURCE_URI`, e.g.
    `https://dev-api.mutantbiotech.com/mcp`) with two custom scopes:
-   - `analysis.read` — the six analysis tools, and
+   - `analysis.read` — the seven analysis tools, and
    - `dna.import` — `show_dna_import`, `get_snp_catalog`, `create_report`.
 
    Cognito composes the two into the full scopes
@@ -162,8 +162,9 @@ npx @modelcontextprotocol/inspector
 ```
 
 Connect to `http://localhost:8080/mcp` with `Bearer dev-paid` (or `dev-free`).
-All nine tools must be discoverable. Call `get_analysis_status`, then
-`get_analysis_context`, then `explain_health_hypothesis` for a returned id.
+All ten tools must be discoverable. Call `get_analysis_status`, then
+`show_analysis_overview` to verify the ready card and hints, and
+`get_analysis_context` followed by `explain_health_hypothesis` for a returned id.
 
 To exercise the scope boundary locally, connect with `Bearer dev-readonly`
 (analysis only) or `Bearer dev-dna` (DNA import only) and confirm the other

@@ -22,7 +22,7 @@ function inputKeys(tool: MutantToolDefinition): string[] {
 }
 
 describe("tool definitions", () => {
-  it("exposes exactly the nine contract tools in order", () => {
+  it("exposes exactly the ten contract tools in order", () => {
     expect(TOOL_DEFINITIONS.map((tool) => tool.name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_DEFINITIONS).toHaveLength(
       ANALYSIS_TOOL_NAMES.length + DNA_IMPORT_TOOL_NAMES.length,
@@ -98,11 +98,11 @@ describe("tool definitions", () => {
     }
   });
 
-  it("attaches the Apps SDK UI descriptor to show_dna_import only", () => {
+  it("attaches the Apps SDK UI descriptor to the two display tools only", () => {
     const config = makeConfig();
     for (const tool of TOOL_DEFINITIONS) {
       const meta = toolMeta(tool, config) as Record<string, unknown>;
-      if (tool.name !== "show_dna_import") {
+      if (tool.name !== "show_dna_import" && tool.name !== "show_analysis_overview") {
         expect(meta["openai/outputTemplate"]).toBeUndefined();
         expect(meta["ui/resourceUri"]).toBeUndefined();
         continue;

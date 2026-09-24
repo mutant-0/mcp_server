@@ -111,7 +111,7 @@ type DnaStatus = "missing" | "available" | "unknown";
  * the resubmission flow. Falling back to the ready card would re-offer the same
  * refresh the user just accepted, and every click would loop.
  */
-type ImportMode = "initial" | "regenerate";
+type ImportMode = "initial" | "regenerate" | "overview";
 
 /** What `get_analysis_status` told us about the account. */
 interface StatusInfo {
@@ -336,10 +336,8 @@ function envelopeOf(result: {
 }
 
 /**
- * Read the selected import mode out of a `show_dna_import` tool result. Only
- * that tool echoes a `mode`, so a result without one (every other tool, or a
- * host that strips the field) is ignored and the component keeps its current
- * intent.
+ * Read the selected mode out of a display-tool result. Results without one
+ * are ignored, so unrelated tool calls cannot change the component's intent.
  */
 function importModeFrom(result: {
   structuredContent?: unknown;
@@ -348,7 +346,7 @@ function importModeFrom(result: {
   const envelope = envelopeOf(result);
   const data = envelope ? asRecord(envelope.data) : null;
   const mode = data?.mode;
-  if (mode === "regenerate" || mode === "initial") return mode;
+  if (mode === "regenerate" || mode === "initial" || mode === "overview") return mode;
   return null;
 }
 
@@ -846,13 +844,12 @@ export function DnaImportApp({
     isConnected,
     error: connectError,
   } = useApp({
-    appInfo: { name: "Mutant DNA Import", version: "1.0.0" },
+    appInfo: { name: "Mutant Genomics", version: "1.0.0" },
     capabilities: {},
     onAppCreated: (created) => {
       created.onerror = logBridgeError;
-      // The `show_dna_import` result is the only place the host tells the
-      // component why it was rendered. Register before `connect` so the
-      // one-shot notification is not missed, and ignore every other result.
+      // The display tool result tells the component why it was rendered.
+      // Register before `connect` so the one-shot notification is not missed.
       created.ontoolresult = (result) => {
         const next = importModeFrom(result);
         if (next) selectImportMode(next);
@@ -1400,6 +1397,11 @@ export function DnaImportApp({
       setFindingsState({ status: "error", message: messageFor("service_unavailable") });
     }
   }, [app, isFull, loadPromptChips, setFindingsState]);
+
+  // The overview route opens directly on its findings and follow-up hints.
+  useEffect(() => {
+    if (stage === "analysis_ready" && importMode === "overview") void loadFindings();
+  }, [stage, importMode, loadFindings]);
 
   /**
    * Hand control back to ChatGPT only when the user asks for interpretation.

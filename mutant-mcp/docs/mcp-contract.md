@@ -27,7 +27,7 @@ authorization happens per tool** (see `src/tools/scope-guard.ts`):
 
 | Scope | Granted tools |
 |---|---|
-| `<resource>/analysis.read` | the six analysis tools |
+| `<resource>/analysis.read` | the seven analysis tools |
 | `<resource>/dna.import` | `show_dna_import`, `get_snp_catalog`, `create_report` |
 
 Both are advertised in protected-resource metadata, authorization-server
@@ -130,14 +130,17 @@ Each tool maps to a distinct user goal. The routing contract is:
 | Tool | Responsibility |
 |---|---|
 | `get_analysis_status` | Establish connection, DNA readiness, analysis readiness, entitlement, and regeneration state. |
-| `get_analysis_context` | Bootstrap the experience: interpretation contract, scoring semantics, boundaries, access scope, compact top-hypothesis preview, and useful next questions. |
+| `show_analysis_overview` | Open the ready-analysis Apps SDK card with accessible findings and hints. |
+| `get_analysis_context` | Supply interpretation rules, boundaries, access scope, compact top-hypothesis preview, and useful next questions for specific analysis questions. |
 | `list_health_hypotheses` | Browse, search, sort, paginate, and compare accessible hypotheses. |
 | `explain_health_hypothesis` | Explain one hypothesis in depth. |
 | `get_supporting_evidence` | Expand one evidence category for one hypothesis. |
 | `get_genetic_context` | Answer marker-, gene-, or module-level questions. |
 
-Call `get_analysis_status` first; call `get_analysis_context` once after status
-reports `analysis_status: "ready"`; use `list_health_hypotheses` for subsequent
+Call `get_analysis_status` first. For a general overview when the analysis is
+ready, call `show_analysis_overview` and let the card present results. For a
+specific question, call `get_analysis_context` after status reports ready, then
+use `list_health_hypotheses` for subsequent
 browsing, searching, sorting, pagination, and comparison; use
 `explain_health_hypothesis` or `get_supporting_evidence` for a single finding.
 
@@ -190,6 +193,8 @@ Input: `{}`. A successful call even with no analysis.
   `show_dna_import` when DNA is missing, `get_analysis_context` when ready,
   `get_analysis_status` while processing, and `show_dna_import` with
   `arguments: { mode: "regenerate" }` when a required refresh is the only path.
+  The MCP presentation uses `show_analysis_overview` for an initial ready-state
+  overview; the backend's `next_action` remains unchanged for data exploration.
 - `optional_actions` is present when regeneration is available but **not
   required**: a list of `ToolAction`s the user may choose (currently the
   `show_dna_import` refresh).
@@ -708,10 +713,19 @@ Output:
 
 ## DNA import
 
-Three tools and one UI resource. The raw DNA file is parsed in the user's browser;
+Three DNA import tools and one shared UI resource. The raw DNA file is parsed in the user's browser;
 only catalog-matched variants are submitted. The MCP layer adds no genetics: it
 validates shape and size, forwards the payload with a server-derived identity, and
 returns a narrowed response.
+
+### `show_analysis_overview`
+
+Input: `{}`. Scope `analysis.read`. No backend call. This MCP-only display tool
+mounts the shared Apps SDK card when a ready analysis is opened for a general
+overview. Its result contains only `{ "ui_rendered": true, "mode": "overview" }`
+and the UI descriptor. The card reads current status, then loads accessible
+findings and the context hints automatically. The model should let the card
+present these results rather than repeating the context preview in prose.
 
 ### `show_dna_import`
 
@@ -1182,7 +1196,7 @@ The contract is covered by:
   roles on `kind: "variants"`, the legacy `unknown` fallback, genetic-context
   rsID dedupe with `pattern_memberships`, and the entitlement
   `hypothesis_markers` rename.
-- `mutant-mcp/tests/tools.test.ts`, `schemas.test.ts` — nine tools, version,
+- `mutant-mcp/tests/tools.test.ts`, `schemas.test.ts` — ten tools, version,
   input schemas (including `show_dna_import.mode`, the `modules` evidence kind,
   and `include_context`).
 - `mutant-mcp/tests/dna-import.test.ts` — status pass-through (no Lambda

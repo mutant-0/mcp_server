@@ -4,7 +4,7 @@ A deployable, stateless [Model Context Protocol](https://modelcontextprotocol.io
 server for Mutant Genomics. It runs as an AWS Lambda behind API Gateway at a
 custom domain (e.g. `https://dev-api.mutantbiotech.com/mcp`), authenticates users
 with Mutant's Cognito OAuth (authorization code + PKCE S256), and exposes the
-**nine-tool contract 2.0.0** backed by the existing `report-generator` Lambda,
+**ten-tool MCP surface using contract 2.0.0** backed by the existing `report-generator` Lambda,
 plus a [ChatGPT Apps SDK](https://developers.openai.com/apps-sdk) component for
 DNA import.
 
@@ -32,12 +32,14 @@ processing finished. `show_dna_import` returns only `{ ui_rendered: true, mode }
 (plus widget-only `_meta.mutant.mode`), so there is no stale status for the model
 to narrate.
 
-The completion view also renders state-aware `suggested_prompts` as chips (from
+`show_analysis_overview` opens the same component under `analysis.read` for a
+ready analysis and loads accessible findings and hints immediately. The
+completion view also renders state-aware `suggested_prompts` as chips (from
 `get_analysis_context`), and — when `get_analysis_status` reports
 `regenerate: true` with a usable current analysis — an optional refresh banner.
 A required refresh (failed analysis) is handled by the recovery card instead.
 
-Two scopes gate the surface: the six analysis tools require `analysis.read`, and
+Two scopes gate the surface: the seven analysis tools require `analysis.read`, and
 `show_dna_import` / `get_snp_catalog` / `create_report` require `dna.import`.
 Because importing DNA creates user data, a read-only grant can never trigger it.
 A `dna.import`-only grant still imports, but the completion card explains that
@@ -90,7 +92,7 @@ mutant-mcp/
 │   │   ├── token-validator.ts     # JWT/JWKS + client/scope/resource checks
 │   │   ├── oauth-metadata.ts      # RFC 9728 PRM + AS metadata mirror
 │   │   └── user-context.ts        # MutantUserContext (userId + scopes)
-│   ├── tools/                     # nine tool definitions + registration
+│   ├── tools/                     # ten tool definitions + registration
 │   │   └── scope-guard.ts         # per-tool scope enforcement
 │   ├── schemas/                   # Zod input + shared envelope schemas
 │   ├── presentation/              # deterministic content builders + prompts
@@ -129,7 +131,8 @@ mutant-mcp/
 | Tool | Scope | Purpose |
 |---|---|---|
 | `get_analysis_status` | `analysis.read` | Routing gate: `dna_status`, `analysis_status`, entitlement/capabilities, a mandatory `regenerate` flag (+ `regeneration` details), and an object `next_action`/`optional_actions`. Polled by the DNA import component while an analysis is processing. |
-| `get_analysis_context` | `analysis.read` | **Start here.** The versioned interpretation contract, coverage, access scope, a compact top-three hypothesis preview, and suggested prompts. |
+| `show_analysis_overview` | `analysis.read` | Renders the ready-analysis card with accessible findings and hints for an initial overview. No backend call or echoed status. |
+| `get_analysis_context` | `analysis.read` | The versioned interpretation contract, coverage, access scope, a compact top-three hypothesis preview, and suggested prompts for specific questions. |
 | `list_health_hypotheses` | `analysis.read` | List/search hypotheses (`items` + `next_cursor`; Free: fixed top three, Full: whole set). |
 | `explain_health_hypothesis` | `analysis.read` | Explanation-ready projection: scores, why-ranked, contributing patterns, clinical context, confirmation plan, guardrails. |
 | `get_supporting_evidence` | `analysis.read` | Stored patterns, deduped variant contributions, cited sources, or full test guidance (`kind: "tests"`). |
@@ -209,7 +212,7 @@ npx @modelcontextprotocol/inspector
 ```
 
 Connect to `http://localhost:8080/mcp` with `Bearer dev-paid` or `Bearer dev-free`.
-All nine tools are discoverable. The `dev-*` tokens carry different scopes so the
+All ten tools are discoverable. The `dev-*` tokens carry different scopes so the
 per-tool authorization boundary can be exercised locally:
 
 | Token | Scopes granted |
@@ -249,7 +252,7 @@ origin to fetch sibling assets from.
 | `MUTANT_OAUTH_ISSUER` | OIDC issuer / Cognito user-pool URL. |
 | `MUTANT_OAUTH_AUDIENCE` | Optional. Expected `aud` claim; leave empty for Cognito without a resource server. |
 | `MUTANT_OAUTH_CLIENT_ID` | Predefined Cognito app client authorized for the ChatGPT redirect URI. |
-| `MUTANT_OAUTH_SCOPE` | Required access-token scope for the six analysis tools. Empty (default) derives `<MUTANT_MCP_RESOURCE_URI>/analysis.read`, e.g. `https://dev-api.mutantbiotech.com/mcp/analysis.read`. Set explicitly only to override. |
+| `MUTANT_OAUTH_SCOPE` | Required access-token scope for the seven analysis tools. Empty (default) derives `<MUTANT_MCP_RESOURCE_URI>/analysis.read`, e.g. `https://dev-api.mutantbiotech.com/mcp/analysis.read`. Set explicitly only to override. |
 | `MUTANT_OAUTH_SCOPE_DNA_IMPORT` | Scope required by `show_dna_import`, `get_snp_catalog`, and `create_report`. Empty (default) derives `<MUTANT_MCP_RESOURCE_URI>/dna.import`. |
 | `MUTANT_MCP_RESOURCE_URI` | Canonical RFC 9728 resource id (used in PRM + challenges, and as the scope's resource-server identifier). |
 | `MUTANT_CORS_ORIGINS` | Comma-separated browser origin allowlist. |

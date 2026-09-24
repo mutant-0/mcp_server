@@ -26,6 +26,7 @@ import {
 /** Minimal arguments that satisfy each tool's input schema. */
 const MINIMAL_ARGS: Record<ToolName, Record<string, unknown>> = {
   get_analysis_status: {},
+  show_analysis_overview: {},
   get_analysis_context: {},
   list_health_hypotheses: {},
   explain_health_hypothesis: { hypothesis_id: "HYP_A" },
@@ -239,6 +240,8 @@ function dataFor(operation: ToolName): Record<string, unknown> {
       };
     case "show_dna_import":
       return { ui_rendered: true, mode: "initial" };
+    case "show_analysis_overview":
+      return { ui_rendered: true, mode: "overview" };
     case "create_report":
       return { analysis_id: "analysis_1", status: "processing" };
   }
