@@ -146,6 +146,7 @@ interface HostBridge {
   toolCalls: ToolCall[];
   modelContextUpdates: unknown[];
   messages: Array<Record<string, unknown>>;
+  openLinks: string[];
   callsTo(name: string): ToolCall[];
   sendToolResult(structured: ToolResponse): void;
   /** Detach the listener, so a finished test cannot answer the next one's calls. */
@@ -165,6 +166,7 @@ function installHostBridge(responders: Responders = {}, options: BridgeOptions =
   const toolCalls: ToolCall[] = [];
   const modelContextUpdates: unknown[] = [];
   const messages: Array<Record<string, unknown>> = [];
+  const openLinks: string[] = [];
   const calls = new Map<string, number>();
 
   function answer(name: string, args: Record<string, unknown>): ToolResponse {
@@ -185,7 +187,7 @@ function installHostBridge(responders: Responders = {}, options: BridgeOptions =
       jsonrpc?: string;
       id?: number;
       method?: string;
-      params?: { name?: string; arguments?: Record<string, unknown> };
+      params?: { name?: string; arguments?: Record<string, unknown>; url?: string };
     };
     if (!message || message.jsonrpc !== "2.0") return;
     // Responses to our own requests have no `method`; notifications have no `id`.
@@ -217,6 +219,11 @@ function installHostBridge(responders: Responders = {}, options: BridgeOptions =
       reply(message.id, options.messageResult ?? {});
       return;
     }
+    if (message.method === "ui/open-link") {
+      openLinks.push(String(message.params?.url ?? ""));
+      reply(message.id, {});
+      return;
+    }
     // Anything else (open-link, size-changed is a notification, ...) is
     // acknowledged so the app never hangs on an unanswered request.
     reply(message.id, {});
@@ -228,6 +235,7 @@ function installHostBridge(responders: Responders = {}, options: BridgeOptions =
     toolCalls,
     modelContextUpdates,
     messages,
+    openLinks,
     callsTo: (name) => toolCalls.filter((call) => call.name === name),
     sendToolResult: (structured) => {
       deliverToApp({ jsonrpc: "2.0", ...toolResultNotification(structured) });
@@ -666,6 +674,61 @@ describe("DNA import component", () => {
     expect(JSON.stringify(bridge.messages[0])).toContain(
       "Explain my #1 finding in plain English.",
     );
+  });
+
+  it("offers record comparison and the Full upgrade only to Free accounts", async () => {
+    const bridge = renderWith({
+      get_analysis_status: statusResponse("ready"),
+      get_analysis_context: makeSuccessResponse({
+        upgrade: { label: "Unlock Full Analysis", url: "https://mutantgenomics.com/cart" },
+        suggested_prompts: [
+          {
+            id: "compare-medical-records",
+            label: "Compare with my records",
+            prompt: "Compare my accessible findings with records I have shared.",
+            intent: "comparison",
+          },
+          {
+            id: "full-scope",
+            label: "Compare all with Full",
+            prompt: "How would Full compare all ranked hypotheses with my records?",
+            intent: "overview",
+          },
+        ],
+      }),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+    await screen.findByRole("button", { name: "Compare with my records" });
+    expect(screen.getByRole("button", { name: "Compare all with Full" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Upgrade to Mutant Full" }));
+    await waitFor(() => expect(bridge.openLinks).toEqual(["https://mutantgenomics.com/cart"]));
+  });
+
+  it("does not offer an upgrade to a Full account", async () => {
+    const bridge = renderWith({
+      get_analysis_status: statusResponse("ready", {
+        plan: "Mutant Full",
+        entitlement: { plan: "mutant_full", hypothesis_scope: "all" },
+      }),
+      get_analysis_context: makeSuccessResponse({
+        suggested_prompts: [
+          {
+            id: "compare-all",
+            label: "Compare all findings",
+            prompt: "Compare all findings with my records.",
+            intent: "comparison",
+          },
+        ],
+      }),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my findings/i }));
+    await screen.findByRole("button", { name: "Compare all findings" });
+    expect(screen.queryByRole("button", { name: "Upgrade to Mutant Full" })).toBeNull();
+    expect(bridge.openLinks).toHaveLength(0);
   });
 
   it("offers an optional refresh when regeneration is available", async () => {

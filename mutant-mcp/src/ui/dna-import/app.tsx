@@ -455,6 +455,17 @@ function isFullAccount(analysis: AnalysisState | null): boolean {
   return analysis?.hypothesisScope === "all" || analysis?.planSlug === "mutant_full";
 }
 
+/** Only allow browser-safe destinations supplied by the analysis service. */
+function safeUpgradeUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Pull the hypothesis summaries out of a `list_health_hypotheses` payload. The
  * shapes are accepted defensively: this renders whatever the backend sends and
@@ -1319,6 +1330,7 @@ export function DnaImportApp({
   const startedAt = startedAtRef.current;
   const elapsedMs = startedAt === null ? 0 : Math.max(0, now - startedAt);
   const isFull = isFullAccount(analysis);
+  const upgradeUrl = isFull ? null : safeUpgradeUrl(analysis?.upgradeUrl ?? null);
 
   /** Resume polling after the ceiling or a run of transient failures. */
   const checkAgain = useCallback(() => {
@@ -1347,6 +1359,11 @@ export function DnaImportApp({
       const envelope = envelopeOf(result);
       if (result.isError || !envelope || !envelope.ok) return;
       setPrompts(promptsFrom(envelope.data));
+      const upgrade = asRecord(asRecord(envelope.data)?.upgrade);
+      const url = safeUpgradeUrl(firstString(upgrade?.url));
+      if (url) {
+        setAnalysis((previous) => (previous ? { ...previous, upgradeUrl: url } : previous));
+      }
     } catch {
       // Chips are an enhancement; a failure must not disturb the findings card.
     }
@@ -1608,6 +1625,24 @@ export function DnaImportApp({
               </button>
             ))}
           </div>
+        ) : null}
+
+        {upgradeUrl ? (
+          <button
+            type="button"
+            style={styles.subtleButton}
+            onClick={() => {
+              if (!app) return;
+              void app.openLink({ url: upgradeUrl }).then(
+                (result) => {
+                  if (result.isError) setHandoffError("The upgrade page could not be opened.");
+                },
+                () => setHandoffError("The upgrade page could not be opened."),
+              );
+            }}
+          >
+            Upgrade to Mutant Full
+          </button>
         ) : null}
 
         <div style={{ ...styles.buttonRow, marginTop: 14 }}>

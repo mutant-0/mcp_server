@@ -123,10 +123,10 @@ function contextPrompts(data: JsonObject): PromptSuggestion[] {
       intent: "comparison",
     },
     {
-      id: "match-health-context",
-      label: "Match my health context",
+      id: "compare-medical-records",
+      label: "Compare with my records",
       prompt:
-        "Which of my accessible findings are most relevant to the health context I have shared here?",
+        "Compare my accessible Mutant findings with medical records I have shared in this chat. If I have not shared any, ask which records I want to provide. Do not assume symptoms or test results I have not given you.",
       intent: "comparison",
     },
   ];
@@ -138,11 +138,19 @@ function contextPrompts(data: JsonObject): PromptSuggestion[] {
       prompt: "Search my complete analysis for findings by topic.",
       intent: "overview",
     });
+    out.push({
+      id: "compare-all",
+      label: "Compare all findings",
+      prompt:
+        "Compare all findings in my complete Mutant analysis with medical records I have shared in this chat. If I have not shared any, ask which records I want to provide. Keep genetic findings separate from my clinical records.",
+      intent: "comparison",
+    });
   } else if (locked !== null && locked > 0) {
     out.push({
       id: "full-scope",
-      label: "What Full unlocks",
-      prompt: "What additional hypotheses can Mutant Full search beyond my top three?",
+      label: "Compare all with Full",
+      prompt:
+        "How would Mutant Full let me compare all ranked hypotheses with my medical records? Explain what it unlocks beyond my accessible top three without revealing locked findings.",
       intent: "overview",
     });
   }

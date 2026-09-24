@@ -112,8 +112,9 @@ add a `suggested_prompts` array to their `data`
 - State-aware: DNA missing (import format/privacy), ready (overview/explain/
   compare/clinician), processing (what happens next), regeneration available
   (why refresh / start refresh), analysis context (explain #1 / compare top
-  three / match health context, plus a Full-scope or what-Full-unlocks prompt
-  from the access summary), hypothesis detail (why ranked / evidence /
+  three / compare with medical records shared in the chat, plus compare-all
+  for Full or a Full-scope prompt for Free accounts with locked findings),
+  hypothesis detail (why ranked / evidence /
   confirmation / what changes it / clinician).
 - `prompt` is exact user-visible natural language. It must never contain an
   internal command, a tool name, or a raw hypothesis id. `explain_health_hypothesis`
@@ -840,7 +841,9 @@ Two v2 additions to the completion view:
 - **Prompt chips.** After loading findings, the component fetches
   `get_analysis_context` and renders its `suggested_prompts` as chips. Clicking
   one sends the exact `prompt` prose through the same host follow-up path. The
-  chip label is shown; the prose is never rendered inside the card.
+  chip label is shown; the prose is never rendered inside the card. Free accounts
+  with an upgrade URL from the status or context response also see an
+  `Upgrade to Mutant Full` action that asks the host to open that URL.
 - **Refresh banner.** When `get_analysis_status` reports `regenerate: true` with
   a usable current analysis, the card shows a refresh banner explaining that the
   current results remain usable and why resubmission is requested. Choosing the

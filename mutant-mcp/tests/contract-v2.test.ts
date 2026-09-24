@@ -354,8 +354,9 @@ describe("contract v2.0 acceptance", () => {
     const ids = (data.suggested_prompts ?? []).map((prompt) => prompt.id);
     expect(ids).toContain("explain-first");
     expect(ids).toContain("compare-top-three");
-    expect(ids).toContain("match-health-context");
+    expect(ids).toContain("compare-medical-records");
     expect(ids).toContain("search-all");
+    expect(ids).toContain("compare-all");
     expect(ids).not.toContain("full-scope");
   });
 
@@ -385,6 +386,9 @@ describe("contract v2.0 acceptance", () => {
     const ids = (data.suggested_prompts ?? []).map((prompt) => prompt.id);
     expect(ids).toContain("full-scope");
     expect(ids).not.toContain("search-all");
+    expect(ids).not.toContain("compare-all");
+    const prompts = data.suggested_prompts ?? [];
+    expect(prompts).toEqual(expect.arrayContaining([expect.objectContaining({ id: "full-scope" })]));
   });
 
   it("reports errors as short text without echoing the envelope", async () => {
