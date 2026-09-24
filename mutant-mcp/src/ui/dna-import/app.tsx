@@ -1553,7 +1553,7 @@ export function DnaImportApp({
                   style={styles.subtleButton}
                   onClick={() =>
                     void askChatGpt(
-                      `Explain my "${finding.title}" finding from my Mutant analysis.`,
+                      `Explain my "${finding.title}" finding from my Mutant analysis in useful detail. Retrieve the full finding details first. Cover what it means, why it ranked where it did, the main module and pattern evidence, what is provisional or uncertain, what would strengthen or weaken it, and the specific confirmation options returned for this finding. Use clear headings and distinguish my genetic results from symptoms or test results I have not shared.`,
                     )
                   }
                 >

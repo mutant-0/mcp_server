@@ -45,6 +45,8 @@ describe("tool definitions", () => {
     expect(details?.description).toContain("broad or concentrated");
     expect(details?.description).toContain("modules and retained patterns");
     expect(details?.description).toContain("Explain modules and patterns before individual genes");
+    expect(details?.description).toContain("use the structured result");
+    expect(details?.description).toContain("confirmation options");
 
     const evidence = TOOL_DEFINITIONS.find((tool) => tool.name === "get_supporting_evidence");
     expect(evidence?.description).toContain('"modules"');

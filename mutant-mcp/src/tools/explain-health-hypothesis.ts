@@ -16,7 +16,11 @@ export const explainHealthHypothesisTool: MutantToolDefinition = {
     "ranked, the boundary between genetic support and an established condition, at most two short " +
     "primary confirmation checks, and what would strengthen or weaken the interpretation. Explain " +
     "modules and patterns before individual genes or variants. Use get_supporting_evidence only " +
-    "when the user asks for detailed modules, patterns, variants, sources, or tests.",
+    "when the user asks for detailed modules, patterns, variants, sources, or tests. " +
+    "For an explanation of a finding, use the structured result to cover its rank and scoring " +
+    "drivers, module and pattern contributions, provisional evidence, confirmation options, " +
+    "and what would strengthen or weaken the interpretation. Keep genetic findings distinct " +
+    "from symptoms or test results the user has not reported.",
   scope: "analysis.read",
   inputSchema: explainHealthHypothesisInputSchema,
   outputSchema: toolResponseOutputSchema,

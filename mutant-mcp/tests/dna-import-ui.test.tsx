@@ -616,6 +616,9 @@ describe("DNA import component", () => {
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
     const sent = JSON.stringify(bridge.messages[0]);
     expect(sent).toMatch(/Alpha finding/);
+    expect(sent).toMatch(/Retrieve the full finding details first/);
+    expect(sent).toMatch(/what would strengthen or weaken it/);
+    expect(sent).toMatch(/symptoms or test results I have not shared/);
     // Prompts are user-visible natural language, never internal ids.
     expect(sent).not.toMatch(/HYP_A/);
     // Requesting the findings again must not refetch or re-message.
