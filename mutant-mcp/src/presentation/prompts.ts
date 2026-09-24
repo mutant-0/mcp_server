@@ -126,7 +126,7 @@ function contextPrompts(data: JsonObject): PromptSuggestion[] {
       id: "compare-medical-records",
       label: "Compare with my records",
       prompt:
-        "Compare my accessible Mutant findings with medical records I have shared in this chat. If I have not shared any, ask which records I want to provide. Do not assume symptoms or test results I have not given you.",
+        "Compare my accessible Mutant findings with medical records you can actually access in this conversation, including connected health records if available. First check what records are accessible; do not infer access from my account or claim to have read records you cannot see. If none are accessible, ask me to provide records here. Do not assume symptoms or test results I have not given you.",
       intent: "comparison",
     },
   ];
@@ -142,7 +142,7 @@ function contextPrompts(data: JsonObject): PromptSuggestion[] {
       id: "compare-all",
       label: "Compare all findings",
       prompt:
-        "Compare all findings in my complete Mutant analysis with medical records I have shared in this chat. If I have not shared any, ask which records I want to provide. Keep genetic findings separate from my clinical records.",
+        "Compare all findings in my complete Mutant analysis with medical records you can actually access in this conversation, including connected health records if available. First check what records are accessible; do not infer access from my account or claim to have read records you cannot see. If none are accessible, ask me to provide records here. Keep genetic findings separate from my clinical records.",
       intent: "comparison",
     });
   } else if (locked !== null && locked > 0) {

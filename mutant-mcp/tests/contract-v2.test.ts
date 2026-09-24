@@ -352,12 +352,15 @@ describe("contract v2.0 acceptance", () => {
     const { client } = await connect();
     const result = await client.callTool({ name: "get_analysis_context", arguments: {} });
     const data = envelopeOf(result).data as {
-      suggested_prompts?: Array<{ id: string }>;
+      suggested_prompts?: Array<{ id: string; prompt: string }>;
     };
     const ids = (data.suggested_prompts ?? []).map((prompt) => prompt.id);
     expect(ids).toContain("explain-first");
     expect(ids).toContain("compare-top-three");
     expect(ids).toContain("compare-medical-records");
+    const recordsPrompt = data.suggested_prompts?.find((prompt) => prompt.id === "compare-medical-records");
+    expect(recordsPrompt?.prompt).toContain("actually access in this conversation");
+    expect(recordsPrompt?.prompt).toContain("do not infer access from my account");
     expect(ids).toContain("search-all");
     expect(ids).toContain("compare-all");
     expect(ids).not.toContain("full-scope");
