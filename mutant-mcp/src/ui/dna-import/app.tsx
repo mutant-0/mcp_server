@@ -28,7 +28,7 @@ import {
 } from "react";
 import { useApp, useDocumentTheme, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
 import type { App } from "@modelcontextprotocol/ext-apps";
-import { appErrorCode, type AppErrorCode, type ToolResponse } from "../../contract";
+import { APP_ERROR_CODES, appErrorCode, type AppErrorCode, type ToolResponse } from "../../contract";
 import { parseDnaFile } from "./parseFile";
 
 /** Client-side ceiling mirroring the server's MAX_SNP_ENTRIES transport guard. */
@@ -207,6 +207,29 @@ const UNSUPPORTED_CLIENT_MESSAGE =
 function messageFor(code: string | undefined): string {
   if (!code) return ERROR_MESSAGES.service_unavailable as string;
   return ERROR_MESSAGES[code] ?? ERROR_MESSAGES.service_unavailable!;
+}
+
+/**
+ * Resolve user-facing copy for an envelope error.
+ *
+ * A mapped application/contract code wins, but an unmapped analysis-lifecycle
+ * code (`ANALYSIS_NOT_READY`, `DATA_INCOMPATIBLE`, `ANALYSIS_FAILED`, ...) must
+ * not collapse into "temporarily unavailable": those are often permanent and
+ * actionable (a stale engine, no servable payload), and the backend's own
+ * message already states the remedy. Only a genuinely absent error falls back to
+ * the generic transient copy.
+ */
+function errorMessage(error: ToolResponse["error"] | undefined): string {
+  if (!error) return ERROR_MESSAGES.service_unavailable!;
+  const mapped =
+    (error.app_code ? ERROR_MESSAGES[error.app_code] : undefined) ??
+    (error.code ? ERROR_MESSAGES[error.code] : undefined) ??
+    (error.code ? ERROR_MESSAGES[appErrorCode(error.code)] : undefined);
+  // `appErrorCode` maps every unknown code to `service_unavailable`; that is a
+  // catch-all, not a real answer, so prefer the backend message over it.
+  if (mapped && mapped !== ERROR_MESSAGES[APP_ERROR_CODES.service_unavailable]) return mapped;
+  const message = typeof error.message === "string" ? error.message.trim() : "";
+  return message.length > 0 ? message : ERROR_MESSAGES.service_unavailable!;
 }
 
 function formatCount(value: number): string {
@@ -904,7 +927,7 @@ export function DnaImportApp({
       const result = await client.callServerTool({ name: "get_snp_catalog", arguments: {} });
       const envelope = envelopeOf(result);
       if (result.isError || !envelope || !envelope.ok) {
-        setCatalogError(messageFor(envelope?.error?.app_code ?? envelope?.error?.code));
+        setCatalogError(errorMessage(envelope?.error));
         return;
       }
       const next = toCatalog(envelope);
@@ -1161,12 +1184,7 @@ export function DnaImportApp({
         const result = await client.callServerTool({ name: "create_report", arguments: args });
         const envelope = envelopeOf(result);
         if (result.isError || !envelope || !envelope.ok) {
-          setUploadError(
-            messageFor(
-              envelope?.error?.app_code ??
-                (envelope?.error?.code ? appErrorCode(envelope.error.code) : undefined),
-            ),
-          );
+          setUploadError(errorMessage(envelope?.error));
           // The review screen survives so the same file can be resubmitted.
           setStage("review_variants");
           return;
@@ -1274,7 +1292,7 @@ export function DnaImportApp({
           }
           failures += 1;
           if (failures >= maxPollFailures) {
-            setPoll((previous) => ({ ...previous, error: messageFor(appCode) }));
+            setPoll((previous) => ({ ...previous, error: errorMessage(envelope?.error) }));
             return;
           }
           continue;
@@ -1385,7 +1403,7 @@ export function DnaImportApp({
       if (result.isError || !envelope || !envelope.ok) {
         setFindingsState({
           status: "error",
-          message: messageFor(envelope?.error?.app_code ?? envelope?.error?.code),
+          message: errorMessage(envelope?.error),
         });
         return;
       }

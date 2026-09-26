@@ -711,6 +711,23 @@ describe("DNA import component", () => {
     expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
   });
 
+  it("surfaces an unmatched analysis error instead of the transient outage copy", async () => {
+    renderWith(
+      {
+        get_analysis_status: statusResponse("ready"),
+        list_health_hypotheses: makeErrorResponse(
+          "ANALYSIS_NOT_READY",
+          "The saved analysis was produced by a different scoring engine and cannot be served. Regenerate the analysis to bring it up to date.",
+          { reason: "analysis_engine_changed" },
+        ),
+      },
+      { mode: "overview" },
+    );
+
+    await screen.findByText(/different scoring engine/i);
+    expect(screen.queryByText(/temporarily unavailable/i)).toBeNull();
+  });
+
   it("offers record comparison and the Full upgrade only to Free accounts", async () => {
     const bridge = renderWith({
       get_analysis_status: statusResponse("ready"),
