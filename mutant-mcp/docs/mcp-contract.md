@@ -199,8 +199,15 @@ Input: `{}`. A successful call even with no analysis.
   The MCP presentation uses `show_analysis_overview` for an initial ready-state
   overview; the backend's `next_action` remains unchanged for data exploration.
 - `optional_actions` is present when regeneration is available but **not
-  required**: a list of `ToolAction`s the user may choose (currently the
-  `show_dna_import` refresh).
+  required** *and* the current results are usable: a list of `ToolAction`s the
+  user may choose (currently the `show_dna_import` refresh). A processing or
+  unservable analysis has nothing to refresh, so no optional action is offered
+  while a run is in flight.
+- `analysis_status` reflects whether the saved analysis can actually be served,
+  not just whether generation completed. A completed run whose saved causes
+  payload the read tools require is missing, stale, or from a different scoring
+  engine is reported as `processing` (transient) or `failed` (permanent) so this
+  endpoint cannot disagree with `get_analysis_context` / `list_health_hypotheses`.
 
 When a refresh exists (`regenerate: true`), `regeneration` is included:
 
@@ -222,7 +229,10 @@ When a refresh exists (`regenerate: true`), `regeneration` is included:
 ```
 
 - `required` is `true` and `current_results_usable` is `false` when the current
-  analysis `failed`, so resubmission is the only path.
+  analysis `failed` or its saved payload can never be served (a scoring-engine
+  change), so resubmission is the only path. `current_results_usable` is also
+  `false` when the reads refuse the saved payload transiently (a regeneration
+  still writing); that clears on its own.
 - `reason_code` is `platform_update` today. The other contract reason codes are
   reserved and are not reported until the engine can justify them.
 - `requires_dna_resubmission` is always `true`: the platform cannot rescore a
