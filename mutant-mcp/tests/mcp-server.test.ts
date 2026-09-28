@@ -1,20 +1,26 @@
 import { describe, it, expect } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { ToolResponse } from "../src/contract.js";
+import type { BackendOperation, ToolResponse } from "../src/contract.js";
 import { SERVER_NAME, createMcpServer } from "../src/server.js";
 import { TOOL_NAMES } from "../src/contract.js";
 import {
   ANALYSIS_SCOPE,
   DNA_SCOPE,
   makeConfig,
+  makeContextData,
   makeErrorResponse,
+  makeStatusData,
   makeSuccessResponse,
+  makeToolResponse,
   makeUser,
   StubBackendClient,
 } from "./helpers.js";
 
-async function connectServer(responder: (operation: string) => ToolResponse) {
+async function connectServer(
+  responder: (operation: BackendOperation) => ToolResponse = (operation) =>
+    makeToolResponse(operation),
+) {
   const backendClient = new StubBackendClient((operation) => responder(operation));
   const server = createMcpServer(makeUser(), makeConfig(), "req-test", backendClient);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -26,7 +32,7 @@ async function connectServer(responder: (operation: string) => ToolResponse) {
 
 describe("MCP server integration", () => {
   it("lists the ten contract tools with schemas", async () => {
-    const { client } = await connectServer(() => makeSuccessResponse());
+    const { client } = await connectServer();
     const result = await client.listTools();
     expect(result.tools.map((tool) => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
     expect(result.tools).toHaveLength(10);
@@ -37,7 +43,7 @@ describe("MCP server integration", () => {
   });
 
   it("advertises each tool's own OAuth scope", async () => {
-    const { client } = await connectServer(() => makeSuccessResponse());
+    const { client } = await connectServer();
     const result = await client.listTools();
     const dnaTools = new Set(["show_dna_import", "get_snp_catalog", "create_report"]);
     for (const tool of result.tools) {
@@ -47,8 +53,8 @@ describe("MCP server integration", () => {
     }
   });
 
-  it("renders the overview card with analysis.read and without a backend call", async () => {
-    const backendClient = new StubBackendClient(() => makeSuccessResponse());
+  it("binds the overview card to one resolved snapshot", async () => {
+    const backendClient = new StubBackendClient((operation) => makeToolResponse(operation));
     const server = createMcpServer(
       makeUser({ scopes: [ANALYSIS_SCOPE] }),
       makeConfig(),
@@ -65,32 +71,35 @@ describe("MCP server integration", () => {
     expect((result.structuredContent as ToolResponse).data).toEqual({
       ui_rendered: true,
       mode: "overview",
+      displayed_analysis_version: "rev42-v3.0.0",
+      displayed_hypotheses: [{ id: "HYP_A", rank: 1, name: "Alpha finding" }],
     });
     expect((result._meta as { ui?: { resourceUri?: string } }).ui?.resourceUri).toBe(
       "ui://mutant/dna-import/v1.html",
     );
-    expect(backendClient.calls).toHaveLength(0);
+    // The card resolves exactly one snapshot, so it can never render a revision
+    // other than the one the model was told about.
+    expect(backendClient.calls.map((call) => call.operation)).toEqual([
+      "resolve_analysis_snapshot",
+    ]);
   });
 
   it("advertises the resources capability for the Apps SDK component", async () => {
-    const { client } = await connectServer(() => makeSuccessResponse());
+    const { client } = await connectServer();
     expect(client.getServerCapabilities()?.resources).toBeDefined();
   });
 
   it("relays a success envelope into structuredContent with deterministic content", async () => {
-    const { client } = await connectServer(() =>
-      makeSuccessResponse({
-        dna_status: "available",
-        analysis_status: "ready",
-        analysis: { generated_at: "2026-01-01" },
-      }),
-    );
+    const { client } = await connectServer(() => makeSuccessResponse(makeStatusData()));
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
     expect(result.isError).toBe(false);
     const structured = result.structuredContent as { ok: boolean; data: unknown };
     expect(structured.ok).toBe(true);
     // The tool is a pass-through: the backend owns every status field.
-    expect(structured.data).toMatchObject({ dna_status: "available", analysis_status: "ready" });
+    expect(structured.data).toMatchObject({
+      dna_status: "available",
+      experience_state: "READY",
+    });
     // Suggested prompts are injected at the MCP boundary.
     expect((structured.data as { suggested_prompts?: unknown[] }).suggested_prompts).toBeDefined();
 
@@ -108,12 +117,12 @@ describe("MCP server integration", () => {
     const { client } = await connectServer((operation) =>
       makeSuccessResponse(
         operation === "get_analysis_context"
-          ? { upgrade: { label: "Unlock Full Analysis", url: "http://localhost:3000/cart" } }
-          : {
-              dna_status: "available",
-              analysis_status: "ready",
-              upgrade_url: "http://localhost:3000/cart",
-            },
+          ? makeContextData({
+              upgrade: { label: "Unlock Full Analysis", url: "http://localhost:3000/cart" },
+            })
+          : makeStatusData({
+              upgrade: { label: "Unlock Full Analysis", url: "http://localhost:3000/cart" },
+            }),
       ),
     );
     const context = await client.callTool({ name: "get_analysis_context", arguments: {} });
@@ -122,32 +131,31 @@ describe("MCP server integration", () => {
       label: "Unlock Full Analysis",
       url: "https://mutantgenomics.com/cart",
     });
-    expect((status.structuredContent as ToolResponse).data?.upgrade_url).toBe(
-      "https://mutantgenomics.com/cart",
-    );
+    expect((status.structuredContent as ToolResponse).data?.upgrade).toEqual({
+      label: "Unlock Full Analysis",
+      url: "https://mutantgenomics.com/cart",
+    });
   });
 
   it("mounts the refresh card from a ready status with an available update", async () => {
     const { client } = await connectServer(() =>
-      makeSuccessResponse({
-        dna_status: "available",
-        analysis_status: "ready",
-        regenerate: true,
-        regeneration: { required: false, current_results_usable: true },
-      }),
+      makeSuccessResponse(makeStatusData({ experience_state: "READY_REFRESH_AVAILABLE" })),
     );
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
     const meta = result._meta as { ui?: { resourceUri?: string }; mutant?: { mode?: string } };
     expect(meta.ui?.resourceUri).toBe("ui://mutant/dna-import/v1.html");
     expect(meta.mutant?.mode).toBe("overview");
     expect((result.content as Array<{ text: string }>)[0]?.text).toContain(
-      "The analysis card offers a refresh action.",
+      "refreshing is optional and your current results remain usable",
     );
   });
 
   it("relays a structured error envelope and sets isError", async () => {
     const { client } = await connectServer(() =>
-      makeErrorResponse("PLAN_ACCESS_REQUIRED", "locked", { required_plan: "mutant_full" }),
+      makeErrorResponse("PLAN_REQUIRED", "locked", {
+        required_plan: "mutant_full",
+        next_action: { tool: "show_dna_import", reason: "Upgrade to continue." },
+      }),
     );
     const result = await client.callTool({
       name: "explain_health_hypothesis",
@@ -156,7 +164,7 @@ describe("MCP server integration", () => {
     expect(result.isError).toBe(true);
     const structured = result.structuredContent as { ok: boolean; error: { code: string } };
     expect(structured.ok).toBe(false);
-    expect(structured.error.code).toBe("PLAN_ACCESS_REQUIRED");
+    expect(structured.error.code).toBe("PLAN_REQUIRED");
   });
 
   it("adds a tool-level OAuth challenge for auth errors", async () => {
@@ -175,7 +183,7 @@ describe("MCP server integration", () => {
   });
 
   it("passes the operation, arguments, and token-derived identity to the backend", async () => {
-    const { client, backendClient } = await connectServer(() => makeSuccessResponse());
+    const { client, backendClient } = await connectServer();
     await client.callTool({
       name: "get_supporting_evidence",
       arguments: { hypothesis_id: "RC_A", kind: "variants" },
@@ -187,20 +195,20 @@ describe("MCP server integration", () => {
   });
 
   it("rejects invalid arguments before calling the backend", async () => {
-    const { client, backendClient } = await connectServer(() => makeSuccessResponse());
+    const { client, backendClient } = await connectServer();
     const result = await client.callTool({ name: "explain_health_hypothesis", arguments: {} });
     expect(result.isError).toBe(true);
     expect(backendClient.calls).toHaveLength(0);
   });
 
   it("uses the Mutant server name", async () => {
-    const { client } = await connectServer(() => makeSuccessResponse());
+    const { client } = await connectServer();
     expect(SERVER_NAME).toBe("mutant-mcp");
     expect(client).toBeDefined();
   });
 
   it("passes the modules evidence kind and include_context to the backend", async () => {
-    const { client, backendClient } = await connectServer(() => makeSuccessResponse());
+    const { client, backendClient } = await connectServer();
     await client.callTool({
       name: "get_supporting_evidence",
       arguments: { hypothesis_id: "RC_A", kind: "modules", include_context: true },
@@ -213,7 +221,7 @@ describe("MCP server integration", () => {
   });
 
   it("never duplicates structuredContent into the model-facing content", async () => {
-    const { client } = await connectServer(() => makeSuccessResponse());
+    const { client } = await connectServer(() => makeSuccessResponse(makeStatusData()));
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
     const structured = JSON.stringify(result.structuredContent);
     const content = ((result.content as Array<{ text?: string }> | undefined) ?? [])

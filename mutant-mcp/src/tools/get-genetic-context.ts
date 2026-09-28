@@ -1,4 +1,4 @@
-import { getGeneticContextInputSchema, toolResponseOutputSchema } from "../schemas/index.js";
+import { geneticContextOutputSchema, getGeneticContextInputSchema } from "../schemas/index.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
 
@@ -13,7 +13,7 @@ export const getGeneticContextTool: MutantToolDefinition = {
     "Module summaries are returned only with include_modules or when the request is module-scoped.",
   scope: "analysis.read",
   inputSchema: getGeneticContextInputSchema,
-  outputSchema: toolResponseOutputSchema,
+  outputSchema: geneticContextOutputSchema,
   annotations: readOnlyAnnotations,
   handler: async (args, runtime) =>
     respond(

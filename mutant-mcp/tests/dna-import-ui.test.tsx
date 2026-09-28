@@ -22,7 +22,7 @@ import {
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DnaImportApp, deliverFollowUp, type DnaImportAppProps } from "../src/ui/dna-import/app";
-import { makeErrorResponse, makeSuccessResponse } from "./helpers.js";
+import { makeContextData, makeErrorResponse, makeSuccessResponse } from "./helpers.js";
 
 type ToolResponse = ReturnType<typeof makeSuccessResponse>;
 
@@ -80,38 +80,126 @@ const CATALOG = makeSuccessResponse({
   },
 });
 
+const FREE_PLAN = {
+  entitlement: { plan: "mutant_free", hypothesis_scope: "top_three" },
+};
+
+const READY_CAPABILITIES = {
+  can_query_analysis: true,
+  can_show_overview: true,
+  can_refresh_analysis: false,
+  can_search_hypotheses: false,
+  can_explore_genetic_context: true,
+};
+
+const NO_CAPABILITIES = {
+  can_query_analysis: false,
+  can_show_overview: false,
+  can_refresh_analysis: false,
+  can_search_hypotheses: false,
+  can_explore_genetic_context: false,
+};
+
 /** No DNA on file yet: the state the file picker opens in. */
 const STATUS_MISSING = makeSuccessResponse({
   dna_status: "missing",
-  analysis_status: "not_started",
-  analysis: { status: "none", created_at: null },
-  plan: "Mutant Free",
-  entitlement: { plan: "mutant_free", hypothesis_scope: "top_3" },
+  experience_state: "NO_DNA",
+  active_analysis: { status: "none", usable: false },
+  pending_analysis: null,
+  next_action: {
+    tool: "show_dna_import",
+    reason: "DNA data is required before an analysis can be created.",
+    arguments: { mode: "initial" },
+  },
+  ...FREE_PLAN,
+  capabilities: NO_CAPABILITIES,
 });
 
+/** The elapsed timer and long-running copy read the pending run's start time. */
+function pendingProcessing(startedAt: string): Record<string, unknown> {
+  return {
+    status: "processing",
+    reason: "initial_analysis",
+    started_at: startedAt,
+  };
+}
+
+/** Build a 3.0.0 `get_analysis_status` payload for one experience state. */
 function statusResponse(
   status: "not_started" | "processing" | "ready" | "failed",
   overrides: Record<string, unknown> = {},
 ): ToolResponse {
+  const generatedAt = new Date(Date.now() - 30_000).toISOString();
+  const base: Record<string, unknown> = { ...FREE_PLAN, ...overrides };
+  if (status === "ready") {
+    return makeSuccessResponse({
+      dna_status: "available",
+      experience_state: "READY",
+      active_analysis: {
+        status: "ready",
+        analysis_version: "analysis_1",
+        generated_at: generatedAt,
+        scoring_engine_version: "v3",
+        usable: true,
+      },
+      pending_analysis: null,
+      capabilities: READY_CAPABILITIES,
+      ...base,
+    }, "analysis_1");
+  }
+  if (status === "processing") {
+    return makeSuccessResponse({
+      dna_status: "available",
+      experience_state: "PROCESSING_INITIAL",
+      active_analysis: { status: "none", usable: false },
+      pending_analysis: pendingProcessing(generatedAt),
+      capabilities: NO_CAPABILITIES,
+      ...base,
+    });
+  }
+  if (status === "failed") {
+    return makeSuccessResponse({
+      dna_status: "available",
+      experience_state: "PROCESSING_FAILED",
+      active_analysis: { status: "none", usable: false },
+      pending_analysis: {
+        status: "failed",
+        reason: "initial_analysis",
+        failure: { code: "ANALYSIS_FAILED", message: "The analysis did not complete." },
+      },
+      capabilities: NO_CAPABILITIES,
+      ...base,
+    });
+  }
+  // DNA is on file but no analysis exists and nothing is in flight.
   return makeSuccessResponse({
     dna_status: "available",
-    analysis_status: status,
-    analysis_id: "analysis_1",
-    created_at: new Date(Date.now() - 30_000).toISOString(),
-    analysis: { status },
-    plan: "Mutant Free",
-    entitlement: { plan: "mutant_free", hypothesis_scope: "top_3" },
+    experience_state: "PROCESSING_INITIAL",
+    active_analysis: { status: "none", usable: false },
+    pending_analysis: null,
+    capabilities: NO_CAPABILITIES,
+    ...base,
+  });
+}
+
+/**
+ * A ready analysis that the platform can improve: the active analysis stays
+ * usable and the refresh is optional.
+ */
+function refreshAvailable(overrides: Record<string, unknown> = {}): ToolResponse {
+  return statusResponse("ready", {
+    experience_state: "READY_REFRESH_AVAILABLE",
+    capabilities: { ...READY_CAPABILITIES, can_refresh_analysis: true },
     ...overrides,
   });
 }
 
-const FINDINGS = makeSuccessResponse({
-  items: [
-    { id: "HYP_A", rank: 1, title: "Alpha finding", summary: "First summary." },
-    { id: "HYP_B", rank: 2, title: "Beta finding", summary: "Second summary." },
-    { id: "HYP_C", rank: 3, title: "Gamma finding", summary: "Third summary." },
+const FINDINGS = makeSuccessResponse({  items: [
+    { id: "HYP_A", rank: 1, name: "Alpha finding", summary: "First summary." },
+    { id: "HYP_B", rank: 2, name: "Beta finding", summary: "Second summary." },
+    { id: "HYP_C", rank: 3, name: "Gamma finding", summary: "Third summary." },
   ],
-  page: { has_more: false },
+  next_cursor: null,
 });
 
 const MICROARRAY_BODY = [
@@ -392,16 +480,19 @@ describe("DNA import component", () => {
     expect(screen.getByText(/Drag and drop your DNA file here/i)).toBeDefined();
   });
 
-  it("treats the v2 'unavailable' analysis status as no analysis yet", async () => {
+  it("ignores the removed 2.x status fields", async () => {
     renderWith({
-      get_analysis_status: statusResponse("not_started", {
+      get_analysis_status: makeSuccessResponse({
+        ...(STATUS_MISSING.data as Record<string, unknown>),
         analysis_status: "unavailable",
-        analysis: { status: "unavailable" },
+        regenerate: true,
+        regeneration: { required: false, current_results_usable: false },
       }),
     });
 
-    await screen.findByText(/DNA data is already on file/i);
-    expect(screen.getByText(/Drag and drop your DNA file here/i)).toBeDefined();
+    await screen.findByText(/Drag and drop your DNA file here/i);
+    expect(screen.queryByText(/newer analysis platform is available/i)).toBeNull();
+    expect(screen.queryByText(/Analysis ready/i)).toBeNull();
   });
 
   it("ignores the show_dna_import result, which carries no routing state", async () => {
@@ -512,7 +603,7 @@ describe("DNA import component", () => {
   it("advances the elapsed timer once per second", async () => {
     renderWith({
       get_analysis_status: statusResponse("processing", {
-        created_at: new Date(Date.now() - 30_000).toISOString(),
+        pending_analysis: pendingProcessing(new Date(Date.now() - 30_000).toISOString()),
       }),
     });
 
@@ -523,7 +614,7 @@ describe("DNA import component", () => {
   it("changes the message when the analysis runs long", async () => {
     renderWith({
       get_analysis_status: statusResponse("processing", {
-        created_at: new Date(Date.now() - 4 * 60_000).toISOString(),
+        pending_analysis: pendingProcessing(new Date(Date.now() - 4 * 60_000).toISOString()),
       }),
     });
     await screen.findByText(/Still working on your analysis/i);
@@ -538,7 +629,7 @@ describe("DNA import component", () => {
 
     renderWith({
       get_analysis_status: statusResponse("processing", {
-        created_at: new Date(Date.now() - 6 * 60_000).toISOString(),
+        pending_analysis: pendingProcessing(new Date(Date.now() - 6 * 60_000).toISOString()),
       }),
     });
     await screen.findByText(/You can leave this conversation and return later/i);
@@ -608,7 +699,8 @@ describe("DNA import component", () => {
 
     const calls = bridge.callsTo("list_health_hypotheses");
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.arguments).toEqual({ limit: 3 });
+    // The displayed snapshot's revision is pinned onto the query.
+    expect(calls[0]?.arguments).toEqual({ limit: 3, analysis_version: "analysis_1" });
     // The findings render in place; ChatGPT is not asked to do it again.
     expect(bridge.messages).toHaveLength(0);
     expect(screen.getByRole("button", { name: /ask chatgpt about my results/i })).toBeDefined();
@@ -638,32 +730,24 @@ describe("DNA import component", () => {
   it("renders state-aware prompt chips and sends one on click", async () => {
     const bridge = renderWith({
       get_analysis_status: statusResponse("ready"),
-      get_analysis_context: makeSuccessResponse({
-        coverage: { analyzed_markers: 1000 },
-        interpretation_contract: {
-          version: "2.0",
-          purpose: "Boundaries.",
-          limitations: [],
-        },
-        access_summary: {
-          plan: "mutant_free",
-          hypothesis_scope: "top_3",
-          total_ranked: 0,
-          returned: 0,
-          unlocked: 0,
-          locked: 0,
-          scope_message: "Your top three ranked hypotheses are fully unlocked.",
-        },
-        top_hypotheses: [],
-        suggested_prompts: [
-          {
-            id: "explain-first",
-            label: "Explain #1",
-            prompt: "Explain my #1 finding in plain English.",
-            intent: "explain",
-          },
-        ],
-      }),
+      get_analysis_context: makeSuccessResponse(
+        makeContextData({
+          suggested_prompts: [
+            {
+              id: "explain-first",
+              label: "Explain #1",
+              prompt: "Explain my #1 finding in plain English.",
+              intent: "explain",
+              hypothesis_id: "HYP_A",
+              action: {
+                analysis_version: "analysis_1",
+                hypothesis_id: "HYP_A",
+                intent: "explain",
+              },
+            },
+          ],
+        }),
+      ),
     });
 
     await screen.findByText(/Analysis ready/i);
@@ -680,16 +764,18 @@ describe("DNA import component", () => {
     const bridge = renderWith(
       {
         get_analysis_status: statusResponse("ready"),
-        get_analysis_context: makeSuccessResponse({
-          suggested_prompts: [
-            {
-              id: "compare-medical-records",
-              label: "Compare with my records",
-              prompt: "Compare my findings with records I shared.",
-              intent: "comparison",
-            },
-          ],
-        }),
+        get_analysis_context: makeSuccessResponse(
+          makeContextData({
+            suggested_prompts: [
+              {
+                id: "compare-medical-records",
+                label: "Compare with my records",
+                prompt: "Compare my findings with records I shared.",
+                intent: "comparison",
+              },
+            ],
+          }),
+        ),
       },
       { mode: "overview" },
     );
@@ -731,23 +817,25 @@ describe("DNA import component", () => {
   it("offers record comparison and the Full upgrade only to Free accounts", async () => {
     const bridge = renderWith({
       get_analysis_status: statusResponse("ready"),
-      get_analysis_context: makeSuccessResponse({
-        upgrade: { label: "Unlock Full Analysis", url: "https://mutantgenomics.com/cart" },
-        suggested_prompts: [
-          {
-            id: "compare-medical-records",
-            label: "Compare with my records",
-            prompt: "Compare my accessible findings with records I have shared.",
-            intent: "comparison",
-          },
-          {
-            id: "full-scope",
-            label: "Compare all with Full",
-            prompt: "How would Full compare all ranked hypotheses with my records?",
-            intent: "overview",
-          },
-        ],
-      }),
+      get_analysis_context: makeSuccessResponse(
+        makeContextData({
+          upgrade: { label: "Unlock Full Analysis", url: "https://mutantgenomics.com/cart" },
+          suggested_prompts: [
+            {
+              id: "compare-medical-records",
+              label: "Compare with my records",
+              prompt: "Compare my accessible findings with records I have shared.",
+              intent: "comparison",
+            },
+            {
+              id: "full-scope",
+              label: "Compare all with Full",
+              prompt: "How would Full compare all ranked hypotheses with my records?",
+              intent: "overview",
+            },
+          ],
+        }),
+      ),
     });
 
     await screen.findByText(/Analysis ready/i);
@@ -764,19 +852,21 @@ describe("DNA import component", () => {
   it("does not offer an upgrade to a Full account", async () => {
     const bridge = renderWith({
       get_analysis_status: statusResponse("ready", {
-        plan: "Mutant Full",
         entitlement: { plan: "mutant_full", hypothesis_scope: "all" },
+        capabilities: { ...READY_CAPABILITIES, can_search_hypotheses: true },
       }),
-      get_analysis_context: makeSuccessResponse({
-        suggested_prompts: [
-          {
-            id: "compare-all",
-            label: "Compare all findings",
-            prompt: "Compare all findings with my records.",
-            intent: "comparison",
-          },
-        ],
-      }),
+      get_analysis_context: makeSuccessResponse(
+        makeContextData({
+          suggested_prompts: [
+            {
+              id: "compare-all",
+              label: "Compare all findings",
+              prompt: "Compare all findings with my records.",
+              intent: "comparison",
+            },
+          ],
+        }),
+      ),
     });
 
     await screen.findByText(/Analysis ready/i);
@@ -786,12 +876,9 @@ describe("DNA import component", () => {
     expect(bridge.openLinks).toHaveLength(0);
   });
 
-  it("offers an optional refresh when regeneration is available", async () => {
+  it("offers an optional refresh when a newer analysis is available", async () => {
     const bridge = renderWith({
-      get_analysis_status: statusResponse("ready", {
-        regenerate: true,
-        regeneration: { required: false, current_results_usable: true },
-      }),
+      get_analysis_status: refreshAvailable(),
     });
 
     await screen.findByText(/Analysis ready/i);
@@ -803,22 +890,21 @@ describe("DNA import component", () => {
   });
 
   it("loads hints when a refresh status result mounts the card", async () => {
-    const status = statusResponse("ready", {
-      regenerate: true,
-      regeneration: { required: false, current_results_usable: true },
-    });
+    const status = refreshAvailable();
     const bridge = renderWith({
       get_analysis_status: status,
-      get_analysis_context: makeSuccessResponse({
-        suggested_prompts: [
-          {
-            id: "compare-medical-records",
-            label: "Compare with my records",
-            prompt: "Compare my findings with records I shared.",
-            intent: "comparison",
-          },
-        ],
-      }),
+      get_analysis_context: makeSuccessResponse(
+        makeContextData({
+          suggested_prompts: [
+            {
+              id: "compare-medical-records",
+              label: "Compare with my records",
+              prompt: "Compare my findings with records I shared.",
+              intent: "comparison",
+            },
+          ],
+        }),
+      ),
     });
 
     await screen.findByText(/Analysis ready/i);
@@ -832,10 +918,7 @@ describe("DNA import component", () => {
   it("opens the resubmission flow when the host selected a refresh", async () => {
     await renderApp(
       {
-        get_analysis_status: statusResponse("ready", {
-          regenerate: true,
-          regeneration: { required: false, current_results_usable: true },
-        }),
+        get_analysis_status: refreshAvailable(),
       },
       { mode: "regenerate" },
     );
@@ -851,10 +934,7 @@ describe("DNA import component", () => {
 
   it("moves off the ready card when a regenerate result arrives after mount", async () => {
     const bridge = renderWith({
-      get_analysis_status: statusResponse("ready", {
-        regenerate: true,
-        regeneration: { required: false, current_results_usable: true },
-      }),
+      get_analysis_status: refreshAvailable(),
     });
 
     await screen.findByText(/Analysis ready/i);

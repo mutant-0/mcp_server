@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { CONTRACT_VERSION, TOOL_NAMES, type ToolName, type ToolResponse } from "../src/contract.js";
+import {
+  CONTRACT_VERSION,
+  TOOL_NAMES,
+  type BackendOperation,
+  type ToolName,
+  type ToolResponse,
+} from "../src/contract.js";
 import { createMcpServer } from "../src/server.js";
 import {
   ANALYSIS_SCOPE,
@@ -9,18 +15,20 @@ import {
   makeCapturingLogger,
   makeConfig,
   makeErrorResponse,
+  makeStatusData,
   makeSuccessResponse,
   makeUser,
   StubBackendClient,
 } from "./helpers.js";
 
 /**
- * Contract v2.0 acceptance smoke test (§11.6).
+ * Contract v3.0 acceptance smoke test.
  *
  * Stands up the server with a permissive backend stub and calls every tool the
  * server advertises, so a tool that is registered but not callable (or that
  * serializes its own structured content into model-facing text) fails here
- * rather than in a host.
+ * rather than in a host. Every response is also validated against the tool's
+ * own concrete `outputSchema` by the SDK, so a drifted `data` shape fails here.
  */
 
 /** Minimal arguments that satisfy each tool's input schema. */
@@ -42,62 +50,73 @@ const MINIMAL_ARGS: Record<ToolName, Record<string, unknown>> = {
 };
 
 /** The `get_analysis_context` payload: the interpretation contract plus previews. */
+function interpretation(): Record<string, unknown> {
+  return {
+    version: "2.5",
+    purpose:
+      "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
+    response_rules: [
+      "Lead with the plain-English meaning.",
+      "Distinguish genetic susceptibility from a current condition.",
+    ],
+    evidence_explanation_rules: {
+      organizing_level: "modules_then_patterns_then_variants",
+      rules: [
+        "Explain the hypothesis as pathway-level support, not a single SNP.",
+        "Start from the contributing biological modules.",
+      ],
+      module_first_instruction:
+        "Explain a finding by its contributing modules first, then retained cross-module patterns, then the individual genes and variants.",
+    },
+    score_semantics: {
+      priority_score: "The ordering score; not disease probability.",
+      genetic_support: "Strength of genetic support within the analyzed evidence.",
+      assessment:
+        "The canonical explanation of this hypothesis result, authoritative over surface wording.",
+      genetic_evidence: "The weak/moderate/strong evidence category.",
+      genetic_confidence: "How well the genetic result is measured.",
+      coverage_confidence: "How completely the relevant markers were assessed.",
+      pattern_convergence: "How strongly independent patterns agree.",
+      module_support: "Genetic support from the underlying biological modules.",
+      pattern_support:
+        "Additional retained support from cross-module patterns; comparable to module_support on the same 0-100 scale.",
+    },
+    evidence_boundaries: {
+      genetics_is_not_diagnosis: true,
+      genetic_support_does_not_establish_current_status: true,
+      clinical_correlation_is_catalog_guidance: true,
+      clinical_correlation_is_not_user_record_evidence: true,
+    },
+    health_context_usage: {
+      allowed: true,
+      performed_by: "chatgpt",
+      sent_to_mutant: false,
+      purpose: "relevance_filtering",
+    },
+    presentation_order: [
+      "bottom_line",
+      "support_architecture",
+      "module_contributions",
+      "pattern_contributions",
+      "key_scoring_genes_and_variants",
+      "interpretation_boundary",
+      "minimal_confirmation",
+      "strengthening_and_weakening_evidence",
+      "action_changing_guardrail",
+    ],
+    evidence_model: {
+      primary_units: ["modules", "patterns", "variants"],
+      preferred_explanation_order: ["modules", "patterns", "variants"],
+    },
+    limitations: ["Not a diagnosis."],
+  };
+}
+
 function contextData(): Record<string, unknown> {
   return {
-    interpretation_contract: {
-      version: "2.1",
-      purpose:
-        "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
-      response_rules: [
-        "Lead with the plain-English meaning.",
-        "Distinguish genetic susceptibility from a current condition.",
-      ],
-      evidence_explanation_rules: {
-        organizing_level: "modules_then_patterns_then_variants",
-        rules: [
-          "Explain the hypothesis as pathway-level support, not a single SNP.",
-          "Start from the contributing biological modules.",
-        ],
-        module_first_instruction:
-          "Explain a finding by its contributing modules first, then retained cross-module patterns, then the individual genes and variants.",
-      },
-      score_semantics: {
-        priority_score: "The ordering score; not disease probability.",
-        genetic_support: "Strength of genetic support within the analyzed evidence.",
-        genetic_evidence: "The weak/moderate/strong evidence category.",
-        coverage_confidence: "How completely the relevant markers were assessed.",
-        pattern_convergence: "How strongly independent patterns agree.",
-        module_support: "Genetic support from the underlying biological modules.",
-        pattern_support:
-          "Additional retained support from cross-module patterns; comparable to module_support on the same 0-100 scale.",
-      },
-      evidence_boundaries: {
-        genetics_is_not_diagnosis: true,
-        genetic_support_does_not_establish_current_status: true,
-        clinical_correlation_is_catalog_guidance: true,
-        clinical_correlation_is_not_user_record_evidence: true,
-      },
-      health_context_usage: {
-        allowed: true,
-        performed_by: "chatgpt",
-        sent_to_mutant: false,
-        purpose: "relevance_filtering",
-      },
-      presentation_order: [
-        "bottom_line",
-        "support_architecture",
-        "module_contributions",
-        "pattern_contributions",
-        "key_scoring_genes_and_variants",
-        "interpretation_boundary",
-        "minimal_confirmation",
-        "strengthening_and_weakening_evidence",
-        "action_changing_guardrail",
-      ],
-      limitations: ["Not a diagnosis."],
-    },
+    interpretation: interpretation(),
     coverage: { analyzed_markers: 1000 },
-    access_summary: {
+    access: {
       plan: "mutant_full",
       hypothesis_scope: "all",
       total_ranked: 2,
@@ -107,13 +126,14 @@ function contextData(): Record<string, unknown> {
       scope_message:
         "Your complete ranked analysis is available. This response previews the top three; use hypothesis search or listing to explore the rest.",
     },
-    top_hypotheses: [
+    preview: [
       {
         id: "HYP_A",
         rank: 1,
-        title: "Alpha finding",
-        bottom_line: "First summary.",
+        name: "Alpha finding",
+        summary: "First summary.",
         priority_score: 90,
+        genetic_support: 72,
         genetic_evidence: "strong",
         coverage_confidence: "high",
         pattern_convergence: "strong",
@@ -121,9 +141,10 @@ function contextData(): Record<string, unknown> {
       {
         id: "HYP_B",
         rank: 2,
-        title: "Beta finding",
-        bottom_line: "Second summary.",
+        name: "Beta finding",
+        summary: "Second summary.",
         priority_score: 80,
+        genetic_support: 61,
         genetic_evidence: "moderate",
         coverage_confidence: "high",
         pattern_convergence: "moderate",
@@ -132,32 +153,72 @@ function contextData(): Record<string, unknown> {
   };
 }
 
-/** A response with the v2 shape the content builders expect for each tool. */
-function dataFor(operation: ToolName): Record<string, unknown> {
+/** A response with the 3.0.0 shape the content builders expect for each tool. */
+function dataFor(operation: BackendOperation): Record<string, unknown> {
   switch (operation) {
-    case "get_analysis_status":
+    case "resolve_analysis_snapshot":
+    case "show_analysis_overview":
       return {
-        dna_status: "available",
-        analysis_status: "ready",
-        regenerate: false,
-        next_action: { tool: "get_analysis_context", reason: "An analysis is ready." },
+        displayed_analysis_version: "rev42-v3.0.0",
+        displayed_hypotheses: [
+          { id: "HYP_A", rank: 1, name: "Alpha finding" },
+          { id: "HYP_B", rank: 2, name: "Beta finding" },
+        ],
       };
+    case "get_analysis_status":
+      return makeStatusData();
     case "get_analysis_context":
       return contextData();
     case "list_health_hypotheses":
       return {
-        items: [{ id: "HYP_A", rank: 1, title: "Alpha finding", bottom_line: "First summary." }],
+        items: [
+          {
+            id: "HYP_A",
+            rank: 1,
+            name: "Alpha finding",
+            summary: "First summary.",
+            priority_score: 90,
+            genetic_support: 72,
+            genetic_evidence: "strong",
+            coverage_confidence: "high",
+            pattern_convergence: "strong",
+          },
+        ],
         next_cursor: "cursor-1",
       };
     case "explain_health_hypothesis":
       return {
-        hypothesis: { id: "HYP_A", rank: 1, title: "Alpha finding" },
+        hypothesis: {
+          id: "HYP_A",
+          rank: 1,
+          name: "Alpha finding",
+          assessment_state: "assessed",
+          scores: {
+            priority: 90,
+            genetic_support: 72,
+            genetic_confidence: 0.9,
+            coverage: "high",
+            convergence: "strong",
+          },
+        },
+        bottom_line: "Alpha finding is a moderate signal.",
         explanation: {
           bottom_line: "Alpha finding is a moderate signal.",
           why_ranked: "It ranked first on priority score and pattern convergence.",
           interpretation_boundary: "This is not a diagnosis.",
           top_contributing_patterns: [{ id: "PAT_A", name: "Pattern A" }],
         },
+        evidence_shape: {
+          support_distribution: "concentrated",
+          summary: "Support is concentrated in a single locus.",
+        },
+        ranking_drivers: [
+          { component: "priority_score", value: 90 },
+          { component: "genetic_support", value: 72 },
+          { component: "module_support", value: 40 },
+          { component: "pattern_support", value: 32 },
+          { component: "converging_pattern_adjustment", value: 5 },
+        ],
         score_breakdown: {
           priority_score: 90,
           genetic_support: 72,
@@ -174,7 +235,7 @@ function dataFor(operation: ToolName): Record<string, unknown> {
           pattern_participating_variant_count: 2,
           summary: "Support is concentrated in a single locus.",
         },
-        module_contributions: [
+        modules: [
           {
             module_id: "histamine",
             module_name: "Histamine",
@@ -185,11 +246,12 @@ function dataFor(operation: ToolName): Record<string, unknown> {
             module_scoring_gene_count: 1,
             module_scoring_variant_count: 1,
             top_scoring_genes: ["HNMT"],
-            summary: "Histamine contributed 40 support points from 1 scoring variant across 1 gene.",
+            summary:
+              "Histamine contributed 40 support points from 1 scoring variant across 1 gene.",
             caveats: [],
           },
         ],
-        pattern_contributions: [
+        patterns: [
           {
             pattern_id: "PAT_A",
             pattern_name: "Pattern A",
@@ -201,7 +263,8 @@ function dataFor(operation: ToolName): Record<string, unknown> {
             summary: "Retained matched pattern with 2 contributing variants.",
           },
         ],
-        converging_pattern_contributions: [
+        provisional_evidence: [],
+        converging_patterns: [
           {
             pattern_id: "CONV_1",
             state: "observed",
@@ -220,14 +283,25 @@ function dataFor(operation: ToolName): Record<string, unknown> {
     case "get_supporting_evidence":
       return {
         kind: "patterns",
-        items: [{ id: "PAT_A", name: "Pattern A", state: "strong", impact_points: 5.5 }],
+        items: [
+          {
+            id: "PAT_A",
+            name: "Pattern A",
+            state: "matched",
+            contribution_status: "contributes",
+            impact_points: 5.5,
+          },
+        ],
       };
     case "get_genetic_context":
       return {
         markers: [
           {
             rsid: "rs4680",
-            call_status: "called",
+            gene: "COMT",
+            genotype: "GG",
+            call_state: "called",
+            contribution_status: "contributes",
             pattern_memberships: [{ pattern_id: "PAT_A", role: "contributing" }],
           },
         ],
@@ -240,15 +314,13 @@ function dataFor(operation: ToolName): Record<string, unknown> {
       };
     case "show_dna_import":
       return { ui_rendered: true, mode: "initial" };
-    case "show_analysis_overview":
-      return { ui_rendered: true, mode: "overview" };
     case "create_report":
       return { analysis_id: "analysis_1", status: "processing" };
   }
 }
 
 async function connect(
-  responder: (operation: ToolName, args: Record<string, unknown>) => ToolResponse = (
+  responder: (operation: BackendOperation, args: Record<string, unknown>) => ToolResponse = (
     operation,
   ) => makeSuccessResponse(dataFor(operation)),
 ) {
@@ -280,12 +352,17 @@ function envelopeOf(result: unknown): ToolResponse {
   return (result as { structuredContent: ToolResponse }).structuredContent;
 }
 
-describe("contract v2.0 acceptance", () => {
+describe("contract v3.0 acceptance", () => {
   it("advertises every contract tool and calls each one successfully", async () => {
     const { client } = await connect();
     const listed = await client.listTools();
     const advertised = listed.tools.map((tool) => tool.name);
     expect(advertised.sort()).toEqual([...TOOL_NAMES].sort());
+
+    // Every advertised tool must publish its own concrete output schema.
+    for (const tool of listed.tools) {
+      expect(tool.outputSchema, `${tool.name} output schema`).toBeTruthy();
+    }
 
     for (const name of TOOL_NAMES) {
       const result = await client.callTool({ name, arguments: MINIMAL_ARGS[name] });
@@ -342,7 +419,7 @@ describe("contract v2.0 acceptance", () => {
     expect(text).toContain("Not a diagnosis.");
     expect(text).toContain("You can ask me to explain one finding");
     // The structured contract is not echoed into the model-facing text.
-    expect(text).not.toContain("interpretation_contract");
+    expect(text).not.toContain("interpretation");
     expect(text).not.toContain("score_semantics");
     expect(text).not.toMatch(/^\s*[{[]/);
     expect(text.length).toBeLessThan(1500);
@@ -356,14 +433,17 @@ describe("contract v2.0 acceptance", () => {
     };
     const ids = (data.suggested_prompts ?? []).map((prompt) => prompt.id);
     expect(ids).toContain("explain-first");
-    expect(ids).toContain("compare-top-three");
-    expect(ids).toContain("compare-medical-records");
-    const recordsPrompt = data.suggested_prompts?.find((prompt) => prompt.id === "compare-medical-records");
-    expect(recordsPrompt?.prompt).toContain("actually access in this conversation");
-    expect(recordsPrompt?.prompt).toContain("do not infer access from my account");
     expect(ids).toContain("search-all");
     expect(ids).toContain("compare-all");
     expect(ids).not.toContain("full-scope");
+
+    // Prompt chips carry a structured action bound to the displayed snapshot.
+    const explain = data.suggested_prompts?.find((prompt) => prompt.id === "explain-first") as
+      | { action?: { analysis_version?: string; hypothesis_id?: string; intent?: string } }
+      | undefined;
+    expect(explain?.action?.analysis_version).toBe("rev42-v3.0.0");
+    expect(explain?.action?.hypothesis_id).toBe("HYP_A");
+    expect(explain?.action?.intent).toBe("explain");
   });
 
   it("offers a Full-scope prompt to Free accounts with locked hypotheses", async () => {
@@ -373,9 +453,9 @@ describe("contract v2.0 acceptance", () => {
       }
       return makeSuccessResponse({
         ...contextData(),
-        access_summary: {
+        access: {
           plan: "mutant_free",
-          hypothesis_scope: "top_3",
+          hypothesis_scope: "top_three",
           total_ranked: 10,
           returned: 3,
           unlocked: 3,
@@ -393,22 +473,38 @@ describe("contract v2.0 acceptance", () => {
     expect(ids).toContain("full-scope");
     expect(ids).not.toContain("search-all");
     expect(ids).not.toContain("compare-all");
-    const prompts = data.suggested_prompts ?? [];
-    expect(prompts).toEqual(expect.arrayContaining([expect.objectContaining({ id: "full-scope" })]));
   });
 
   it("reports errors as short text without echoing the envelope", async () => {
     const { client } = await connect(() =>
-      makeErrorResponse("ANALYSIS_NOT_READY", "The analysis is still processing.", {
-        next_action: "Try again in a moment.",
+      makeErrorResponse("ANALYSIS_PROCESSING", "The analysis is still processing.", {
+        next_action: { tool: "get_analysis_status", reason: "Processing is not finished." },
       }),
     );
     const result = await client.callTool({ name: "get_analysis_context", arguments: {} });
     expect(result.isError).toBe(true);
     const text = textOf(result);
-    expect(text).toContain("ANALYSIS_NOT_READY");
+    expect(text).toContain("ANALYSIS_PROCESSING");
+    expect(text).toContain("get_analysis_status");
     expect(text).not.toMatch(/^\s*[{[]/);
     expect(text).not.toContain("contract_version");
+  });
+
+  it("binds the overview card to one displayed snapshot", async () => {
+    const { client, backendClient } = await connect();
+    const result = await client.callTool({ name: "show_analysis_overview", arguments: {} });
+    expect(result.isError).toBe(false);
+    const data = envelopeOf(result).data as {
+      displayed_analysis_version: string | null;
+      displayed_hypotheses: Array<{ id: string; rank: number; name: string }>;
+    };
+    expect(data.displayed_analysis_version).toBe("rev42-v3.0.0");
+    expect(data.displayed_hypotheses.length).toBe(2);
+    expect(backendClient.calls.map((call) => call.operation)).toContain(
+      "resolve_analysis_snapshot",
+    );
+    const meta = result._meta as { mutant?: { displayed_analysis_version?: string } };
+    expect(meta.mutant?.displayed_analysis_version).toBe("rev42-v3.0.0");
   });
 
   it("keeps widget-only state out of genetic data and off the analysis tools", async () => {
@@ -425,10 +521,10 @@ describe("contract v2.0 acceptance", () => {
   it("carries the module-first explanation contract without dumping it into text", async () => {
     const { client } = await connect();
     const result = await client.callTool({ name: "get_analysis_context", arguments: {} });
-    const contract = (envelopeOf(result).data as { interpretation_contract: Record<string, unknown> })
-      .interpretation_contract;
+    const contract = (envelopeOf(result).data as { interpretation: Record<string, unknown> })
+      .interpretation;
 
-    expect(contract.version).toBe("2.1");
+    expect(contract.version).toBe("2.5");
     const rules = contract.evidence_explanation_rules as {
       organizing_level: string;
       rules: string[];
@@ -440,6 +536,14 @@ describe("contract v2.0 acceptance", () => {
     const semantics = contract.score_semantics as Record<string, string>;
     expect(semantics.module_support).toBeTruthy();
     expect(semantics.pattern_support).toBeTruthy();
+    expect(semantics.assessment).toBeTruthy();
+
+    const model = contract.evidence_model as {
+      primary_units: string[];
+      preferred_explanation_order: string[];
+    };
+    expect(model.primary_units).toEqual(["modules", "patterns", "variants"]);
+    expect(model.preferred_explanation_order).toEqual(["modules", "patterns", "variants"]);
 
     const order = contract.presentation_order as string[];
     expect(order.slice(0, 4)).toEqual([
@@ -519,5 +623,29 @@ describe("contract v2.0 acceptance", () => {
     expect(text).toContain("40 retained points");
     expect(text).not.toMatch(/^\s*[{[]/);
     expect(text).not.toContain("scoring_drivers");
+  });
+
+  it("rejects a stale analysis_version with ANALYSIS_VERSION_CHANGED", async () => {
+    const { client } = await connect(() =>
+      makeErrorResponse(
+        "ANALYSIS_VERSION_CHANGED",
+        "The analysis changed since that revision.",
+        {
+          next_action: {
+            tool: "show_analysis_overview",
+            reason: "Re-resolve the current analysis revision.",
+          },
+        },
+      ),
+    );
+    const result = await client.callTool({
+      name: "explain_health_hypothesis",
+      arguments: { hypothesis_id: "HYP_A", analysis_version: "stale-rev" },
+    });
+    expect(result.isError).toBe(true);
+    const envelope = envelopeOf(result);
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error?.code).toBe("ANALYSIS_VERSION_CHANGED");
+    expect(envelope.error?.next_action?.tool).toBe("show_analysis_overview");
   });
 });

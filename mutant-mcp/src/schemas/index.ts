@@ -1,5 +1,21 @@
 import { z } from "zod";
 
+import {
+  analysisContextDataSchema,
+  analysisStatusDataSchema,
+  createReportDataSchema,
+  dnaImportDataSchema,
+  errorOutputSchema,
+  explainHypothesisDataSchema,
+  geneticContextDataSchema,
+  hypothesisListDataSchema,
+  showAnalysisOverviewDataSchema,
+  snpCatalogDataSchema,
+  supportingEvidenceDataSchema,
+} from "./outputs.js";
+
+export * from "./outputs.js";
+
 /**
  * Per-tool input schemas. Every tool takes a JSON object (never a scalar).
  * No tool accepts an analysis id, account, or plan, and the DNA import tools
@@ -37,6 +53,19 @@ const hypothesisIdSchema = z
   .max(160)
   .describe("Health hypothesis id from get_analysis_context or list_health_hypotheses.");
 
+/**
+ * Optional snapshot pin. Analytical tools answer against the currently active
+ * analysis; passing the version a card displayed binds the call to that exact
+ * revision and rejects a mismatch with `ANALYSIS_VERSION_CHANGED` instead of
+ * silently reinterpreting the reference.
+ */
+const analysisVersionSchema = z
+  .string()
+  .min(1)
+  .max(160)
+  .describe("Analysis revision returned by a previous call. Omit to use the current one.")
+  .optional();
+
 export const getAnalysisStatusInputSchema = {};
 
 export const getAnalysisContextInputSchema = {};
@@ -50,10 +79,12 @@ export const listHealthHypothesesInputSchema = {
     .optional(),
   limit: boundedLimitSchema(20),
   cursor: cursorSchema,
+  analysis_version: analysisVersionSchema,
 };
 
 export const explainHealthHypothesisInputSchema = {
   hypothesis_id: hypothesisIdSchema,
+  analysis_version: analysisVersionSchema,
 };
 
 export const getSupportingEvidenceInputSchema = {
@@ -76,6 +107,7 @@ export const getSupportingEvidenceInputSchema = {
     .optional(),
   limit: boundedLimitSchema(20),
   cursor: cursorSchema,
+  analysis_version: analysisVersionSchema,
 };
 
 export const getGeneticContextInputSchema = {
@@ -111,6 +143,7 @@ export const getGeneticContextInputSchema = {
     .optional(),
   limit: limitSchema,
   cursor: cursorSchema,
+  analysis_version: analysisVersionSchema,
 };
 
 // ---------------------------------------------------------------------------
@@ -234,32 +267,74 @@ export const createReportInputSchema = z.strictObject({
 
 /**
  * Shared structured error shape returned inside the envelope.
+ *
+ * @deprecated Prefer `errorOutputSchema` from `./outputs.js`; kept as an alias so
+ * existing imports keep working.
  */
-export const toolErrorOutputSchema = z.object({
-  code: z.string(),
-  message: z.string(),
-  retryable: z.boolean(),
-  next_action: z.string().optional(),
-  required_plan: z.string().optional(),
-  upgrade_url: z.string().optional(),
-  retry_after_seconds: z.number().optional(),
-  required_scope: z.string().optional(),
-  app_code: z.string().optional(),
-  /**
-   * Why a saved analysis could not be served. Distinguishes a regeneration that
-   * is still in flight from a permanent engine change.
-   */
-  reason: z.string().optional(),
-});
+export const toolErrorOutputSchema = errorOutputSchema;
 
 /**
- * Shared `ToolResponse` envelope. `data` is intentionally permissive: each tool
- * returns a different object, while the envelope itself is uniform.
+ * Envelope factory: one concrete output schema per tool.
+ *
+ * The MCP `outputSchema` must describe a JSON object, so the envelope is a
+ * single object schema whose `data` is typed per tool and whose `error` is the
+ * structured application error. The `ok` discriminator is enforced in the
+ * schema itself, so an invalid combination (`ok: true` with an error, or
+ * `ok: false` with data) fails validation rather than passing as a permissive
+ * record.
  */
-export const toolResponseOutputSchema = z.object({
-  contract_version: z.string(),
-  analysis_version: z.string().nullable(),
-  ok: z.boolean(),
-  data: z.record(z.string(), z.unknown()).nullable(),
-  error: toolErrorOutputSchema.nullable(),
-});
+export function envelopeOf<T extends z.ZodTypeAny>(data: T) {
+  return z
+    .object({
+      contract_version: z.string(),
+      analysis_version: z.string().nullable(),
+      ok: z.boolean(),
+      data: data.nullable(),
+      error: errorOutputSchema.nullable(),
+    })
+    .superRefine((value, ctx) => {
+      const envelope = value as unknown as { ok: boolean; data: unknown; error: unknown };
+      if (envelope.ok) {
+        if (envelope.error !== null) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["error"],
+            message: "A successful envelope must not carry an error.",
+          });
+        }
+        if (envelope.data === null) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["data"],
+            message: "A successful envelope must carry data.",
+          });
+        }
+        return;
+      }
+      if (envelope.data !== null) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["data"],
+          message: "A failed envelope must carry null data.",
+        });
+      }
+      if (envelope.error === null) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["error"],
+          message: "A failed envelope must carry a structured error.",
+        });
+      }
+    });
+}
+
+export const analysisStatusOutputSchema = envelopeOf(analysisStatusDataSchema);
+export const analysisContextOutputSchema = envelopeOf(analysisContextDataSchema);
+export const hypothesisListOutputSchema = envelopeOf(hypothesisListDataSchema);
+export const explainHypothesisOutputSchema = envelopeOf(explainHypothesisDataSchema);
+export const supportingEvidenceOutputSchema = envelopeOf(supportingEvidenceDataSchema);
+export const geneticContextOutputSchema = envelopeOf(geneticContextDataSchema);
+export const showAnalysisOverviewOutputSchema = envelopeOf(showAnalysisOverviewDataSchema);
+export const dnaImportOutputSchema = envelopeOf(dnaImportDataSchema);
+export const snpCatalogOutputSchema = envelopeOf(snpCatalogDataSchema);
+export const createReportOutputSchema = envelopeOf(createReportDataSchema);

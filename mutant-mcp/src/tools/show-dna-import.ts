@@ -1,5 +1,5 @@
 import { CONTRACT_VERSION, type ToolResponse } from "../contract.js";
-import { showDnaImportInputSchema, toolResponseOutputSchema } from "../schemas/index.js";
+import { dnaImportOutputSchema, showDnaImportInputSchema } from "../schemas/index.js";
 import { DNA_IMPORT_UI_URI, dnaImportUiMeta } from "../ui/dna-import/resource.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
@@ -34,7 +34,7 @@ export const showDnaImportTool: MutantToolDefinition = {
   uiVisibility: ["model", "app"],
   uiResourceUri: DNA_IMPORT_UI_URI,
   inputSchema: showDnaImportInputSchema,
-  outputSchema: toolResponseOutputSchema,
+  outputSchema: dnaImportOutputSchema,
   annotations: readOnlyAnnotations,
   handler: async (args, runtime) => {
     const mode = args.mode === "regenerate" ? "regenerate" : "initial";

@@ -1,6 +1,6 @@
 import type { ToolResponse } from "../contract.js";
 import { withSuggestedPrompts } from "../presentation/prompts.js";
-import { explainHealthHypothesisInputSchema, toolResponseOutputSchema } from "../schemas/index.js";
+import { explainHealthHypothesisInputSchema, explainHypothesisOutputSchema } from "../schemas/index.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
 
@@ -23,7 +23,7 @@ export const explainHealthHypothesisTool: MutantToolDefinition = {
     "from symptoms or test results the user has not reported.",
   scope: "analysis.read",
   inputSchema: explainHealthHypothesisInputSchema,
-  outputSchema: toolResponseOutputSchema,
+  outputSchema: explainHypothesisOutputSchema,
   annotations: readOnlyAnnotations,
   handler: async (args, runtime) => {
     const response: ToolResponse = await runtime.client.invoke(

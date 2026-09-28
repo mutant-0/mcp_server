@@ -198,8 +198,10 @@ live in process memory, so restarting the dev server clears them.
    - "What evidence supports that?"
    - "Explore the histamine pathway." (Full)
    - "Upload my 23andMe data." (import flow: `show_dna_import` renders the component)
-5. Verify: `get_analysis_status` reports the expected plan; Free searches never
-   surface locked hypotheses; `analysis_version` changes after a reprocess.
+5. Verify: `get_analysis_status` reports the expected plan and a valid
+   `experience_state` (`READY` for a servable analysis); Free searches never
+   surface locked hypotheses; `active_analysis.analysis_version` changes after a
+   reprocess.
 
 ### DNA import checks
 
@@ -208,10 +210,13 @@ live in process memory, so restarting the dev server clears them.
   `create_report` receives only catalog-matched variants.
 - **Polling completes without another prompt.** After the file is submitted the
   card polls `get_analysis_status` (about every 7 seconds) and turns into the
-  completion view on its own. Watch the connector traffic: repeated
-  `get_analysis_status` calls with `{}` are the component, not the model. If the
-  card stalls, check whether the last read returned `ready`/`failed` or whether
-  polling was capped at 10 minutes, which surfaces as the "still working" state.
+  completion view on its own when `experience_state` leaves the processing states
+  (`PROCESSING_INITIAL` / `REFRESH_PROCESSING_NO_USABLE_ANALYSIS` →
+  `READY*`). Watch the connector traffic: repeated `get_analysis_status` calls
+  with `{}` are the component, not the model. If the card stalls, check whether
+  the last read returned a `READY*` or `PROCESSING_FAILED` state, or whether
+  polling was capped at 10 minutes, which surfaces as the "still working"
+  state.
 - **`dev-dna` is the scope-boundary caveat.** A `dna.import`-only connection can
   import but cannot read the status, so the completion card says ChatGPT must
   report the result instead of polling. That is expected; use `dev-paid` or
@@ -254,8 +259,10 @@ live in process memory, so restarting the dev server clears them.
   backend contract failures log `[MCP] handler failure` / `[MCP] internal
   operation failed`.
 - Watch for `SERVICE_UNAVAILABLE` spikes (backend invocation failures/timeouts),
-  `DATA_INCOMPATIBLE` (contract/projection mismatch), and `ANALYSIS_CHANGED`
-  (expected after reprocessing; a spike means clients are mixing versions).
+  `DATA_INCOMPATIBLE` (contract/projection mismatch), and a rise in
+  `ANALYSIS_VERSION_CHANGED` (expected when a conversation keeps referencing an
+  older revision after reprocessing; sustained volume means clients are mixing
+  versions instead of re-displaying the current analysis).
 - DNA import: `dna import submitted` / `dna import completed` lines carry
   `snpCount`, `wgsRecordCount`, `payloadBytes`, `importRequestId`, `analysisId`,
   upstream status, and duration. Genotypes are **never** logged: the logger
@@ -328,7 +335,7 @@ worker is skipped, and every parse happens on the UI thread. `tests/ui-resource.
 catches it by asserting the served document still contains the worker's own
 strings, and `npm run build:ui` logs both byte sizes.
 
-Because the internal contract is versioned (`contract_version: "2.0.0"`), the
+Because the internal contract is versioned (`contract_version: "3.0.0"`), the
 MCP Lambda rejects a mismatched backend with `DATA_INCOMPATIBLE` rather than
 serving partial data. Deploy backend first when changing the contract, then MCP.
 

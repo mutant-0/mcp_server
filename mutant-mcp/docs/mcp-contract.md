@@ -1,4 +1,4 @@
-# Mutant MCP contract (2.0.0)
+# Mutant MCP contract (3.0.0)
 
 This document describes the implemented contract between the MCP Lambda
 (`mutant-mcp`) and the report-generator backend (`report-generator/mcp`). The
@@ -6,8 +6,26 @@ backend is authoritative for every business rule and returns the typed `data`
 shapes; the Lambda is a thin, authenticated transport that adds only the
 MCP-facing presentation (`content`, `suggested_prompts`, widget `_meta`).
 
-Version 2.0.0 is a breaking revision. The detail tool is named
-**`explain_health_hypothesis`** (there is no `get_hypothesis_details` alias).
+Version 3.0.0 is a breaking revision with **no compatibility shims**. The
+removed 2.x fields (`analysis_status`, `regenerate`, `regeneration`,
+`current_results_usable`, `optional_actions`) no longer exist on the wire, and
+the detail tool is named **`explain_health_hypothesis`** (there is no
+`get_hypothesis_details` alias).
+
+What changed from 2.0.0:
+
+- One canonical `experience_state` enum plus authoritative `capabilities`,
+  replacing the overlapping readiness flags the model had to combine.
+- `active_analysis` / `pending_analysis` instead of `analysis` / `regeneration`.
+- Every error carries a structured `next_action` object `{tool, reason?,
+  arguments?}` — including lifecycle errors, which now never reach a transport
+  exception.
+- Per-tool typed `outputSchema` (one concrete envelope per tool), so response
+  shapes are machine-checkable instead of `record<string, unknown>`.
+- Snapshot-consistent cards: `show_analysis_overview` resolves and displays one
+  immutable revision (`resolve_analysis_snapshot`), and analytical calls accept
+  an optional `analysis_version` pin that is rejected with
+  `ANALYSIS_VERSION_CHANGED` on a mismatch.
 
 ## Transport and authentication
 
@@ -42,11 +60,15 @@ importing DNA creates user data.
 ## Envelope
 
 Every tool returns the same envelope as `structuredContent`, plus a single text
-content block that summarizes it. `isError` is set from `ok`.
+content block that summarizes it. `isError` is set from `ok`. Each tool declares
+a concrete `outputSchema` built by `envelopeOf(dataSchema)`
+(`src/schemas/index.ts`): `data` is typed per tool, `error` is the structured
+error, and the schema itself rejects an invalid combination (`ok: true` with an
+error, or `ok: false` with data).
 
 ```json
 {
-  "contract_version": "2.0.0",
+  "contract_version": "3.0.0",
   "analysis_version": "rev42-v3.0.0",
   "ok": true,
   "data": { "…": "tool-specific" },
@@ -56,19 +78,34 @@ content block that summarizes it. `isError` is set from `ok`.
 
 ```json
 {
-  "contract_version": "2.0.0",
+  "contract_version": "3.0.0",
   "analysis_version": null,
   "ok": false,
   "data": null,
   "error": {
-    "code": "PLAN_ACCESS_REQUIRED",
+    "code": "PLAN_REQUIRED",
     "message": "This request is outside your Free top-three analysis.",
     "retryable": false,
     "required_plan": "mutant_full",
-    "upgrade_url": "https://mutantgenomics.com/cart"
+    "upgrade_url": "https://mutantgenomics.com/cart",
+    "next_action": {
+      "tool": "get_analysis_context",
+      "reason": "Continue with the accessible top three."
+    }
   }
 }
 ```
+
+- `analysis_version` is opaque. It changes when returned content changes (account
+  cache revision + scoring config version). It is set on every analytical
+  envelope and `null` on non-analysis tools (DNA import, catalog, overview
+  pre-resolution failures).
+- `error.next_action` is the structured `{tool, reason?, arguments?}` object for
+  **every** error, not only `get_analysis_status`. It is the only sanctioned way
+  for the model to recover; the transport never converts a lifecycle state into a
+  thrown exception.
+- `error.reason` is present only for readiness diagnostics
+  (`core.cache_identity.REASON_*`), never as free-form prose.
 
 ### `content` is a deterministic summary, not a JSON mirror
 
@@ -85,46 +122,87 @@ block without the envelope.
 ### `_meta` is widget-only
 
 `_meta` carries only the auth challenge (`mcp/www_authenticate`), the Apps SDK
-UI descriptor, the security schemes, and widget hydration state (currently
-`mutant.mode` for `show_dna_import`). No tool data, genotypes, or account state
-is placed in `_meta`.
-When a ready status reports `regenerate: true`, its result also carries the
+UI descriptor, the security schemes, and widget hydration state (`mutant.mode`,
+and `mutant.displayed_analysis_version` for the overview card). No tool data,
+genotypes, or account state is placed in `_meta`.
+When `experience_state` is `READY_REFRESH_AVAILABLE` or
+`READY_REFRESH_PROCESSING`, the `get_analysis_status` result also carries the
 shared UI descriptor and widget-only `mutant.mode: "overview"`, so the refresh
 card opens with findings and hints without a second tool call.
 
-`analysis_version` is opaque. It changes when returned content changes
-(account cache revision + scoring config version). Clients that cache must
-compare it and refetch context before mixing versions.
+## Experience state model
 
-## Prompt suggestions
+`report-generator/mcp/state.py` is the **single source of truth**. Nothing else
+in either repo recomputes `experience_state`, `active_analysis`,
+`pending_analysis`, or `capabilities`; the Apps SDK card and the analytical tools
+read the same derivation, which is what stops them from disagreeing about
+whether results are usable.
 
-`get_analysis_status`, `get_analysis_context`, and `explain_health_hypothesis`
-add a `suggested_prompts` array to their `data`
-(`src/presentation/prompts.ts`). Each entry is:
-
-```json
-{
-  "id": "why-refresh",
-  "label": "Why refresh?",
-  "prompt": "Why is a refreshed analysis available, and what might change?",
-  "intent": "regeneration"
-}
+```mermaid
+flowchart TD
+  Snapshot[resolve_snapshot] --> Active
+  CacheState[get_cache_state regenerate] --> Pending
+  Unservable[_saved_analysis_unservable_reason] --> Pending
+  Active[active_analysis] --> Experience
+  Pending[pending_analysis] --> Experience
+  Ent[entitlement] --> Experience
+  DNA[dna_status] --> Experience
+  Experience[experience_state] --> Caps[capabilities]
+  Experience --> NextAction[next_action]
 ```
 
-- At most **five**, ordered by likely usefulness.
-- State-aware: DNA missing (import format/privacy), ready (overview/explain/
-  compare/clinician), processing (what happens next), regeneration available
-  (why refresh / start refresh), analysis context (explain #1 / compare top
-  three / compare with medical records shared in the chat, plus compare-all
-  for Full or a Full-scope prompt for Free accounts with locked findings),
-  hypothesis detail (why ranked / evidence /
-  confirmation / what changes it / clinician).
-- `prompt` is exact user-visible natural language. It must never contain an
-  internal command, a tool name, or a raw hypothesis id. `explain_health_hypothesis`
-  suggestions may carry a `hypothesis_id` **field** for the host's convenience,
-  but it is never embedded in the prose.
-- These fields are added at the MCP boundary, not by the backend. The backend
-  owns the typed facts; the Lambda owns the presentation.
+Derivation rules:
+
+- `active_analysis.status = "ready"` (with `analysis_version`, `generated_at`,
+  optional `scoring_engine_version`, and `usable: true`) only when the saved
+  causes payload the read tools require is servable. Otherwise it is
+  `{ "status": "none", "usable": false }`.
+- `pending_analysis` is present when the snapshot is `processing`/`failed`, when
+  `regenerate` is set alongside an in-flight refresh, or when the saved payload is
+  transiently unservable (a regeneration still writing). Its `reason` is
+  `initial_analysis`, `platform_refresh`, or `user_refresh`.
+- `experience_state` is the finite UX vocabulary below.
+- `capabilities.can_query_analysis` equals `active_analysis.usable` — by
+  construction, not by convention.
+
+### `experience_state`
+
+| State | Meaning |
+|---|---|
+| `NO_DNA` | No DNA has been imported. |
+| `PROCESSING_INITIAL` | First analysis in flight; no prior usable results. |
+| `READY` | Usable results, nothing to refresh. |
+| `READY_REFRESH_AVAILABLE` | Usable results, and a newer platform/scoring revision is available. |
+| `READY_REFRESH_PROCESSING` | Usable results while a replacement run is in flight. |
+| `REFRESH_PROCESSING_NO_USABLE_ANALYSIS` | A platform refresh is in flight and no usable results exist yet. |
+| `PROCESSING_FAILED` | No usable results and nothing in flight (terminal failure); regeneration is required. |
+
+Add a state only when it changes ChatGPT behavior.
+
+### `capabilities`
+
+| Flag | True when |
+|---|---|
+| `can_query_analysis` | `experience_state` is one of the `READY*` states (equals `active_analysis.usable`). |
+| `can_show_overview` | Same as `can_query_analysis`. |
+| `can_refresh_analysis` | `experience_state == READY_REFRESH_AVAILABLE`. |
+| `can_search_hypotheses` | `can_query_analysis` and the account is Full. |
+| `can_explore_genetic_context` | Same as `can_query_analysis`. |
+
+### `next_action`
+
+`next_action` is present only when exactly one logical path exists. In the READY
+states it is deliberately omitted: the user may open the overview, ask a
+question, or browse, so pinning one action would over-constrain the model.
+
+| State | `next_action` |
+|---|---|
+| `NO_DNA` | `show_dna_import` (`arguments: {mode: "initial"}`). |
+| `PROCESSING_INITIAL` | `get_analysis_status` (poll). |
+| `REFRESH_PROCESSING_NO_USABLE_ANALYSIS` | `get_analysis_status` (poll). |
+| `PROCESSING_FAILED` | `show_dna_import` (`arguments: {mode: "regenerate"}`). |
+| DNA on file, no report row | `show_dna_import` (`arguments: {mode: "initial"}`). |
+| `READY*` | omitted. |
 
 ## Tools
 
@@ -132,20 +210,30 @@ Each tool maps to a distinct user goal. The routing contract is:
 
 | Tool | Responsibility |
 |---|---|
-| `get_analysis_status` | Establish connection, DNA readiness, analysis readiness, entitlement, and regeneration state. |
-| `show_analysis_overview` | Open the ready-analysis Apps SDK card with accessible findings and hints. |
-| `get_analysis_context` | Supply interpretation rules, boundaries, access scope, compact top-hypothesis preview, and useful next questions for specific analysis questions. |
+| `get_analysis_status` | Establish connection, DNA readiness, the canonical `experience_state`, entitlement, capabilities, and the single next action. |
+| `show_analysis_overview` | Resolve one immutable analysis snapshot and open the ready-analysis Apps SDK card bound to it. |
+| `get_analysis_context` | Supply the interpretation contract, coverage, access scope, a compact top-hypothesis preview, and useful next questions for specific analysis questions. |
 | `list_health_hypotheses` | Browse, search, sort, paginate, and compare accessible hypotheses. |
 | `explain_health_hypothesis` | Explain one hypothesis in depth. |
 | `get_supporting_evidence` | Expand one evidence category for one hypothesis. |
 | `get_genetic_context` | Answer marker-, gene-, or module-level questions. |
 
-Call `get_analysis_status` first. For a general overview when the analysis is
-ready, call `show_analysis_overview` and let the card present results. For a
-specific question, call `get_analysis_context` after status reports ready, then
-use `list_health_hypotheses` for subsequent
-browsing, searching, sorting, pagination, and comparison; use
-`explain_health_hypothesis` or `get_supporting_evidence` for a single finding.
+Call `get_analysis_status` first. Read its `experience_state` and `capabilities`
+instead of inferring readiness. When `experience_state` is `NO_DNA`, call
+`show_dna_import` in the same turn. When `capabilities.can_query_analysis` is
+true and the user opens Mutant or asks for a general overview, call
+`show_analysis_overview` in the same turn and let the card present results. For a
+specific question, call `get_analysis_context` first, then use
+`list_health_hypotheses` for subsequent browsing, searching, sorting,
+pagination, and comparison; use `explain_health_hypothesis` or
+`get_supporting_evidence` for a single finding.
+
+Both `list_health_hypotheses` and `explain_health_hypothesis` (plus
+`get_supporting_evidence` and `get_genetic_context`) accept an optional
+`analysis_version` snapshot pin. Omit it to answer against the currently active
+analysis; pass the value a card or prompt suggestion displayed to bind the call
+to that exact revision. A mismatch is rejected with `ANALYSIS_VERSION_CHANGED`
+(see [Snapshot consistency](#snapshot-consistency)).
 
 ### `get_analysis_status`
 
@@ -153,107 +241,99 @@ Input: `{}`. A successful call even with no analysis.
 
 ```json
 {
-  "dna_status": "missing",
-  "analysis_status": "unavailable",
+  "dna_status": "available",
+  "experience_state": "READY_REFRESH_AVAILABLE",
+  "active_analysis": {
+    "status": "ready",
+    "analysis_version": "rev41-v3.0.0",
+    "generated_at": "2026-08-01T12:00:00Z",
+    "scoring_engine_version": "v3.1.0",
+    "usable": true
+  },
+  "pending_analysis": null,
   "entitlement": {
     "plan": "mutant_free",
-    "hypothesis_scope": "top_3",
-    "genetic_context_scope": "hypothesis_markers"
+    "hypothesis_scope": "top_three",
+    "genetic_context_scope": "accessible_hypotheses"
   },
   "capabilities": {
-    "clinical_correlation": true,
-    "supporting_evidence": true,
-    "search_all_hypotheses": false,
-    "independent_genetic_exploration": false
+    "can_query_analysis": true,
+    "can_show_overview": true,
+    "can_refresh_analysis": true,
+    "can_search_hypotheses": false,
+    "can_explore_genetic_context": true
   },
-  "regenerate": false,
   "next_action": {
     "tool": "show_dna_import",
-    "reason": "DNA data is required before an analysis can be generated."
+    "reason": "Resubmit DNA to regenerate the analysis with the current scoring engine.",
+    "arguments": { "mode": "regenerate" }
   },
+  "suggested_prompts": [ /* added by the Lambda, max 5 */ ],
   "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/cart" }
 }
 ```
 
 - `dna_status` is `missing | available`. `missing` means no DNA data has been
   received, so `show_dna_import` is the next action.
-- `analysis_status` is `unavailable | processing | ready | failed`. The internal
-  `none` maps to `unavailable`; every in-flight word (`queued`, `pending`,
-  `running`, `in_progress`) maps to `processing` so an analysis that exists is
-  never reported as no DNA data.
+- `experience_state` is the canonical enum. The internal `none` readiness word
+  never appears on the wire.
+- `active_analysis` is the analysis that can be queried **now**:
+  `{ status: "none" | "ready", analysis_version?, generated_at?,
+  scoring_engine_version?, usable }`. Version fields are resolved only for a
+  servable analysis.
+- `pending_analysis` is `null` or
+  `{ status: "processing" | "failed", reason: "initial_analysis" |
+  "platform_refresh" | "user_refresh", target_scoring_engine_version?, failure? }`.
+  `failure` is `{ code, message }` and appears only for a `failed` replacement.
 - `entitlement` is the effective plan and scope.
-  `genetic_context_scope` is `hypothesis_markers` for Free and
+  `genetic_context_scope` is `accessible_hypotheses` for Free and
   `all_analyzed_markers` for Full. `access_expires_at` is present only when
   access is scheduled to end (never a renewal date).
-- `capabilities` mirrors the plan's feature gates.
-- `regenerate` is **always present**, `true` only when the platform/catalog/
-  scoring revision is newer than the account's. It is never inferred from the
-  mere existence of a report.
-- `analysis` is present whenever an analysis exists:
-  `{ "generated_at": …, "scoring_engine_version"?: …, "catalog_version"?: … }`.
-  The version fields are resolved lazily only for a ready analysis.
-- `next_action` is an object `{ tool, reason, arguments? }` (a `ToolAction`):
-  `show_dna_import` when DNA is missing, `get_analysis_context` when ready,
-  `get_analysis_status` while processing, and `show_dna_import` with
-  `arguments: { mode: "regenerate" }` when a required refresh is the only path.
-  The MCP presentation uses `show_analysis_overview` for an initial ready-state
-  overview; the backend's `next_action` remains unchanged for data exploration.
-- `optional_actions` is present when regeneration is available but **not
-  required** *and* the current results are usable: a list of `ToolAction`s the
-  user may choose (currently the `show_dna_import` refresh). A processing or
-  unservable analysis has nothing to refresh, so no optional action is offered
-  while a run is in flight.
-- `analysis_status` reflects whether the saved analysis can actually be served,
-  not just whether generation completed. A completed run whose saved causes
-  payload the read tools require is missing, stale, or from a different scoring
-  engine is reported as `processing` (transient) or `failed` (permanent) so this
-  endpoint cannot disagree with `get_analysis_context` / `list_health_hypotheses`.
+- `capabilities` mirrors the state model above.
+- `upgrade` is present only for a Free account with locked findings.
+- There is no `regenerate`, `regeneration`, `current_results_usable`,
+  `optional_actions`, or `analysis_status` field. Readiness is expressed exactly
+  once, by `experience_state`.
 
-When a refresh exists (`regenerate: true`), `regeneration` is included:
+The status endpoint reports readiness from what the read tools can actually
+serve, not merely from report completion. A completed run whose saved causes
+payload is missing, stale, or from a different scoring engine is reported as
+`READY_REFRESH_PROCESSING` / `PROCESSING_FAILED` (via `pending_analysis`) — it is
+never advertised as `READY` while `get_analysis_context` would refuse it.
 
-```json
-{
-  "recommended": true,
-  "required": false,
-  "reason_code": "platform_update",
-  "reason": "A newer analysis pipeline can evaluate additional patterns.",
-  "requires_dna_resubmission": true,
-  "current_results_usable": true,
-  "current_analysis_version": "rev41-v3.0.0",
-  "action": {
-    "tool": "show_dna_import",
-    "reason": "Refresh the analysis with the newer platform.",
-    "arguments": { "mode": "regenerate" }
-  }
-}
-```
-
-- `required` is `true` and `current_results_usable` is `false` when the current
-  analysis `failed` or its saved payload can never be served (a scoring-engine
-  change), so resubmission is the only path. `current_results_usable` is also
-  `false` when the reads refuse the saved payload transiently (a regeneration
-  still writing); that clears on its own.
-- `reason_code` is `platform_update` today. The other contract reason codes are
-  reserved and are not reported until the engine can justify them.
-- `requires_dna_resubmission` is always `true`: the platform cannot rescore a
-  stored raw file the account no longer holds.
-
-While `analysis_status` is `processing`, the DNA import component polls this
-tool itself (about every 7 seconds, up to 10 minutes) after it creates a report.
-The model should not tell the user to keep asking whether processing has
+While `experience_state` is a processing state, the DNA import component polls
+this tool itself (about every 7 seconds, up to 10 minutes) after it creates a
+report. The model should not tell the user to keep asking whether processing has
 finished, and should not narrate the status while that component is on screen.
+
+#### Refresh semantics
+
+- `READY_REFRESH_AVAILABLE` means the platform/catalog/scoring revision is newer
+  than the account's, **and** the current results remain usable. It is never
+  inferred from the mere existence of a report. The refresh action is
+  `show_dna_import` with `{mode: "regenerate"}`.
+- `READY_REFRESH_PROCESSING` means a replacement run is in flight while the prior
+  results stay queryable. No refresh action is offered while a run is in flight.
+- `REFRESH_PROCESSING_NO_USABLE_ANALYSIS` is the same run with no usable prior
+  results; the only action is to poll status.
+- A refresh requires DNA resubmission: the platform cannot rescore a stored raw
+  file the account no longer holds.
+- A permanent miss (`analysis_engine_changed`, `analysis_payload_empty`) makes
+  the active analysis unusable and yields `PROCESSING_FAILED` with a regeneration
+  action; a transient miss (a regeneration still writing) clears on its own and
+  yields a processing state.
 
 ### `get_analysis_context`
 
-Input: `{}`. The first analysis tool called after status reports the analysis is
-ready. It bootstraps the overall experience: the versioned interpretation
-contract, coverage, access scope, a compact preview of the top three hypotheses,
-and next-question prompts. It is not a listing tool.
+Input: `{}`. The first analysis tool called after status reports
+`can_query_analysis`. It bootstraps the overall experience: the versioned
+interpretation contract, coverage, access scope, a compact preview of the top
+three hypotheses, and next-question prompts. It is not a listing tool.
 
 ```json
 {
-  "interpretation_contract": {
-    "version": "2.1",
+  "interpretation": {
+    "version": "2.5",
     "purpose": "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
     "response_rules": ["… (1-6)"],
     "evidence_explanation_rules": {
@@ -264,7 +344,9 @@ and next-question prompts. It is not a listing tool.
     "score_semantics": {
       "priority_score": "…",
       "genetic_support": "…",
+      "assessment": "…",
       "genetic_evidence": "…",
+      "genetic_confidence": "…",
       "coverage_confidence": "…",
       "pattern_convergence": "…",
       "module_support": "Genetic support from the underlying biological modules.",
@@ -293,97 +375,87 @@ and next-question prompts. It is not a listing tool.
       "strengthening_and_weakening_evidence",
       "action_changing_guardrail"
     ],
-    "limitations": ["…", "…"]
+    "limitations": ["…", "…"],
+    "evidence_model": {
+      "primary_units": ["modules", "patterns", "variants"],
+      "preferred_explanation_order": ["modules", "patterns", "variants"]
+    }
   },
   "coverage": { "analyzed_markers": 1240, "classification": "moderate" },
-  "access_summary": {
+  "access": {
     "plan": "mutant_free",
-    "hypothesis_scope": "top_3",
+    "hypothesis_scope": "top_three",
     "total_ranked": 12,
     "returned": 3,
     "unlocked": 3,
     "locked": 9,
     "scope_message": "Your top three ranked hypotheses are fully unlocked. Mutant Full can search 9 additional ranked hypotheses."
   },
-  "top_hypotheses": [ /* up to three HypothesisPreview, rank order */ ],
+  "preview": [ /* up to three HypothesisSummary, rank order */ ],
   "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/cart" },
   "suggested_prompts": [ /* added by the Lambda, max 5 */ ]
 }
 ```
 
-- `interpretation_contract` is server-owned and versioned (`"2.1"`). It is
-  global product behavior, never per-hypothesis catalog prose and never
-  LLM-generated. `response_rules` is 1-6 unique strings; `limitations` is 0-4
-  unique strings; the boundary flags are literal `true`; `score_semantics` has
-  exactly the seven published keys; `presentation_order` is the fixed order
-  above.
+- `interpretation` is server-owned and versioned (`"2.5"`). It is global product
+  behavior, never per-hypothesis catalog prose and never LLM-generated.
+  `response_rules` is 1-6 unique strings; `limitations` is 0-4 unique strings;
+  the boundary flags are literal `true`; `score_semantics` has exactly the
+  published keys (`priority_score`, `genetic_support`, `assessment`,
+  `genetic_evidence`, `genetic_confidence`, `coverage_confidence`,
+  `pattern_convergence`, `module_support`, `pattern_support`);
+  `presentation_order` is the fixed order above; `evidence_model` names the
+  evidence units explanations are built from.
 - `evidence_explanation_rules` is the module-first contract: `organizing_level`
-  is `modules_then_patterns_then_variants`, `rules` carries the nine presentation
-  rules, and `module_first_instruction` is the stable server instruction the
-  model must apply to every hypothesis explanation. It is global behavior, not
-  per-hypothesis content, and is never echoed into `content`.
+  is `modules_then_patterns_then_variants`, `rules` carries the published
+  presentation rules, and `module_first_instruction` is the stable server
+  instruction the model must apply to every hypothesis explanation. It is global
+  behavior, not per-hypothesis content, and is never echoed into `content`.
+- The blocks are named `interpretation`, `access`, and `preview` (2.0.0 called
+  them `interpretation_contract`, `access_summary`, and `top_hypotheses`).
 - `coverage.classification` is optional.
-- `access_summary.hypothesis_scope` is `top_3` for Free and `all` for Full.
+- `access.hypothesis_scope` is `top_three` for Free and `all` for Full.
   `unlocked` is the count of accessible hypotheses; `locked` is the count the
   current plan cannot reach (zero for Full). `scope_message` states the actual
   scope and never implies the three previews are the whole of a Full analysis.
 - `upgrade` is present only for a Free account whose analysis has `locked > 0`.
   Full never receives upgrade messaging.
-- Free never exposes locked hypothesis ids, titles, scores, ranks, or tags.
+- Free never exposes locked hypothesis ids, names, scores, ranks, or tags.
 
 For Full, `scope_message` reads: "Your complete ranked analysis is available.
 This response previews the top three; use hypothesis search or listing to
 explore the rest."
 
-#### `HypothesisPreview`
-
-The compact preview returned only by `get_analysis_context`:
-
-```json
-{
-  "id": "RC_A",
-  "rank": 1,
-  "title": "Alpha",
-  "bottom_line": "…",
-  "priority_score": 90.0,
-  "genetic_evidence": "strong",
-  "coverage_confidence": "high",
-  "pattern_convergence": "strong"
-}
-```
-
-- At most three records, in authoritative rank order. Free returns its three
-  unlocked hypotheses; Full also receives only the first three here.
-- Deliberately narrower than `HypothesisSummary`: no `genetic_support_score`, no
-  context tags, and no patterns, variants, tests, sources, or clinical detail.
-  The two DTOs are separate types so the context response cannot accumulate
-  list-only fields.
-
 #### `HypothesisSummary`
 
-The richer browse/search DTO owned by `list_health_hypotheses`:
+The shared browse/search DTO, reused (bounded to three records in rank order) by
+the context `preview`:
 
 ```json
 {
   "id": "RC_A",
   "rank": 1,
-  "title": "Alpha",
-  "bottom_line": "…",
+  "name": "Alpha",
+  "summary": "…",
   "priority_score": 90.0,
-  "genetic_support_score": 80.0,
+  "genetic_support": 80.0,
+  "genetic_confidence": { "score": 82.5, "level": "high" },
   "genetic_evidence": "strong",
   "coverage_confidence": "high",
   "pattern_convergence": "strong"
 }
 ```
 
+- `name` is the display name (2.0.0 called it `title`); `summary` is the curated
+  `presentation.bottom_line` when present, else the catalog `summary` or the
+  hypothesis `user_description`.
 - `genetic_evidence`, `coverage_confidence`, and `pattern_convergence` pass the
   engine's published vocabulary through unchanged. No thresholds or scores are
   invented.
-- `genetic_support_score` is the raw support score; it is intentionally absent
-  from `HypothesisPreview`.
-- `bottom_line` is the curated `presentation.bottom_line` when present, else the
-  catalog `summary` or the hypothesis `user_description`.
+- `genetic_support` is the raw support score; `genetic_confidence` is
+  `{ score, level }` and describes measurement quality, independent of direction.
+- `priority_score` is a ranking signal, **not** disease probability or diagnostic
+  confidence, and is not comparable across analyses.
 
 #### Model-facing `content`
 
@@ -393,9 +465,9 @@ The richer browse/search DTO owned by `list_health_hypotheses`:
 Your DNA analysis is ready and assessed {analyzed_markers} markers. {purpose}
 
 Your highest-ranked findings are:
-1. {title} - {bottom_line}
-2. {title} - {bottom_line}
-3. {title} - {bottom_line}
+1. {name} - {summary}
+2. {name} - {summary}
+3. {name} - {summary}
 
 {scope_message}
 
@@ -407,46 +479,54 @@ You can ask me to explain one finding, compare the three, or search accessible h
 It carries the readiness/coverage sentence, the access scope, the preview list,
 the single most important interpretation boundary, and the next-question line.
 It never repeats the full contract, never serializes `structuredContent`, and
-stays under ~1,500 characters (titles and bottom lines are bounded).
+stays under ~1,500 characters (names and summaries are bounded).
 
 ### `list_health_hypotheses`
 
-Input: `{ query?, limit? (1–20, default 10), cursor? }`. The `module_id` argument
-was **removed** in v2. `query` matches hypothesis titles/summaries only.
+Input: `{ query?, limit? (1-20, default 10), cursor?, analysis_version? }`.
+`query` matches hypothesis names/summaries only.
 
 Output:
 
 ```json
 {
   "items": [ /* HypothesisSummary[] */ ],
-  "next_cursor": "…"
+  "next_cursor": "…",
+  "total_accessible": 12
 }
 ```
 
 `next_cursor` is present only when more items remain; there is no `page`
-wrapper. Free returns its frozen top three in rank order; Full returns the whole
-set.
+wrapper. `total_accessible` is optional. Free returns its frozen top three in
+rank order; Full returns the whole set.
 
 ### `explain_health_hypothesis`
 
-Input: `{ hypothesis_id }`. The explanation-ready projection, with no nested
-variant records, no full test records, and no bespoke prose. It is organized
-module-first: the server states whether support is broad or concentrated, then
-the contributing modules, then retained patterns, then the key scoring drivers.
+Input: `{ hypothesis_id, analysis_version? }`. The explanation-ready projection,
+with no nested variant records, no full test records, and no bespoke prose. It is
+organized module-first: the server states whether support is broad or
+concentrated, then the contributing modules, then retained patterns, then the key
+scoring drivers.
 
 ```json
 {
   "hypothesis": {
     "id": "RC_A",
     "rank": 1,
-    "title": "Alpha",
+    "name": "Alpha",
     "assessment_state": "assessed",
     "scores": {
       "priority": 90.0,
       "genetic_support": 80.0,
+      "genetic_confidence": { "score": 82.5, "level": "high" },
       "coverage": "high",
       "convergence": "strong"
     }
+  },
+  "bottom_line": "…",
+  "evidence_shape": {
+    "support_distribution": "concentrated",
+    "summary": "Support is concentrated: CYP19A1 supplies 71% of the retained genetic support."
   },
   "explanation": {
     "bottom_line": "…",
@@ -464,6 +544,10 @@ the contributing modules, then retained patterns, then the key scoring drivers.
       }
     ]
   },
+  "ranking_drivers": [
+    { "component": "genetic_support", "value": 80.0, "semantics": "…" },
+    { "component": "pattern_support", "value": 32.0, "semantics": "…" }
+  ],
   "score_breakdown": {
     "priority_score": 90.0,
     "genetic_support": 80.0,
@@ -471,6 +555,8 @@ the contributing modules, then retained patterns, then the key scoring drivers.
     "pattern_support": 32.0,
     "converging_pattern_adjustment": 5.0
   },
+  "score_interpretation": { "summary": "…" },
+  "assessment": { "…": "the canonical engine assessment" },
   "support_architecture": {
     "classification": "locus_concentrated",
     "contributing_module_count": 1,
@@ -486,7 +572,7 @@ the contributing modules, then retained patterns, then the key scoring drivers.
     },
     "summary": "Support is concentrated: CYP19A1 supplies 71% of the retained genetic support."
   },
-  "module_contributions": [
+  "modules": [
     {
       "module_id": "steroid",
       "module_name": "Sex Hormone Transport & Availability",
@@ -501,7 +587,7 @@ the contributing modules, then retained patterns, then the key scoring drivers.
       "caveats": []
     }
   ],
-  "pattern_contributions": [
+  "patterns": [
     {
       "pattern_id": "STORM_A",
       "pattern_name": "…",
@@ -513,7 +599,8 @@ the contributing modules, then retained patterns, then the key scoring drivers.
       "summary": "Retained matched pattern with 2 contributing variants."
     }
   ],
-  "converging_pattern_contributions": [
+  "provisional_evidence": [ /* the provisional subset of patterns */ ],
+  "converging_patterns": [
     {
       "pattern_id": "CONV_1",
       "state": "observed",
@@ -533,8 +620,10 @@ the contributing modules, then retained patterns, then the key scoring drivers.
     "partial_support": "…",
     "weakening_evidence": "…"
   },
+  "strengthens_interpretation": ["…"],
+  "weakens_interpretation": ["…"],
   "guardrails": ["…"],
-  "related_hypotheses": [{ "id": "RC_B", "title": "…", "relationship": "related" }],
+  "related_hypotheses": [{ "id": "RC_B", "name": "…", "relationship": "related" }],
   "suggested_prompts": [ /* added by the Lambda, max 5 */ ]
 }
 ```
@@ -542,17 +631,27 @@ the contributing modules, then retained patterns, then the key scoring drivers.
 - `explanation.why_ranked` is **always** assembled from the live rank, scores,
   and contributing pattern count; it is never stored prose and can never drift
   from the payload.
+- The contributing blocks are named `modules`, `patterns`,
+  `provisional_evidence`, and `converging_patterns` (2.0.0 used
+  `module_contributions`, `pattern_contributions`, `clinical_context`, and
+  `converging_pattern_contributions`).
+- `bottom_line` is duplicated at the top level so the model can read the headline
+  without descending into `explanation`.
 - `explanation.bottom_line` and `interpretation_boundary` prefer curated
   `presentation` copy, then the catalog, and are omitted when no source exists.
 - `explanation.top_contributing_patterns` lists at most three matched or
   provisional patterns, strongest impact first.
+- `ranking_drivers` lists the non-null score components behind the priority
+  score, in score order, each carrying its published `semantics` sentence.
 - `score_breakdown` carries the retained component scores on the comparable
   0-100 genetic-support scale. It is read from the engine's retained
   `scoring_trace` when present, and falls back to the stored totals for legacy
-  analyses.
-- `support_architecture`, `module_contributions` (max 3 by retained support),
-  and `pattern_contributions` (max 3 by retained support) come from the retained
-  `scoring_trace`. They are never reconstructed by the adapter. See
+  analyses. `score_interpretation` projects the assessment onto the
+  score-breakdown vocabulary; `assessment` is the canonical engine assessment and
+  is authoritative over surface wording.
+- `support_architecture`, `modules` (max 3 by retained support), and `patterns`
+  (max 3 by retained support) come from the retained `scoring_trace`. They are
+  never reconstructed by the adapter. See
   [Module-aware explanations](#module-aware-explanations).
 - `converging_pattern_adjustment` is a separate priority-only family and is
   never summed into `module_support` or `pattern_support`.
@@ -563,17 +662,20 @@ the contributing modules, then retained patterns, then the key scoring drivers.
   `presentation` copy, then the tests catalog, and are omitted when absent.
 - `guardrails` is deduped and capped at four. `related_hypotheses` appears only
   when the catalog declares related drivers.
-- Removed in v2: default `user_context`, `confidence_notes`, `module_context`,
-  per-pattern `variants[]`, and full `clinical_correlation` test records. Those
-  move to `get_supporting_evidence` (`kind: "tests"` for assay guidance).
+- Removed in v3: the flat `support_architecture`-duplicating top-level keys, and
+  the `pattern_contributions` / `module_contributions` names. Those families are
+  now `patterns` / `modules`, with `provisional_evidence` separated.
 
 ### `get_supporting_evidence`
 
 Input: `{ hypothesis_id, kind? ("patterns" | "variants" | "modules" |
-"sources" | "tests"), pattern_id?, include_context?, limit? (1–20), cursor? }`.
-Defaults to `patterns`.
+"sources" | "tests"), pattern_id?, include_context?, limit? (1-20), cursor?,
+analysis_version? }`. Defaults to `patterns`.
 
-Output: `{ kind, items, next_cursor?, source_state? }`.
+Output: `{ kind, items, next_cursor?, source_state? }`. An empty evidence layer
+for `patterns` / `variants` / `modules` / `tests` is reported as
+`EVIDENCE_NOT_AVAILABLE` rather than an empty `items` list; `sources` keeps its
+explicit `source_state: "not_provided"` signal.
 
 - `patterns` → `PatternEvidence`:
 
@@ -606,7 +708,7 @@ Output: `{ kind, items, next_cursor?, source_state? }`.
     "rsid": "rs4680",
     "gene": "COMT",
     "genotype": "AG",
-    "call_status": "called",
+    "call_state": "called",
     "contribution_status": "contributes",
     "module_role": { "status": "contributes", "retained_contribution": 12.5 },
     "pattern_memberships": [
@@ -621,9 +723,10 @@ Output: `{ kind, items, next_cursor?, source_state? }`.
   }
   ```
 
-  `call_status` is `called | not_called | not_scored`;
-  `contribution_status` is `contributes | context_only | excluded`; membership
-  `role` is `core | supporting | context`. `module_role.status` is
+  `call_state` is `called | missing | unresolved` (`missing` = in the catalog but
+  no stored call; `unresolved` = not in the analyzed catalog);
+  `contribution_status` is `contributes | context_only | excluded`;
+  membership `role` is `core | supporting | context`. `module_role.status` is
   `contributes | no_score_contribution | not_scored | not_assessed`, so a
   zero-weight module variant can still be a retained-pattern participant
   without either role being flattened. A marker in several patterns appears
@@ -683,17 +786,17 @@ Output: `{ kind, items, next_cursor?, source_state? }`.
   fields are invented where the library has none.
 
 Access before expansion: a Free request for a locked hypothesis returns
-`PLAN_ACCESS_REQUIRED` (indistinguishable from a nonexistent hypothesis). An
-unknown `pattern_id` returns `PATTERN_NOT_FOUND`.
+`PLAN_REQUIRED` (indistinguishable from a nonexistent hypothesis). An unknown
+`pattern_id` returns `PATTERN_NOT_FOUND`.
 
 ### `get_genetic_context`
 
 Input:
-`{ hypothesis_id?, module_id?, gene?, rsids?, include_modules?, limit? (1–50),
-cursor? }`.
+`{ hypothesis_id?, module_id?, gene?, rsids?, include_modules?, limit? (1-50),
+cursor?, analysis_version? }`.
 
-- Free: `hypothesis_id` is required (`HYPOTHESIS_SCOPE_REQUIRED` otherwise) and
-  must be accessible; selectors are limited to that hypothesis's stored evidence.
+- Free: `hypothesis_id` is required (`SCOPE_REQUIRED` otherwise) and must be
+  accessible; selectors are limited to that hypothesis's stored evidence.
 - Full: at least one of `hypothesis_id`, `module_id`, `gene`, or `rsids` is
   required.
 
@@ -707,8 +810,7 @@ Output:
 }
 ```
 
-- Markers are aggregated by rsID: the former `(rsid, module_id, pattern_id)`
-  dedupe is replaced by one row per rsID carrying a single nested
+- Markers are aggregated by rsID: one row per rsID carrying a single nested
   `pattern_memberships` list. When a hypothesis scopes the call and a retained
   trace exists, each row also carries `module_role`, mirroring
   `kind: "variants"`.
@@ -722,31 +824,82 @@ Output:
   `support = 0` even when they have their own `score`.
 - The v1 top-level module-support totals
   (`combined_module_support`, `module_base_support`, `module_supporting_lift`)
-  are no longer part of `data`; the widget derives what it needs from `modules`.
+  are not part of `data`; the widget derives what it needs from `modules`.
+
+## Snapshot consistency
+
+An analysis revision must mean one thing for the whole conversation. Two
+mechanisms enforce that.
+
+### `resolve_analysis_snapshot` (internal operation)
+
+`show_analysis_overview` does not read status and does not re-derive the current
+analysis in the card. It calls the internal backend operation
+`resolve_analysis_snapshot`, which resolves `_ready_context` and returns:
+
+```json
+{
+  "displayed_analysis_version": "rev42-v3.0.0",
+  "displayed_hypotheses": [{ "id": "RC_A", "rank": 1, "name": "Alpha" }]
+}
+```
+
+Only accessible hypotheses are listed (Free never sees locked ids), and no
+variant data is returned. If the analysis is not ready, the operation returns the
+same structured `ANALYSIS_PROCESSING` / `ANALYSIS_NOT_READY` / `DNA_NOT_AVAILABLE`
+envelope an analytical tool would, and `show_analysis_overview` forwards it
+rather than throwing. `resolve_analysis_snapshot` is internal-only: it is
+accepted by `parse_request` but is **not** a model-facing tool.
+
+The card renders exactly `displayed_analysis_version` / `displayed_hypotheses`
+and passes `displayed_analysis_version` (also exposed as
+`_meta.mutant.displayed_analysis_version`) on follow-up calls, so `#3` cannot
+silently mean a different finding than the one the model described.
+
+### `analysis_version` pin
+
+`list_health_hypotheses`, `explain_health_hypothesis`, `get_supporting_evidence`,
+and `get_genetic_context` accept an optional `analysis_version`. When it is
+provided and does not equal the active snapshot's version, the backend returns
+
+```json
+{
+  "code": "ANALYSIS_VERSION_CHANGED",
+  "message": "A newer analysis is now active.",
+  "retryable": false,
+  "next_action": { "tool": "show_analysis_overview", "reason": "Display the current analysis before continuing." }
+}
+```
+
+instead of silently answering against the newer revision. A cursor bound to a
+different revision is rejected the same way (`cursors.decode_cursor`); a
+tampered, expired, or selector-mismatched cursor is `INVALID_CURSOR`.
 
 ## DNA import
 
-Three DNA import tools and one shared UI resource. The raw DNA file is parsed in the user's browser;
-only catalog-matched variants are submitted. The MCP layer adds no genetics: it
-validates shape and size, forwards the payload with a server-derived identity, and
-returns a narrowed response.
+Three DNA import tools and one shared UI resource. The raw DNA file is parsed in
+the user's browser; only catalog-matched variants are submitted. The MCP layer
+adds no genetics: it validates shape and size, forwards the payload with a
+server-derived identity, and returns a narrowed response.
 
 ### `show_analysis_overview`
 
-Input: `{}`. Scope `analysis.read`. No backend call. This MCP-only display tool
-mounts the shared Apps SDK card when a ready analysis is opened for a general
-overview. Its result contains only `{ "ui_rendered": true, "mode": "overview" }`
-and the UI descriptor. The card reads current status, then loads accessible
-findings and the context hints automatically. The model should let the card
-present these results rather than repeating the context preview in prose.
+Input: `{}`. Scope `analysis.read`. Calls `resolve_analysis_snapshot` and mounts
+the shared Apps SDK card. Its result is
+`{ ui_rendered: true, mode: "overview", displayed_analysis_version,
+displayed_hypotheses }` plus the UI descriptor and widget-only
+`mutant.mode: "overview"`. The card renders that bound snapshot and loads
+accessible findings and hints from it; the model should let the card present
+these results rather than repeating the context preview in prose.
 
 ### `show_dna_import`
 
 Input: `{ mode?: "initial" | "regenerate" }`. Scope `dna.import`. No backend call.
 
 The model calls this immediately whenever `get_analysis_status` reports
-`dna_status="missing"`. It calls it with `mode: "regenerate"` only when
-regeneration is required or the user explicitly asks to refresh. The mode never
+`experience_state: "NO_DNA"`. It calls it with `mode: "regenerate"` only when a
+refresh is required (`experience_state: "PROCESSING_FAILED"` /
+`READY_REFRESH_AVAILABLE`) or the user explicitly asks to refresh. The mode never
 triggers a resubmission by itself.
 
 Visibility `["model", "app"]`. The result carries **no** routing state, no
@@ -839,45 +992,50 @@ the server only through the host bridge (`tools/call`), so it declares neither
 The component (`src/ui/dna-import/main.tsx` mounts `app.tsx`) owns the whole
 asynchronous lifecycle. On mount it calls `get_snp_catalog` and
 `get_analysis_status` in parallel, which is how a rerender or a reopened panel
-resumes an in-flight analysis instead of starting a new one: `processing` opens
-the progress card and resumes polling, `ready` opens the completion card, and
-`failed` opens the recovery card. It parses the selected file with the vendored
-shared processor (`src/ui/dna-import/parseFile.ts` over `src/ui/genomics/*`, synced
-from `front-end-web/src/genomics`), filters to catalog-matched variants, and
-submits via `create_report` with one `crypto.randomUUID()` per attempt.
+resumes an in-flight analysis instead of starting a new one: a processing
+`experience_state` opens the progress card and resumes polling, a `READY*` state
+opens the completion card, and `PROCESSING_FAILED` opens the recovery card. It
+parses the selected file with the vendored shared processor
+(`src/ui/dna-import/parseFile.ts` over `src/ui/genomics/*`, synced from
+`front-end-web/src/genomics`), filters to catalog-matched variants, and submits
+via `create_report` with one `crypto.randomUUID()` per attempt.
 
 After a successful `create_report` the component polls `get_analysis_status`
-itself (about every 7 seconds, up to 10 minutes) and stops on `ready`, `failed`,
-unmount, a new import, or the ceiling. It shows an elapsed timer measured from
-`created_at` (falling back to its own clock), never a countdown, percentage, or
-estimated time remaining.
+itself (about every 7 seconds, up to 10 minutes) and stops when
+`experience_state` is no longer a processing state, on unmount, on a new import,
+or on the ceiling. It shows an elapsed timer measured from
+`active_analysis.generated_at` (falling back to its own clock), never a
+countdown, percentage, or estimated time remaining.
 
 When the analysis is ready the same card becomes the completion view, offering
 either `View my top 3 findings`, which calls `list_health_hypotheses` from the
-component and renders the summaries inline, or `Ask ChatGPT about my results` /
-`Explain this finding`, which hand off to ChatGPT only when the user asks for
-interpretation. The handoff is feature-detected and delivered as a real
-follow-up turn, never rendered inside the card: on ChatGPT it uses
-`window.openai.sendFollowUpMessage({ prompt, scrollToBottom: true })`, on
-MCP Apps hosts it uses the `ui/message` bridge (`App.sendMessage`), and when
-neither is available (or the host rejects it) the card shows a user-visible error
-instead. It applies the host's theme and CSS variables (`useHostStyles`).
+component (pinned to `displayed_analysis_version`) and renders the summaries
+inline, or `Ask ChatGPT about my results` / `Explain this finding`, which hand
+off to ChatGPT only when the user asks for interpretation. The handoff is
+feature-detected and delivered as a real follow-up turn, never rendered inside the
+card: on ChatGPT it uses `window.openai.sendFollowUpMessage({ prompt,
+scrollToBottom: true })`, on MCP Apps hosts it uses the `ui/message` bridge
+(`App.sendMessage`), and when neither is available (or the host rejects it) the
+card shows a user-visible error instead. It applies the host's theme and CSS
+variables (`useHostStyles`).
 
-Two v2 additions to the completion view:
+Two 3.0.0 behaviors on the completion view:
 
 - **Prompt chips.** After loading findings, the component fetches
   `get_analysis_context` and renders its `suggested_prompts` as chips. Clicking
-  one sends the exact `prompt` prose through the same host follow-up path. The
-  chip label is shown; the prose is never rendered inside the card. Free accounts
-  with an upgrade URL from the status or context response also see an
-  `Upgrade to Mutant Full` action that asks the host to open that URL.
-- **Refresh banner.** When `get_analysis_status` reports `regenerate: true` with
-  a usable current analysis, the card shows a refresh banner explaining that the
-  current results remain usable and why resubmission is requested. The ready
-  status result mounts this card directly when a refresh is available. Choosing
-  the refresh action switches the card into its DNA resubmission flow without a
-  ChatGPT follow-up; the banner is no longer shown once selected. A required
-  refresh (failed analysis) is handled by the recovery card instead.
+  one sends the exact `prompt` prose through the same host follow-up path, and
+  the chip's structured `action.analysis_version` travels with the follow-up so
+  the answer binds to the displayed snapshot. The chip label is shown; the prose
+  is never rendered inside the card. Free accounts with an upgrade URL from the
+  status or context response also see an `Upgrade to Mutant Full` action that
+  asks the host to open that URL.
+- **Refresh banner.** When `experience_state` is `READY_REFRESH_AVAILABLE`, the
+  card shows a refresh banner explaining that the current results remain usable
+  and why resubmission is requested. The status result mounts this card directly
+  in that state. Choosing the refresh action switches the card into its DNA
+  resubmission flow without a ChatGPT follow-up; the banner is no longer shown
+  once selected. A required refresh (`PROCESSING_FAILED`) is handled by the
+  recovery card instead.
 
 Because `_meta.ui.csp` cannot declare `worker-src`, parsing prefers a Web Worker
 started from a `blob:` URL and falls back to the same parser on the main thread if
@@ -885,6 +1043,42 @@ the host's composed `script-src` blocks it. The document is therefore built in t
 esbuild passes (`scripts/build-ui.mjs`): the worker as its own IIFE, inlined into
 the component as a string. No CSP domain is added for either path, and the
 document stays self-contained at roughly 650 KB (of which ~14 KB is the worker).
+
+## Prompt suggestions
+
+`get_analysis_status`, `get_analysis_context`, and `explain_health_hypothesis`
+add a `suggested_prompts` array to their `data`
+(`src/presentation/prompts.ts`). Each entry is:
+
+```json
+{
+  "id": "why-refresh",
+  "label": "Why refresh?",
+  "prompt": "Why is a refreshed analysis available, and what might change?",
+  "intent": "regeneration",
+  "action": { "analysis_version": "rev42-v3.0.0", "intent": "regeneration" }
+}
+```
+
+- At most **five**, ordered by likely usefulness.
+- State-aware, driven by `experience_state` and `capabilities` (never the removed
+  `analysis_status` / `regenerate`): `NO_DNA` (import format/privacy),
+  `can_query_analysis` (overview / explain / compare / clinician, plus
+  why-refresh and start-refresh in the refresh states), the processing states
+  (what happens next), `PROCESSING_FAILED` (regenerate), analysis context
+  (explain #1 / compare top three / compare with medical records shared in the
+  chat, plus compare-all for Full or a Full-scope prompt for Free accounts with
+  locked findings), and hypothesis detail (why ranked / evidence / confirmation /
+  what changes it / clinician).
+- `prompt` is exact user-visible natural language. It must never contain an
+  internal command, a tool name, or a raw hypothesis id. `explain_health_hypothesis`
+  suggestions may carry a `hypothesis_id` **field** for the host's convenience,
+  but it is never embedded in the prose.
+- `action` is the structured follow-up binding (`{analysis_version?,
+  hypothesis_id?, intent}`). `analysis_version` pins the click to the revision
+  the chip was rendered from.
+- These fields are added at the MCP boundary, not by the backend. The backend
+  owns the typed facts; the Lambda owns the presentation.
 
 ## Pagination
 
@@ -894,24 +1088,29 @@ wrapper). Cursors are HMAC-signed and bound to the account, analysis version,
 tool, normalized selectors, page size, effective access scope, and an expiry.
 They never contain raw account ids or findings.
 
-- A cursor from a different analysis returns `ANALYSIS_CHANGED`.
+- A cursor from a different analysis returns `ANALYSIS_VERSION_CHANGED`.
 - A tampered, expired, or selector-mismatched cursor returns `INVALID_CURSOR`.
 
 ## Error codes
 
-The v2 envelope keeps the existing specific error vocabulary. Only
-`get_analysis_status` uses the object-shaped `next_action`/`optional_actions`
-(in `data`); the `error.next_action` string field is unchanged.
+Every error is an `ok: false` envelope with a stable `code`, a `message`,
+`retryable`, and (when a recovery exists) a structured `next_action`. Lifecycle
+states never reach a transport or MCP exception.
 
 | Code | Meaning |
 |---|---|
-| `AUTHENTICATION_REQUIRED` / `INSUFFICIENT_SCOPE` | Transport-level OAuth failures. |
+| `AUTHENTICATION_REQUIRED` / `INSUFFICIENT_SCOPE` | Transport-level OAuth failures (`INSUFFICIENT_SCOPE` carries `required_scope`). |
 | `ACCOUNT_NOT_AVAILABLE` | The connected account cannot be served. |
-| `ANALYSIS_NOT_FOUND`, `ANALYSIS_NOT_READY`, `ANALYSIS_FAILED` | No / pending / failed analysis. |
-| `ANALYSIS_CHANGED` | Cursor bound to a different analysis version. |
-| `PLAN_ACCESS_REQUIRED` | Free request outside the top three (includes `required_plan` + `upgrade_url`). |
-| `HYPOTHESIS_SCOPE_REQUIRED` | Free `get_genetic_context` without an accessible hypothesis. |
+| `DNA_NOT_AVAILABLE` | No DNA has been imported, so no analysis can exist (`next_action`: `show_dna_import`). |
+| `ANALYSIS_PROCESSING` | A generation is in flight; retryable (`retry_after_seconds`, `next_action`: `get_analysis_status`). |
+| `ANALYSIS_NOT_READY` | The saved payload cannot be served yet; carries `reason` (see below). |
+| `ANALYSIS_NOT_FOUND`, `ANALYSIS_FAILED` | No report row / the run did not complete. |
+| `ANALYSIS_VERSION_CHANGED` | The caller pinned a revision that is no longer current, or a cursor is bound to another revision (`next_action`: `show_analysis_overview`). |
+| `REGENERATION_REQUIRED` | The saved analysis can never be served (engine change / empty) and only a regeneration clears it (`next_action`: `show_dna_import` with `{mode: "regenerate"}`). |
+| `PLAN_REQUIRED` | Free request outside the accessible scope (includes `required_plan` + `upgrade_url`). |
+| `SCOPE_REQUIRED` | Free `get_genetic_context` without an accessible hypothesis. |
 | `HYPOTHESIS_NOT_FOUND`, `PATTERN_NOT_FOUND` | Unknown id within the accessible scope. |
+| `EVIDENCE_NOT_AVAILABLE` | The requested evidence category has no stored records for this hypothesis. |
 | `INVALID_ARGUMENT`, `INVALID_CURSOR` | Bad input / cursor. |
 | `RATE_LIMITED`, `SERVICE_UNAVAILABLE` | Retryable (`retry_after_seconds`). |
 | `DATA_INCOMPATIBLE`, `RESPONSE_TOO_LARGE` | Saved data cannot be safely projected / response cap hit. |
@@ -921,6 +1120,9 @@ The v2 envelope keeps the existing specific error vocabulary. Only
 | `UNSUPPORTED_FORMAT` | The backend does not accept the submitted source format. |
 | `UNSUPPORTED_GENOME_BUILD` | Sequencing input used a build the backend cannot place. |
 | `REPORT_GENERATION_FAILED` | Analysis creation failed after the payload was accepted. |
+
+`PLAN_ACCESS_REQUIRED` and `HYPOTHESIS_SCOPE_REQUIRED` were removed in 3.0.0;
+they are now `PLAN_REQUIRED` and `SCOPE_REQUIRED`.
 
 The component-facing codes (`error.app_code`, from `APP_ERROR_CODES`) map onto
 these with stable lowercase names: `unauthorized`, `insufficient_scope`,
@@ -963,7 +1165,8 @@ Engine vocabularies are mapped to the contract's published vocabulary:
 | `genetic_evidence: weak` | engine `genetic_evidence: limited` |
 | `coverage_confidence: low` | engine `coverage_confidence: limited` |
 | `pattern_convergence: weak` | engine `pattern_convergence: none` |
-| `call_status: not_called` | `missing_genotype` / `unresolved_genotype` / `not_in_analyzed_catalog` |
+| `call_state: missing` | `missing_genotype` / `not_in_analyzed_catalog` |
+| `call_state: unresolved` | `unresolved_genotype` |
 | `contribution_status: context_only` | `module_score_status: not_scored` |
 | `pattern contribution_status: context_only` | pattern requires clinical confirmation without a resolved contribution |
 | pattern `state: not_matched` | `not_assessable` / `missing` |
@@ -981,10 +1184,11 @@ never estimates contributions from raw catalog weights.
 ### Module-first rule
 
 `get_analysis_context` returns `evidence_explanation_rules`
-(`organizing_level: "modules_then_patterns_then_variants"`). ChatGPT must:
+(`organizing_level: "modules_then_patterns_then_variants"`) plus the
+`evidence_model` block. ChatGPT must:
 
 1. Start with the plain-English meaning and whether support is broad or
-   concentrated.
+   concentrated (`evidence_shape.support_distribution`).
 2. Name the contributing biological modules and their retained support.
 3. Name the retained cross-module patterns.
 4. Only then mention the individual genes and variants that actually scored, and
@@ -1080,8 +1284,8 @@ interface ConvergingPatternContribution {
 ```
 
 A module's `scoring_status` is derived from its catalog, never a display name.
-`active` means every positive-weight marker scores; `partially_active` means
-part of the catalog is deliberately excluded; `context_only` and `retired`
+`active` means every positive-weight marker scores; `partially_active` means part
+of the catalog is deliberately excluded; `context_only` and `retired`
 cannot contribute module support. A contradictory catalog (`retired` /
 `context_only` with a nonzero weight, or a declared status disagreeing with the
 derived one) fails analysis validation rather than silently contributing.
@@ -1132,8 +1336,8 @@ fallback rather than a reconstructed breakdown:
     "classification": "unknown",
     "summary": "This analysis predates module-contribution tracing. Regenerate it to see the module breakdown."
   },
-  "module_contributions": [],
-  "pattern_contributions": []
+  "modules": [],
+  "patterns": []
 }
 ```
 
@@ -1176,50 +1380,58 @@ outputs:
 
 ## Interpretation guardrails
 
-`interpretation_contract` (returned at the top of `get_analysis_context`)
-carries the purpose, response rules, score semantics, literal evidence
-boundaries, and global limitations. It states that scores are model support, not
-diagnosis; that genetic support does not establish current status; that missing
-calls are not reassuring; that catalog clinical correlation is guidance, not
-evidence from the user's records; and that different `analysis_version` values
-must not be silently combined. Health-context relevance is performed by ChatGPT
+`interpretation` (returned at the top of `get_analysis_context`) carries the
+purpose, response rules, score semantics, literal evidence boundaries, and global
+limitations. It states that scores are model support, not diagnosis; that genetic
+support does not establish current status; that missing calls are not reassuring;
+that catalog clinical correlation is guidance, not evidence from the user's
+records; and that different `analysis_version` values must not be silently
+combined. Health-context relevance is performed by ChatGPT
 (`performed_by: "chatgpt"`) and is never sent to Mutant.
 
 The static MCP server instructions route tools; they do not replace
-`interpretation_contract`. The contract supplies the analysis-specific
-interpretation and scope that travel with the current result.
+`interpretation`. The contract supplies the analysis-specific interpretation and
+scope that travel with the current result.
 
 ## Acceptance tests
 
 The contract is covered by:
 
+- `report-generator/mcp/tests/test_mcp_state.py` — the full `experience_state`
+  matrix (No DNA, initial processing, ready, refresh available, refresh
+  processing with and without a usable active analysis, refresh completing
+  between calls → `ANALYSIS_VERSION_CHANGED`), `capabilities`,
+  `next_action`, and `can_query_analysis == active_analysis.usable`.
+- `report-generator/mcp/tests/test_mcp_handlers.py` — the 3.0.0 status model,
+  `resolve_analysis_snapshot` and version-mismatch rejection, the context
+  interpretation-contract shape (version `2.5` incl. `evidence_explanation_rules`
+  and `evidence_model`), access-summary counts and Free/Full upgrade behavior,
+  locked-hypothesis non-leakage, `EVIDENCE_NOT_AVAILABLE`, `kind: "modules"` with
+  and without `include_context`, dual module/pattern roles on `kind: "variants"`,
+  the legacy `unknown` fallback, genetic-context rsID dedupe with
+  `pattern_memberships`, the renamed plan/scope codes, and that every lifecycle
+  state is an `ok: false` envelope rather than an exception.
 - `report-generator/test/test_scoring_v3_trace.py` — retained module/pattern
   reconciliation, context-only variants excluded from module drivers while still
   allowed as retained-pattern participants, duplicate pattern memberships not
   inflating counts, support-architecture classification boundaries, missing
   fraction handling, and contradictory `scoring_status` rejection.
-- `report-generator/mcp/tests/test_mcp_handlers.py` — status v2 shape (including
-  mandatory `regenerate: false`), the context interpretation-contract shape
-  (version `2.1` incl. `evidence_explanation_rules`), access-summary counts and
-  Free/Full upgrade behavior, locked-hypothesis non-leakage, preview-vs-summary
-  separation, contract validation (unknown score semantics, non-literal
-  boundaries, wrong presentation order, duplicate rules), `kind: "tests"`,
-  `kind: "modules"` with and without `include_context`, dual module/pattern
-  roles on `kind: "variants"`, the legacy `unknown` fallback, genetic-context
-  rsID dedupe with `pattern_memberships`, and the entitlement
-  `hypothesis_markers` rename.
-- `mutant-mcp/tests/tools.test.ts`, `schemas.test.ts` — ten tools, version,
-  input schemas (including `show_dna_import.mode`, the `modules` evidence kind,
-  and `include_context`).
+- `mutant-mcp/tests/contract-v3.test.ts` — a callable-tool smoke test asserting
+  every advertised tool is callable and validates against its own concrete
+  output schema, that `content` is a summary rather than a JSON dump, the
+  module-first contract and content order, that the context content is rendered
+  from the interpretation contract without echoing it, that context prompts
+  follow the access summary, that suggestions are capped at five natural-language
+  prompts with structured actions, that `show_analysis_overview` returns a bound
+  `displayed_analysis_version`, and that `_meta` stays widget-only.
+- `mutant-mcp/tests/schemas.test.ts` — per-tool output schemas, the object
+  `next_action`, and the `analysis_version` input.
+- `mutant-mcp/tests/tools.test.ts` — ten tools, version, and input schemas
+  (including `show_dna_import.mode`, the `modules` evidence kind, and
+  `include_context`).
 - `mutant-mcp/tests/dna-import.test.ts` — status pass-through (no Lambda
-  routing shim), prompt injection, `show_dna_import` mode.
-- `mutant-mcp/tests/dna-import-ui.test.tsx` — prompt chips and the optional
-  refresh banner.
+  routing shim), prompt injection, and `show_dna_import` mode.
+- `mutant-mcp/tests/dna-import-ui.test.tsx` — prompt chips and the refresh
+  banner driven by `experience_state`.
 - `mutant-mcp/tests/mcp-server.test.ts` — `modules`/`include_context`
   pass-through and that `structuredContent` is never duplicated into `content`.
-- `mutant-mcp/tests/contract-v2.test.ts` — a callable-tool smoke test asserting
-  every advertised tool is callable, that `content` is a summary rather than a
-  JSON dump, the module-first contract and content order, that the context
-  content is rendered from the interpretation contract without echoing it, that
-  context prompts follow the access summary, that suggestions are capped at five
-  natural-language prompts, and that `_meta` stays widget-only.

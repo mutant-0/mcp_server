@@ -1,0 +1,16 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm.
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...version of npm.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+ RUN  v4.1.10 C:/ghrepos/mcp_server/mutant-mcp
+
+
+ Test Files  2 passed (2)
+      Tests  48 passed (48)
+   Start at  13:12:09
+   Duration  1.02s (transform 744ms, setup 0ms, import 1.35s, tests 366ms, environment 0ms)
+

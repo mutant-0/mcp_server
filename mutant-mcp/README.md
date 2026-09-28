@@ -4,7 +4,7 @@ A deployable, stateless [Model Context Protocol](https://modelcontextprotocol.io
 server for Mutant Genomics. It runs as an AWS Lambda behind API Gateway at a
 custom domain (e.g. `https://dev-api.mutantbiotech.com/mcp`), authenticates users
 with Mutant's Cognito OAuth (authorization code + PKCE S256), and exposes the
-**ten-tool MCP surface using contract 2.0.0** backed by the existing `report-generator` Lambda,
+**ten-tool MCP surface using contract 3.0.0** backed by the existing `report-generator` Lambda,
 plus a [ChatGPT Apps SDK](https://developers.openai.com/apps-sdk) component for
 DNA import.
 
@@ -33,13 +33,15 @@ processing finished. `show_dna_import` returns only `{ ui_rendered: true, mode }
 to narrate.
 
 `show_analysis_overview` opens the same component under `analysis.read` for a
-ready analysis and loads accessible findings and hints immediately. The
-completion view also renders state-aware `suggested_prompts` as chips (from
-`get_analysis_context`), and — when `get_analysis_status` reports
-`regenerate: true` with a usable current analysis — an optional refresh banner.
-That ready status result carries the UI descriptor so the card opens directly;
-its refresh button starts DNA resubmission inside the card.
-A required refresh (failed analysis) is handled by the recovery card instead.
+ready analysis, bound to one immutable snapshot: it calls the internal
+`resolve_analysis_snapshot` operation and returns the exact
+`displayed_analysis_version` plus the visible hypothesis identities, which the
+card renders and passes back on follow-ups. The completion view also renders
+state-aware `suggested_prompts` as chips (from `get_analysis_context`), and — when
+`experience_state` is `READY_REFRESH_AVAILABLE` — an optional refresh banner.
+That status result carries the UI descriptor so the card opens directly; its
+refresh button starts DNA resubmission inside the card. A required refresh
+(`PROCESSING_FAILED`) is handled by the recovery card instead.
 
 Two scopes gate the surface: the seven analysis tools require `analysis.read`, and
 `show_dna_import` / `get_snp_catalog` / `create_report` require `dna.import`.
@@ -59,9 +61,9 @@ API Gateway HTTP API  $default (catch-all)
    v
 Mutant MCP Lambda (Node HTTP server on :8080)
    |-- OAuth discovery + token validation (jose / OIDC JWKS)
-   |-- Nine MCP tools (schemas, envelope, deterministic content, per-tool scopes)
+   |-- Ten MCP tools (schemas, envelope, deterministic content, per-tool scopes)
    |-- Apps SDK resource ui://mutant/dna-import/v1.html
-   `-- Versioned internal contract 2.0.0 (direct InvokeCommand, IAM-scoped)
+   `-- Versioned internal contract 3.0.0 (direct InvokeCommand, IAM-scoped)
           |
           v
 Report-generator Lambda  (mcp package)
@@ -89,14 +91,14 @@ mutant-mcp/
 │   ├── server.ts                  # McpServer + instructions + UI resource
 │   ├── logger.ts                  # pino with genotype redaction
 │   ├── config.ts                  # env loading/validation (Zod)
-│   ├── contract.ts                # contract 2.0.0 constants + types
+│   ├── contract.ts                # contract 3.0.0 constants + types
 │   ├── auth/
 │   │   ├── token-validator.ts     # JWT/JWKS + client/scope/resource checks
 │   │   ├── oauth-metadata.ts      # RFC 9728 PRM + AS metadata mirror
 │   │   └── user-context.ts        # MutantUserContext (userId + scopes)
 │   ├── tools/                     # ten tool definitions + registration
 │   │   └── scope-guard.ts         # per-tool scope enforcement
-│   ├── schemas/                   # Zod input + shared envelope schemas
+│   ├── schemas/                   # Zod input schemas + per-tool typed output schemas
 │   ├── presentation/              # deterministic content builders + prompts
 │   ├── clients/
 │   │   └── mutant-lambda-client.ts# versioned internal contract + envelope parse
@@ -132,9 +134,9 @@ mutant-mcp/
 
 | Tool | Scope | Purpose |
 |---|---|---|
-| `get_analysis_status` | `analysis.read` | Routing gate: `dna_status`, `analysis_status`, entitlement/capabilities, a mandatory `regenerate` flag (+ `regeneration` details), and an object `next_action`/`optional_actions`. Polled by the DNA import component while an analysis is processing. |
-| `show_analysis_overview` | `analysis.read` | Renders the ready-analysis card with accessible findings and hints for an initial overview. No backend call or echoed status. |
-| `get_analysis_context` | `analysis.read` | The versioned interpretation contract, coverage, access scope, a compact top-three hypothesis preview, and suggested prompts for specific questions. |
+| `get_analysis_status` | `analysis.read` | Routing gate: `dna_status`, the canonical `experience_state`, `active_analysis`/`pending_analysis`, entitlement/capabilities, and the single `next_action`. Polled by the DNA import component while an analysis is processing. |
+| `show_analysis_overview` | `analysis.read` | Resolves one immutable analysis snapshot (`resolve_analysis_snapshot`) and renders the ready-analysis card bound to that revision. No status echoed. |
+| `get_analysis_context` | `analysis.read` | The versioned interpretation contract, coverage, access scope, a compact hypothesis preview, and suggested prompts for specific questions. |
 | `list_health_hypotheses` | `analysis.read` | List/search hypotheses (`items` + `next_cursor`; Free: fixed top three, Full: whole set). |
 | `explain_health_hypothesis` | `analysis.read` | Explanation-ready projection: scores, why-ranked, contributing patterns, clinical context, confirmation plan, guardrails. |
 | `get_supporting_evidence` | `analysis.read` | Stored patterns, deduped variant contributions, cited sources, or full test guidance (`kind: "tests"`). |
@@ -145,8 +147,8 @@ mutant-mcp/
 
 The same tool definitions are exposed to Free and Full accounts; access limits
 are enforced in the backend and returned as structured errors
-(`PLAN_ACCESS_REQUIRED`, `HYPOTHESIS_SCOPE_REQUIRED`). Calling a tool without its
-scope returns `INSUFFICIENT_SCOPE` with the missing scope, which makes ChatGPT
+(`PLAN_REQUIRED`, `SCOPE_REQUIRED`). Calling a tool without its scope returns
+`INSUFFICIENT_SCOPE` with the missing scope, which makes ChatGPT
 re-consent instead of failing opaquely.
 
 `create_report` also accepts an optional, request-only `analysis_context`

@@ -1,0 +1,461 @@
+import { z } from "zod";
+
+/**
+ * Concrete per-tool `data` schemas for the 3.0.0 contract.
+ *
+ * The purpose is to stop the model (and the Apps SDK card) from guessing at
+ * response shapes: every tool's `data` is a typed object, every stable
+ * vocabulary is an enum, and fields whose names invite misinterpretation carry
+ * a `.describe()` that is part of the machine-readable schema.
+ *
+ * These are the transport mirror of `report-generator/mcp/projection.py`. Every
+ * object schema is loose: the backend owns the payload, so an additive
+ * backend-only field must never fail output validation or be dropped.
+ */
+
+export const nextActionSchema = z.looseObject({
+  tool: z.string().describe("Name of the tool to call next."),
+  reason: z.string().optional().describe("Why that tool should be called."),
+  arguments: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const errorOutputSchema = z.looseObject({
+  code: z.string().describe("Stable contract error code."),
+  message: z.string(),
+  retryable: z.boolean(),
+  next_action: nextActionSchema.optional(),
+  required_plan: z.string().optional(),
+  upgrade_url: z.string().optional(),
+  retry_after_seconds: z.number().optional(),
+  required_scope: z.string().optional(),
+  app_code: z.string().optional(),
+  reason: z.string().optional().describe("Readiness diagnostic for an unservable analysis."),
+});
+
+export const experienceStateSchema = z
+  .enum([
+    "NO_DNA",
+    "PROCESSING_INITIAL",
+    "READY",
+    "READY_REFRESH_AVAILABLE",
+    "READY_REFRESH_PROCESSING",
+    "REFRESH_PROCESSING_NO_USABLE_ANALYSIS",
+    "PROCESSING_FAILED",
+  ])
+  .describe(
+    "The one canonical experience state. Do not re-derive it from dna_status, active_analysis, or pending_analysis.",
+  );
+
+export const activeAnalysisSchema = z.looseObject({
+  status: z.enum(["none", "ready"]),
+  analysis_version: z.string().optional(),
+  generated_at: z.string().optional(),
+  scoring_engine_version: z.string().optional(),
+  usable: z.boolean().describe("Whether the analytical tools can answer from this analysis."),
+});
+
+export const pendingAnalysisSchema = z.looseObject({
+  status: z.enum(["processing", "failed"]),
+  reason: z.enum(["initial_analysis", "platform_refresh", "user_refresh"]),
+  target_scoring_engine_version: z.string().optional(),
+  started_at: z.string().optional(),
+  retry_after_seconds: z.number().optional(),
+  failure: z.looseObject({ code: z.string(), message: z.string() }).optional(),
+});
+
+export const capabilitiesSchema = z.looseObject({
+  can_query_analysis: z
+    .boolean()
+    .describe("Authoritative: whether the analytical tools can answer right now."),
+  can_show_overview: z.boolean(),
+  can_refresh_analysis: z.boolean(),
+  can_search_hypotheses: z.boolean(),
+  can_explore_genetic_context: z.boolean(),
+});
+
+export const entitlementSchema = z.looseObject({
+  plan: z.enum(["mutant_free", "mutant_full"]),
+  hypothesis_scope: z.enum(["top_three", "all"]),
+  genetic_context_scope: z.enum(["accessible_hypotheses", "all_analyzed_markers"]),
+  access_expires_at: z.string().optional(),
+});
+
+export const upgradeOfferSchema = z.looseObject({
+  label: z.string(),
+  url: z.string(),
+});
+
+export const promptSuggestionSchema = z.looseObject({
+  id: z.string(),
+  label: z.string(),
+  prompt: z.string(),
+  intent: z.enum([
+    "overview",
+    "explain",
+    "evidence",
+    "confirmation",
+    "comparison",
+    "clinician_questions",
+    "regeneration",
+    "import_help",
+  ]),
+  hypothesis_id: z.string().optional(),
+  action: z
+    .looseObject({
+      analysis_version: z.string().optional(),
+      hypothesis_id: z.string().optional(),
+      intent: z.string().optional(),
+    })
+    .optional(),
+});
+
+export const analysisStatusDataSchema = z.looseObject({
+  dna_status: z.enum(["missing", "available"]),
+  experience_state: experienceStateSchema,
+  active_analysis: activeAnalysisSchema,
+  pending_analysis: pendingAnalysisSchema.nullable(),
+  entitlement: entitlementSchema,
+  capabilities: capabilitiesSchema,
+  next_action: nextActionSchema.optional(),
+  suggested_prompts: z.array(promptSuggestionSchema).optional(),
+  upgrade: upgradeOfferSchema.optional(),
+});
+
+const interpretationSchema = z.looseObject({
+  version: z.literal("2.5"),
+  purpose: z.string(),
+  response_rules: z.array(z.string()),
+  evidence_explanation_rules: z.looseObject({
+    organizing_level: z.literal("modules_then_patterns_then_variants"),
+    rules: z.array(z.string()),
+    module_first_instruction: z.string(),
+  }),
+  score_semantics: z.looseObject({
+    priority_score: z.string(),
+    genetic_support: z.string(),
+    assessment: z.string().optional(),
+    genetic_evidence: z.string(),
+    genetic_confidence: z.string(),
+    coverage_confidence: z.string(),
+    pattern_convergence: z.string(),
+    module_support: z.string(),
+    pattern_support: z.string(),
+  }),
+  evidence_boundaries: z.record(z.string(), z.literal(true)),
+  health_context_usage: z.looseObject({
+    allowed: z.literal(true),
+    performed_by: z.literal("chatgpt"),
+    sent_to_mutant: z.literal(false),
+    purpose: z.string().optional(),
+  }),
+  presentation_order: z.array(z.string()),
+  limitations: z.array(z.string()),
+  evidence_model: z
+    .looseObject({
+      primary_units: z.array(z.enum(["modules", "patterns", "variants"])),
+      preferred_explanation_order: z.array(z.enum(["modules", "patterns", "variants"])),
+    })
+    .describe("The evidence units Mutant explanations are built from, in presentation order."),
+});
+
+export const hypothesisSummarySchema = z.looseObject({
+  id: z.string().nullable(),
+  rank: z.number().int(),
+  name: z.string(),
+  summary: z.string(),
+  priority_score: z
+    .number()
+    .nullable()
+    .describe(
+      "Ranking signal used to order hypotheses. Not disease probability, not a diagnostic confidence, and not comparable across analyses.",
+    ),
+  genetic_support: z
+    .number()
+    .nullable()
+    .describe(
+      "Strength of genetic support within the analyzed evidence. Null means no value was calculated; zero is a calculated value that did not qualify.",
+    ),
+  genetic_confidence: z.string().nullable().optional(),
+  genetic_evidence: z
+    .string()
+    .nullable()
+    .describe(
+      "The user-facing weak/moderate/strong evidence category. Null means it was not calculated.",
+    ),
+  coverage_confidence: z
+    .string()
+    .nullable()
+    .describe("How completely relevant markers were called. High coverage can coexist with zero support. Null means it was not calculated."),
+  pattern_convergence: z.string().nullable(),
+});
+
+export const accessSummarySchema = z.looseObject({
+  plan: z.enum(["mutant_free", "mutant_full"]),
+  hypothesis_scope: z.enum(["top_three", "all"]),
+  total_ranked: z.number().int(),
+  returned: z.number().int(),
+  unlocked: z.number().int(),
+  locked: z.number().int(),
+  scope_message: z.string(),
+});
+
+export const analysisContextDataSchema = z.looseObject({
+  interpretation: interpretationSchema,
+  coverage: z.looseObject({
+    analyzed_markers: z.number().nullable(),
+    classification: z.string().optional(),
+  }),
+  access: accessSummarySchema,
+  preview: z.array(hypothesisSummarySchema),
+  upgrade: upgradeOfferSchema.optional(),
+  suggested_prompts: z.array(promptSuggestionSchema),
+});
+
+export const hypothesisListDataSchema = z.looseObject({
+  items: z.array(hypothesisSummarySchema),
+  next_cursor: z.string().nullable().optional(),
+  total_accessible: z.number().int().optional(),
+});
+
+const patternContributionSchema = z.looseObject({
+  pattern_id: z.string().nullable(),
+  pattern_name: z.string().nullable(),
+  state: z.string().nullable(),
+  retained_support: z.number().nullable(),
+  module_ids: z.array(z.string()),
+  participating_gene_count: z.number().int(),
+  participating_variant_count: z.number().int(),
+  summary: z.string().nullable(),
+});
+
+const moduleContributionSchema = z.looseObject({
+  module_id: z.string().nullable(),
+  module_name: z.string().nullable(),
+  scoring_status: z.string().nullable(),
+  role: z.string().nullable(),
+  retained_support: z.number().nullable(),
+  module_support_fraction: z.number().nullable().optional(),
+  module_scoring_gene_count: z.number().int(),
+  module_scoring_variant_count: z.number().int(),
+  top_scoring_genes: z.array(z.string()),
+  summary: z.string().nullable(),
+  caveats: z.array(z.string()),
+});
+
+export const explainHypothesisDataSchema = z.looseObject({
+  hypothesis: z.looseObject({
+    id: z.string().nullable(),
+    rank: z.number().int(),
+    name: z.string(),
+    assessment_state: z.string().nullable(),
+    scores: z.looseObject({
+      priority: z.number().nullable(),
+      genetic_support: z.number().nullable(),
+      genetic_confidence: z.number().nullable().optional(),
+      coverage: z.string().nullable(),
+      convergence: z.string().nullable(),
+    }),
+  }),
+  bottom_line: z.string().nullable().optional(),
+  evidence_shape: z
+    .looseObject({
+      support_distribution: z.enum(["broad", "mixed", "concentrated"]),
+      summary: z.string().nullable(),
+    })
+    .optional(),
+  ranking_drivers: z
+    .array(
+      z.looseObject({
+        component: z.enum([
+          "priority_score",
+          "genetic_support",
+          "module_support",
+          "pattern_support",
+          "converging_pattern_adjustment",
+        ]),
+        value: z.number().nullable(),
+        semantics: z.string().optional(),
+      }),
+    )
+    .optional(),
+  explanation: z.looseObject({
+    bottom_line: z.string().optional(),
+    why_ranked: z.string(),
+    interpretation_boundary: z.string().optional(),
+    top_contributing_patterns: z.array(z.record(z.string(), z.unknown())),
+  }),
+  score_breakdown: z.looseObject({
+    priority_score: z.number().nullable(),
+    genetic_support: z.number().nullable(),
+    module_support: z.number().nullable(),
+    pattern_support: z.number().nullable(),
+    converging_pattern_adjustment: z.number().nullable(),
+  }),
+  score_interpretation: z.record(z.string(), z.unknown()).optional(),
+  assessment: z.record(z.string(), z.unknown()).optional(),
+  support_architecture: z.looseObject({
+    classification: z.string(),
+    contributing_module_count: z.number().int().optional(),
+    module_scoring_gene_count: z.number().int().optional(),
+    module_scoring_variant_count: z.number().int().optional(),
+    pattern_participating_gene_count: z.number().int().optional(),
+    pattern_participating_variant_count: z.number().int().optional(),
+    dominant_driver: z.record(z.string(), z.unknown()).optional(),
+    summary: z.string().nullable(),
+  }),
+  modules: z.array(moduleContributionSchema),
+  patterns: z.array(patternContributionSchema),
+  provisional_evidence: z.array(patternContributionSchema),
+  converging_patterns: z.array(
+    z.looseObject({
+      pattern_id: z.string().nullable(),
+      state: z.string().nullable(),
+      structural_fit: z.number().nullable(),
+      pattern_confidence: z.number().nullable(),
+      contribution: z.number().nullable(),
+    }),
+  ),
+  clinical_context: z.record(z.string(), z.unknown()).optional(),
+  confirmation: z.record(z.string(), z.unknown()).optional(),
+  guardrails: z.array(z.string()).optional(),
+  related_hypotheses: z.array(z.record(z.string(), z.unknown())).optional(),
+  strengthens_interpretation: z.array(z.string()).optional(),
+  weakens_interpretation: z.array(z.string()).optional(),
+  suggested_prompts: z.array(promptSuggestionSchema).optional(),
+});
+
+const patternMembershipSchema = z.looseObject({
+  pattern_id: z.string().nullable(),
+  pattern_name: z.string().optional(),
+  role: z.string().optional().describe("This marker's role in the pattern (e.g. core, supporting, context)."),
+  pattern_state: z.string().optional(),
+  pattern_contributes: z.boolean().optional(),
+});
+
+const variantEvidenceSchema = z.looseObject({
+  rsid: z.string(),
+  gene: z.string().nullable().optional(),
+  genotype: z.string().nullable().optional(),
+  call_state: z
+    .enum(["called", "missing", "unresolved"])
+    .describe(
+      "Whether a genotype was called. 'missing' means the marker is in the catalog but no call was stored; 'unresolved' means it was not in the analyzed catalog.",
+    ),
+  contribution_status: z
+    .enum(["contributes", "context_only", "excluded", "no_score_contribution", "not_scored", "not_assessed"])
+    .describe("Whether this marker adds score support. 'context_only' and 'excluded' do not."),
+  module_role: z
+    .looseObject({
+      status: z.string(),
+      retained_contribution: z.number().nullable(),
+    })
+    .optional(),
+  pattern_memberships: z.array(patternMembershipSchema),
+});
+
+const patternEvidenceSchema = z.looseObject({
+  id: z.string().nullable(),
+  name: z.string().nullable(),
+  state: z.string().nullable(),
+  pattern_type: z.string().nullable().optional(),
+  contribution_status: z.string(),
+  impact_points: z.number().nullable().optional(),
+  coverage: z.number().nullable().optional(),
+  requires_clinical_confirmation: z.boolean().nullable().optional(),
+  summary: z.string().nullable().optional(),
+  marker_ids: z.array(z.string()).optional(),
+});
+
+const moduleEvidenceSchema = z.looseObject({
+  module_id: z.string().nullable(),
+  module_name: z.string().nullable(),
+  scoring_status: z.string().nullable(),
+  hypothesis_role: z.string().nullable().optional(),
+  raw_module_score: z.number().nullable().optional(),
+  hypothesis_weight: z.number().nullable().optional(),
+  retained_support: z.number().nullable(),
+  module_support_fraction: z.number().nullable().optional(),
+  module_scoring_gene_count: z.number().int().optional(),
+  module_scoring_variant_count: z.number().int().optional(),
+  summary: z.string().nullable().optional(),
+  caveats: z.array(z.string()).optional(),
+  scoring_drivers: z.array(z.record(z.string(), z.unknown())).optional(),
+  contextual_markers: z.array(z.record(z.string(), z.unknown())).optional(),
+});
+
+const testEvidenceSchema = z.looseObject({
+  id: z.string().nullable(),
+  name: z.string().nullable(),
+  purpose: z.string().nullable().optional(),
+  interpretation_notes: z.array(z.string()).optional(),
+  limitations: z.array(z.string()).optional(),
+});
+
+const sourceEvidenceSchema = z.looseObject({
+  id: z.string().nullable(),
+  title: z.string().nullable(),
+  publisher_or_journal: z.string().nullable().optional(),
+  year: z.union([z.number(), z.string()]).nullable().optional(),
+  type: z.string().nullable().optional(),
+  key_points: z.array(z.string()).optional(),
+  url: z.string().nullable().optional(),
+});
+
+const evidencePage = {
+  next_cursor: z.string().nullable().optional(),
+  source_state: z.enum(["not_provided"]).optional(),
+};
+
+export const supportingEvidenceDataSchema = z.discriminatedUnion("kind", [
+  z.looseObject({ kind: z.literal("patterns"), items: z.array(patternEvidenceSchema), ...evidencePage }),
+  z.looseObject({ kind: z.literal("variants"), items: z.array(variantEvidenceSchema), ...evidencePage }),
+  z.looseObject({ kind: z.literal("modules"), items: z.array(moduleEvidenceSchema), ...evidencePage }),
+  z.looseObject({ kind: z.literal("sources"), items: z.array(sourceEvidenceSchema), ...evidencePage }),
+  z.looseObject({ kind: z.literal("tests"), items: z.array(testEvidenceSchema), ...evidencePage }),
+]);
+
+export const geneticMarkerSchema = variantEvidenceSchema.extend({
+  module_id: z.string().nullable().optional(),
+  module_score_status: z.string().nullable().optional(),
+  status_reason: z.string().nullable().optional(),
+});
+
+export const geneticContextDataSchema = z.looseObject({
+  markers: z.array(geneticMarkerSchema),
+  modules: z.array(moduleEvidenceSchema).optional(),
+  next_cursor: z.string().nullable().optional(),
+});
+
+export const dnaImportDataSchema = z.looseObject({
+  ui_rendered: z.literal(true),
+  mode: z.enum(["initial", "regenerate"]),
+});
+
+export const snpCatalogDataSchema = z.looseObject({
+  version: z.union([z.number(), z.string()]).optional(),
+  snp_count: z.number().optional(),
+  snps: z.record(z.string(), z.unknown()),
+  // The catalog carries additional backend-maintained metadata (aliases,
+  // reference alleles, provenance) that the component passes through untouched.
+});
+
+export const createReportDataSchema = z.looseObject({
+  analysis_id: z.string(),
+  status: z.string(),
+});
+
+export const showAnalysisOverviewDataSchema = z.looseObject({
+  ui_rendered: z.literal(true),
+  mode: z.literal("overview"),
+  displayed_analysis_version: z
+    .string()
+    .nullable()
+    .describe("The exact analysis revision this card displays. Pass it back on follow-ups."),
+  displayed_hypotheses: z.array(
+    z.looseObject({
+      id: z.string().nullable(),
+      rank: z.number().int(),
+      name: z.string(),
+    }),
+  ),
+});

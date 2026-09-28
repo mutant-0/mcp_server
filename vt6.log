@@ -1,0 +1,263 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm.
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...version of npm.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+ RUN  v4.1.10 C:/ghrepos/mcp_server/mutant-mcp
+
+ Γ¥» tests/mcp-server.test.ts (14 tests | 5 failed) 182ms
+     ├ù renders the overview card with analysis.read and without a backend call 9ms
+     ├ù relays a success envelope into structuredContent with deterministic content 2ms
+     ├ù replaces backend-local checkout URLs with the public portal URL 2ms
+     ├ù mounts the refresh card from a ready status with an available update 1ms
+     ├ù never duplicates structuredContent into the model-facing content 1ms
+ Γ¥» tests/dna-import.test.ts (31 tests | 9 failed) 204ms
+     ├ù allows the DNA import tools to a dna.import token 7ms
+     ├ù accepts a payload at the request size cap 1ms
+     ├ù forwards the request-only analysis context without logging it 2ms
+     ├ù passes the backend routing fields through unchanged 1ms
+     ├ù adds suggested prompts for a ready analysis 1ms
+     ├ù suggests a refresh only when regeneration is available 1ms
+     ├ù never rewrites or infers fields the backend omitted 2ms
+     ├ù remembers an import so status polling reaches ready 1ms
+     ├ù reports processing until the synthetic window elapses 0ms
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ» Failed Tests 14 ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+
+ FAIL  tests/dna-import.test.ts > DNA import authorization > allows the DNA import tools to a dna.import token
+AssertionError: create_report should be allowed: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ Γ¥» tests/dna-import.test.ts:145:59
+    143|         arguments: name === "create_report" ? VALID_IMPORT : {},
+    144|       });
+    145|       expect(result.isError, `${name} should be allowed`).toBe(false);
+       |                                                           ^
+    146|     }
+    147|   });
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[1/14]ΓÄ»
+
+ FAIL  tests/dna-import.test.ts > create_report > accepts a payload at the request size cap
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ Γ¥» tests/dna-import.test.ts:355:28
+    353|     const { client } = await connect({});
+    354|     const result = await client.callTool({ name: "create_report", arguΓÇª
+    355|     expect(result.isError).toBe(false);
+       |                            ^
+    356|     expect(structured(result).ok).toBe(true);
+    357|   });
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[2/14]ΓÄ»
+
+ FAIL  tests/dna-import.test.ts > create_report > forwards the request-only analysis context without logging it
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ Γ¥» tests/dna-import.test.ts:388:28
+    386|     });
+    387|
+    388|     expect(result.isError).toBe(false);
+       |                            ^
+    389|     expect(backendClient.calls[0]?.arguments.analysis_context).toEqualΓÇª
+    390|
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[3/14]ΓÄ»
+
+ FAIL  tests/dna-import.test.ts > get_analysis_status > passes the backend routing fields through unchanged
+TypeError: Cannot read properties of undefined (reading 'data')
+ Γ¥» tests/dna-import.test.ts:448:36
+    446|     });
+    447|     const result = await client.callTool({ name: "get_analysis_status"ΓÇª
+    448|     const data = structured(result).data as Record<string, unknown>;
+       |                                    ^
+    449|     expect(data.dna_status).toBe("missing");
+    450|     expect(data.analysis_status).toBe("unavailable");
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[4/14]ΓÄ»
+
+ FAIL  tests/dna-import.test.ts > get_analysis_status > adds suggested prompts for a ready analysis
+TypeError: Cannot read properties of undefined (reading 'data')
+ Γ¥» tests/dna-import.test.ts:461:36
+    459|     });
+    460|     const result = await client.callTool({ name: "get_analysis_status"ΓÇª
+    461|     const data = structured(result).data as Record<string, unknown>;
+       |                                    ^
+    462|     const prompts = data.suggested_prompts as Array<{ id: string; promΓÇª
+    463|     expect(prompts.length).toBeGreaterThan(0);
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[5/14]ΓÄ»
+
+ FAIL  tests/dna-import.test.ts > get_analysis_status > suggests a refresh only when regeneration is available
+TypeError: Cannot read properties of undefined (reading 'data')
+ Γ¥» tests/dna-import.test.ts:480:40
+    478|     });
+    479|     const result = await client.callTool({ name: "get_analysis_status"ΓÇª
+    480|     const prompts = (structured(result).data as { suggested_prompts: AΓÇª
+       |                                        ^
+    481|       .suggested_prompts;
+    482|     expect(prompts.some((prompt) => prompt.id === "why-refresh")).toBeΓÇª
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[6/14]ΓÄ»
+
+ FAIL  tests/dna-import.test.ts > get_analysis_status > never rewrites or infers fields the backend omitted
+TypeError: Cannot read properties of undefined (reading 'data')
+ Γ¥» tests/dna-import.test.ts:488:36
+    486|     const { client } = await connect({ responder: () => ok({ data: {} ΓÇª
+    487|     const result = await client.callTool({ name: "get_analysis_status"ΓÇª
+    488|     const data = structured(result).data as Record<string, unknown>;
+       |                                    ^
+    489|     expect(data.dna_status).toBeUndefined();
+    490|     expect(data.analysis_status).toBeUndefined();
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[7/14]ΓÄ»
+
+ FAIL  tests/dna-import.test.ts > dev-mode mock analysis lifecycle > remembers an import so status polling reaches 
+ready
+AssertionError: expected undefined to be 'ready' // Object.is equality
+
+- Expected:
+"ready"
+
++ Received:
+undefined
+
+ Γ¥» tests/dna-import.test.ts:508:41
+    506|
+    507|     const after = await client.invoke("get_analysis_status", {}, user,ΓÇª
+    508|     expect(after.data?.analysis_status).toBe("ready");
+       |                                         ^
+    509|     expect(after.data?.dna_status).toBe("available");
+    510|     expect(typeof after.data?.analysis_id).toBe("string");
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[8/14]ΓÄ»
+
+ FAIL  tests/dna-import.test.ts > dev-mode mock analysis lifecycle > reports processing until the synthetic window 
+elapses
+AssertionError: expected undefined to be 'processing' // Object.is equality
+
+- Expected:
+"processing"
+
++ Received:
+undefined
+
+ Γ¥» tests/dna-import.test.ts:522:42
+    520|
+    521|     const status = await client.invoke("get_analysis_status", {}, userΓÇª
+    522|     expect(status.data?.analysis_status).toBe("processing");
+       |                                          ^
+    523|   });
+    524|
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[9/14]ΓÄ»
+
+ FAIL  tests/mcp-server.test.ts > MCP server integration > renders the overview card with analysis.read and without a 
+backend call
+AssertionError: expected { ui_rendered: true, ΓÇª(3) } to deeply equal { ui_rendered: true, mode: 'overview' }
+
+- Expected
++ Received
+
+  {
++   "displayed_analysis_version": null,
++   "displayed_hypotheses": [],
+    "mode": "overview",
+    "ui_rendered": true,
+  }
+
+ Γ¥» tests/mcp-server.test.ts:65:61
+     63|     const result = await client.callTool({ name: "show_analysis_overviΓÇª
+     64|     expect(result.isError).toBe(false);
+     65|     expect((result.structuredContent as ToolResponse).data).toEqual({
+       |                                                             ^
+     66|       ui_rendered: true,
+     67|       mode: "overview",
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[10/14]ΓÄ»
+
+ FAIL  tests/mcp-server.test.ts > MCP server integration > relays a success envelope into structuredContent with 
+deterministic content
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ Γ¥» tests/mcp-server.test.ts:89:28
+     87|     );
+     88|     const result = await client.callTool({ name: "get_analysis_status"ΓÇª
+     89|     expect(result.isError).toBe(false);
+       |                            ^
+     90|     const structured = result.structuredContent as { ok: boolean; dataΓÇª
+     91|     expect(structured.ok).toBe(true);
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[11/14]ΓÄ»
+
+ FAIL  tests/mcp-server.test.ts > MCP server integration > replaces backend-local checkout URLs with the public portal 
+URL
+TypeError: Cannot read properties of undefined (reading 'data')
+ Γ¥» tests/mcp-server.test.ts:121:56
+    119|     const context = await client.callTool({ name: "get_analysis_contexΓÇª
+    120|     const status = await client.callTool({ name: "get_analysis_status"ΓÇª
+    121|     expect((context.structuredContent as ToolResponse).data?.upgrade).ΓÇª
+
+ Test Files  2 failed | 2 passed (4)
+      Tests  14 failed | 61 passed (75)
+   Start at  13:10:49
+   Duration  892ms (transform 757ms, setup 0ms, import 1.78s, tests 572ms, environment 0ms)
+
+       |                                                        ^
+    122|       label: "Unlock Full Analysis",
+    123|       url: "https://mutantgenomics.com/cart",
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[12/14]ΓÄ»
+
+ FAIL  tests/mcp-server.test.ts > MCP server integration > mounts the refresh card from a ready status with an 
+available update
+TypeError: Cannot read properties of undefined (reading 'ui')
+ Γ¥» tests/mcp-server.test.ts:141:17
+    139|     const result = await client.callTool({ name: "get_analysis_status"ΓÇª
+    140|     const meta = result._meta as { ui?: { resourceUri?: string }; mutaΓÇª
+    141|     expect(meta.ui?.resourceUri).toBe("ui://mutant/dna-import/v1.html"ΓÇª
+       |                 ^
+    142|     expect(meta.mutant?.mode).toBe("overview");
+    143|     expect((result.content as Array<{ text: string }>)[0]?.text).toConΓÇª
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[13/14]ΓÄ»
+
+ FAIL  tests/mcp-server.test.ts > MCP server integration > never duplicates structuredContent into the model-facing 
+content
+AssertionError: expected 'MCP error -32602: Output validation eΓÇª' to not include undefined
+ Γ¥» tests/mcp-server.test.ts:222:25
+    220|       .map((block) => block.text ?? "")
+    221|       .join("\n");
+    222|     expect(content).not.toContain(structured);
+       |                         ^
+    223|     expect(content).not.toMatch(/^\s*[{[]/);
+    224|   });
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[14/14]ΓÄ»
+

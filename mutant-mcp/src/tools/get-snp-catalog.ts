@@ -1,6 +1,6 @@
 import { byteLength } from "../clients/mutant-lambda-client.js";
 import { APP_ERROR_CODES, CONTRACT_VERSION, ErrorCode, type ToolResponse } from "../contract.js";
-import { getSnpCatalogInputSchema, toolResponseOutputSchema } from "../schemas/index.js";
+import { getSnpCatalogInputSchema, snpCatalogOutputSchema } from "../schemas/index.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
 
@@ -49,7 +49,7 @@ export const getSnpCatalogTool: MutantToolDefinition = {
   // Hidden from the model's tool list: only the DNA import component calls this.
   uiVisibility: ["app"],
   inputSchema: getSnpCatalogInputSchema,
-  outputSchema: toolResponseOutputSchema,
+  outputSchema: snpCatalogOutputSchema,
   annotations: readOnlyAnnotations,
   handler: async (args, runtime) => {
     const startedAt = Date.now();

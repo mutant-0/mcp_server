@@ -1,0 +1,41 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm.
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...version of npm.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+ RUN  v4.1.10 C:/ghrepos/mcp_server/mutant-mcp
+
+ Γ¥» tests/contract-v3.test.ts (13 tests | 1 failed) 155ms
+     ├ù advertises every contract tool and calls each one successfully 130ms
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ» Failed Tests 1 ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+
+ FAIL  tests/contract-v3.test.ts > contract v3.0 acceptance > advertises every contract tool and calls each one 
+successfully
+AssertionError: get_snp_catalog should succeed: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ Γ¥» tests/contract-v3.test.ts:369:56
+    367|     for (const name of TOOL_NAMES) {
+    368|       const result = await client.callTool({ name, arguments: MINIMAL_ΓÇª
+    369|       expect(result.isError, `${name} should succeed`).toBe(false);
+       |                                                        ^
+    370|       const envelope = envelopeOf(result);
+    371|       expect(envelope.contract_version, `${name} contract version`).toΓÇª
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[1/1]ΓÄ»
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 passed (13)
+   Start at  13:08:44
+   Duration  896ms (transform 309ms, setup 0ms, import 597ms, tests 155ms, environment 0ms)
+

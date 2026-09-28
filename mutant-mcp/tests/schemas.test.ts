@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  analysisStatusOutputSchema,
   createReportInputSchema,
+  explainHealthHypothesisInputSchema,
+  getAnalysisContextInputSchema,
+  getAnalysisStatusInputSchema,
+  getGeneticContextInputSchema,
   getSnpCatalogInputSchema,
   getSupportingEvidenceInputSchema,
+  listHealthHypothesesInputSchema,
   showDnaImportInputSchema,
-  toolResponseOutputSchema,
+  supportingEvidenceOutputSchema,
 } from "../src/schemas/index.js";
-import { makeErrorResponse, makeSuccessResponse } from "./helpers.js";
+import { makeErrorResponse, makeStatusData, makeSuccessResponse } from "./helpers.js";
 
 const evidenceKindSchema = getSupportingEvidenceInputSchema.kind;
 const includeContextSchema = getSupportingEvidenceInputSchema.include_context;
@@ -27,39 +33,99 @@ describe("get_supporting_evidence input schema", () => {
   });
 });
 
-describe("toolResponseOutputSchema", () => {
-  it("accepts a success envelope", () => {
-    expect(toolResponseOutputSchema.safeParse(makeSuccessResponse()).success).toBe(true);
+describe("per-tool output schemas (contract 3.0.0)", () => {
+  it("accepts a typed success envelope", () => {
+    expect(analysisStatusOutputSchema.safeParse(makeSuccessResponse(makeStatusData())).success).toBe(
+      true,
+    );
   });
 
-  it("accepts an error envelope", () => {
+  it("accepts a structured error envelope with an object next_action", () => {
     expect(
-      toolResponseOutputSchema.safeParse(
-        makeErrorResponse("ANALYSIS_CHANGED", "changed"),
+      analysisStatusOutputSchema.safeParse(
+        makeErrorResponse("ANALYSIS_PROCESSING", "processing", {
+          retryable: true,
+          retry_after_seconds: 30,
+          next_action: { tool: "get_analysis_status", reason: "Wait for processing." },
+        }),
       ).success,
     ).toBe(true);
   });
 
-  it("accepts a null analysis version", () => {
-    expect(
-      toolResponseOutputSchema.safeParse(makeErrorResponse("INVALID_CURSOR")).success,
-    ).toBe(true);
+  it("rejects a string next_action, because 3.0.0 requires the structured action", () => {
+    const envelope = {
+      ...makeErrorResponse("ANALYSIS_NOT_READY", "not ready"),
+      error: {
+        code: "ANALYSIS_NOT_READY",
+        message: "not ready",
+        retryable: true,
+        next_action: "Try again in a moment.",
+      },
+    };
+    expect(analysisStatusOutputSchema.safeParse(envelope).success).toBe(false);
   });
 
-  it("rejects a payload missing required envelope fields", () => {
-    expect(toolResponseOutputSchema.safeParse({ ok: true }).success).toBe(false);
+  it("accepts a null analysis version and rejects a missing envelope field", () => {
+    expect(analysisStatusOutputSchema.safeParse(makeErrorResponse("INVALID_CURSOR")).success).toBe(
+      true,
+    );
+    expect(analysisStatusOutputSchema.safeParse({ ok: true }).success).toBe(false);
+    // `ok: true` may not carry an error.
+    expect(
+      analysisStatusOutputSchema.safeParse({ ...makeSuccessResponse(makeStatusData()), error: {} })
+        .success,
+    ).toBe(false);
   });
 
   it("carries the scope-denial fields the client needs to re-consent", () => {
-    const parsed = toolResponseOutputSchema.safeParse({
+    const parsed = analysisStatusOutputSchema.safeParse({
       ...makeErrorResponse("INSUFFICIENT_SCOPE", "scope missing"),
       error: {
-        ...makeErrorResponse("INSUFFICIENT_SCOPE", "scope missing").error,
+        code: "INSUFFICIENT_SCOPE",
+        message: "scope missing",
+        retryable: false,
         required_scope: "https://mcp.example/mcp/dna.import",
         app_code: "insufficient_scope",
       },
     });
     expect(parsed.success).toBe(true);
+  });
+
+  it("rejects an unknown experience_state", () => {
+    const parsed = analysisStatusOutputSchema.safeParse(
+      makeSuccessResponse(makeStatusData({ experience_state: "READY_SOON" })),
+    );
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects an untyped evidence kind", () => {
+    const envelope = makeSuccessResponse({ kind: "genes", items: [] });
+    expect(supportingEvidenceOutputSchema.safeParse(envelope).success).toBe(false);
+    expect(
+      supportingEvidenceOutputSchema.safeParse(
+        makeSuccessResponse({ kind: "patterns", items: [] }),
+      ).success,
+    ).toBe(true);
+  });
+});
+
+describe("analysis_version input pins", () => {
+  it("is optional on every analytical tool", () => {
+    for (const schema of [
+      listHealthHypothesesInputSchema,
+      explainHealthHypothesisInputSchema,
+      getSupportingEvidenceInputSchema,
+      getGeneticContextInputSchema,
+    ]) {
+      expect(schema.analysis_version.safeParse(undefined).success).toBe(true);
+      expect(schema.analysis_version.safeParse("rev42-v3.0.0").success).toBe(true);
+      expect(schema.analysis_version.safeParse("").success).toBe(false);
+    }
+  });
+
+  it("is not accepted by the status or context tools", () => {
+    expect(getAnalysisStatusInputSchema).toEqual({});
+    expect(getAnalysisContextInputSchema).toEqual({});
   });
 });
 

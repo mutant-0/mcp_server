@@ -34,7 +34,7 @@ describe("parseBackendPayload", () => {
   });
 
   it("accepts a well-formed error envelope", () => {
-    const response = makeErrorResponse("PLAN_ACCESS_REQUIRED");
+    const response = makeErrorResponse("PLAN_REQUIRED");
     expect(parseBackendPayload(response)).toEqual(response);
   });
 

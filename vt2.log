@@ -1,0 +1,62 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm.
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...version of npm.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+ RUN  v4.1.10 C:/ghrepos/mcp_server/mutant-mcp
+
+ Γ¥» tests/contract-v3.test.ts (13 tests | 2 failed) 148ms
+     ├ù advertises every contract tool and calls each one successfully 125ms
+     ├ù selects context prompts from the access summary, not selection_scope 2ms
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ» Failed Tests 2 ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»
+
+ FAIL  tests/contract-v3.test.ts > contract v3.0 acceptance > advertises every contract tool and calls each one 
+successfully
+AssertionError: get_genetic_context should succeed: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ Γ¥» tests/contract-v3.test.ts:369:56
+    367|     for (const name of TOOL_NAMES) {
+    368|       const result = await client.callTool({ name, arguments: MINIMAL_ΓÇª
+    369|       expect(result.isError, `${name} should succeed`).toBe(false);
+       |                                                        ^
+    370|       const envelope = envelopeOf(result);
+    371|       expect(envelope.contract_version, `${name} contract version`).toΓÇª
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[1/2]ΓÄ»
+
+ FAIL  tests/contract-v3.test.ts > contract v3.0 acceptance > selects context prompts from the access summary, not 
+selection_scope
+AssertionError: expected undefined to be 'HYP_A' // Object.is equality
+
+- Expected:
+"HYP_A"
+
++ Received:
+undefined
+
+ Γ¥» tests/contract-v3.test.ts:445:44
+    443|       | undefined;
+    444|     expect(explain?.action?.analysis_version).toBe("rev42-v3.0.0");
+    445|     expect(explain?.action?.hypothesis_id).toBe("HYP_A");
+       |                                            ^
+    446|     expect(explain?.action?.intent).toBe("explain");
+    447|   });
+
+ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»ΓÄ»[2/2]ΓÄ»
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 28 passed (30)
+   Start at  13:08:18
+   Duration  916ms (transform 346ms, setup 0ms, import 806ms, tests 189ms, environment 0ms)
+

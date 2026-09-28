@@ -413,44 +413,87 @@ function normalizeStatus(value: unknown): LifecycleStatus | null {
 }
 
 /**
- * Read the routing and plan fields out of a `get_analysis_status` envelope. This
- * is the only input to the component's lifecycle: whatever the server says on
- * mount is what lets a rerender (or a reopened panel) resume an existing
- * analysis instead of starting a new one.
+ * Read the routing and plan fields out of a `get_analysis_status` envelope.
+ *
+ * The 3.0.0 backend reports the canonical `experience_state` plus
+ * `active_analysis` / `pending_analysis` / `capabilities`; the component keeps
+ * its own small `analysisStatus` vocabulary and derives it here, so nothing
+ * downstream has to know the contract's state model.
  */
 function statusOf(envelope: ToolResponse): StatusInfo {
   const data = asRecord(envelope.data) ?? {};
-  const analysis = asRecord(data.analysis);
   const entitlement = asRecord(data.entitlement);
   const upgrade = asRecord(data.upgrade);
-  const regeneration = asRecord(data.regeneration);
+  const active = asRecord(data.active_analysis);
+  const pending = asRecord(data.pending_analysis);
+  const experience = firstString(data.experience_state);
+  const pendingStatus = firstString(pending?.status);
 
-  const analysisStatus = normalizeStatus(data.analysis_status) ?? normalizeStatus(analysis?.status);
+  const analysisStatus: LifecycleStatus | "unknown" =
+    active?.usable === true
+      ? "ready"
+      : pendingStatus === "processing"
+        ? "processing"
+        : pendingStatus === "failed"
+          ? "failed"
+          : experience === "NO_DNA"
+            ? "not_started"
+            : "unknown";
+
   const rawDna = data.dna_status;
   const dnaStatus: DnaStatus =
-    rawDna === "missing" || rawDna === "available"
-      ? rawDna
-      : analysisStatus && analysisStatus !== "not_started"
-        ? "available"
-        : "unknown";
+    rawDna === "missing" || rawDna === "available" ? rawDna : "unknown";
+
+  const refreshOffered =
+    experience === "READY_REFRESH_AVAILABLE" || experience === "READY_REFRESH_PROCESSING";
 
   return {
     dnaStatus,
-    analysisStatus: analysisStatus ?? "unknown",
-    analysisId: firstString(data.analysis_id, analysis?.analysis_id, analysis?.id),
-    createdAt: firstString(
-      data.created_at,
-      analysis?.created_at,
-      analysis?.started_at,
-      analysis?.requested_at,
-    ),
+    analysisStatus,
+    analysisId: firstString(active?.analysis_version, envelope.analysis_version),
+    // The active analysis carries the completion time; while a replacement is in
+    // flight the pending run's start time drives the elapsed timer.
+    createdAt: firstString(active?.generated_at, pending?.started_at),
     planLabel: firstString(data.plan, entitlement?.plan_label),
     planSlug: firstString(data.plan_slug, entitlement?.plan),
     hypothesisScope: firstString(entitlement?.hypothesis_scope, data.hypothesis_scope),
     upgradeUrl: firstString(upgrade?.url, data.upgrade_url),
-    regenerate: data.regenerate === true,
-    regenerationRequired: regeneration?.required === true,
-    regenerationUsable: regeneration?.current_results_usable !== false,
+    regenerate: refreshOffered,
+    regenerationRequired: experience === "PROCESSING_FAILED",
+    regenerationUsable: active?.usable !== false,
+  };
+}
+
+/**
+ * Read the bound snapshot out of a `show_analysis_overview` result, when the
+ * host mounted the card from one. The card renders these hypotheses and passes
+ * the version back on follow-ups instead of re-resolving the current analysis.
+ */
+function overviewSnapshotFrom(result: {
+  structuredContent?: unknown;
+  content?: Array<{ type: string; text?: string }>;
+  _meta?: unknown;
+}): { version: string | null; items: Finding[] } | null {
+  const envelope = envelopeOf(result);
+  const data = envelope ? asRecord(envelope.data) : null;
+  if (!data || data.mode !== "overview") return null;
+  const raw = Array.isArray(data.displayed_hypotheses) ? data.displayed_hypotheses : [];
+  const items: Finding[] = [];
+  raw.forEach((entry, index) => {
+    const item = asRecord(entry);
+    if (!item) return;
+    const title = firstString(item.name, item.title);
+    if (!title) return;
+    items.push({
+      id: firstString(item.id),
+      rank: typeof item.rank === "number" ? item.rank : index + 1,
+      title,
+      summary: null,
+    });
+  });
+  return {
+    version: firstString(data.displayed_analysis_version, envelope?.analysis_version),
+    items,
   };
 }
 
@@ -882,6 +925,16 @@ export function DnaImportApp({
       created.ontoolresult = (result) => {
         const next = importModeFrom(result);
         if (next) selectImportMode(next);
+        // A bound overview snapshot is authoritative: render exactly the
+        // hypotheses it resolved and pin follow-ups to that revision.
+        const snapshot = overviewSnapshotFrom(result);
+        if (snapshot) {
+          if (snapshot.version) displayedVersionRef.current = snapshot.version;
+          if (snapshot.items.length > 0) {
+            findingsRef.current = { status: "loaded", items: snapshot.items };
+            setFindingsState({ status: "loaded", items: snapshot.items });
+          }
+        }
       };
     },
   });
@@ -900,6 +953,12 @@ export function DnaImportApp({
   const deadlineRef = useRef<number | null>(null);
   /** Read inside the polling loop without making the loop depend on state. */
   const findingsRef = useRef<FindingsState>({ status: "idle" });
+  /**
+   * The analysis revision this card is displaying. Set from a bound overview
+   * snapshot or from `get_analysis_status`, then sent on follow-up analysis
+   * calls so the backend answers the same revision the user is looking at.
+   */
+  const displayedVersionRef = useRef<string | null>(null);
 
   const setFindingsState = useCallback((next: FindingsState) => {
     findingsRef.current = next;
@@ -968,6 +1027,7 @@ export function DnaImportApp({
       }
 
       const info = statusOf(envelope);
+      if (envelope.analysis_version) displayedVersionRef.current = envelope.analysis_version;
       setAnalysis((previous) => analysisFromStatus(previous, info));
       if (info.createdAt) {
         const startedAt = Date.parse(info.createdAt);
@@ -1300,6 +1360,7 @@ export function DnaImportApp({
 
         failures = 0;
         const info = statusOf(envelope);
+        if (envelope.analysis_version) displayedVersionRef.current = envelope.analysis_version;
         if (info.createdAt) {
           const startedAt = Date.parse(info.createdAt);
           if (Number.isFinite(startedAt)) startedAtRef.current = startedAt;
@@ -1395,9 +1456,13 @@ export function DnaImportApp({
     if (findingsRef.current.status === "loading" || findingsRef.current.status === "loaded") return;
     setFindingsState({ status: "loading" });
     try {
+      const version = displayedVersionRef.current;
       const result = await app.callServerTool({
         name: "list_health_hypotheses",
-        arguments: { limit: isFull ? FULL_FINDINGS_LIMIT : FREE_FINDINGS_LIMIT },
+        arguments: {
+          limit: isFull ? FULL_FINDINGS_LIMIT : FREE_FINDINGS_LIMIT,
+          ...(version ? { analysis_version: version } : {}),
+        },
       });
       const envelope = envelopeOf(result);
       if (result.isError || !envelope || !envelope.ok) {

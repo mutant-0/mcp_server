@@ -1,7 +1,7 @@
 import type { ToolResponse } from "../contract.js";
 import { withSuggestedPrompts } from "../presentation/prompts.js";
 import { withPublicUpgradeUrl } from "../presentation/upgrade.js";
-import { getAnalysisContextInputSchema, toolResponseOutputSchema } from "../schemas/index.js";
+import { analysisContextOutputSchema, getAnalysisContextInputSchema } from "../schemas/index.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
 
@@ -22,7 +22,7 @@ export const getAnalysisContextTool: MutantToolDefinition = {
     "for an analysis ID; the current analysis is resolved from the connection.",
   scope: "analysis.read",
   inputSchema: getAnalysisContextInputSchema,
-  outputSchema: toolResponseOutputSchema,
+  outputSchema: analysisContextOutputSchema,
   annotations: readOnlyAnnotations,
   handler: async (args, runtime) => {
     const response: ToolResponse = await runtime.client.invoke(

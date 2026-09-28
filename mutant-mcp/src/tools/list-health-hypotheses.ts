@@ -1,4 +1,4 @@
-import { listHealthHypothesesInputSchema, toolResponseOutputSchema } from "../schemas/index.js";
+import { hypothesisListOutputSchema, listHealthHypothesesInputSchema } from "../schemas/index.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
 
@@ -12,7 +12,7 @@ export const listHealthHypothesesTool: MutantToolDefinition = {
     "overall interpretation experience; use get_analysis_context for that purpose.",
   scope: "analysis.read",
   inputSchema: listHealthHypothesesInputSchema,
-  outputSchema: toolResponseOutputSchema,
+  outputSchema: hypothesisListOutputSchema,
   annotations: readOnlyAnnotations,
   handler: async (args, runtime) =>
     respond(

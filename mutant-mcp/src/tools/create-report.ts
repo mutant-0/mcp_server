@@ -1,6 +1,6 @@
 import { byteLength, payloadTooLarge } from "../clients/mutant-lambda-client.js";
 import { APP_ERROR_CODES, ErrorCode, type ToolResponse } from "../contract.js";
-import { createReportInputSchema, toolResponseOutputSchema } from "../schemas/index.js";
+import { createReportInputSchema, createReportOutputSchema } from "../schemas/index.js";
 import { respond } from "./respond.js";
 import { dnaImportWriteAnnotations, type MutantToolDefinition } from "./types.js";
 
@@ -8,7 +8,7 @@ import { dnaImportWriteAnnotations, type MutantToolDefinition } from "./types.js
  * Upstream codes remapped to the stable DNA import vocabulary (§14). Codes that
  * carry authorization meaning are deliberately absent so a scope or
  * authentication failure still produces a tool-level OAuth challenge:
- * `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`, `PLAN_ACCESS_REQUIRED`, and
+ * `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`, `PLAN_REQUIRED`, and
  * `PAYLOAD_TOO_LARGE` / `RESPONSE_TOO_LARGE` all pass through unchanged.
  */
 const REMAPS: Record<string, { code: string; app_code: string; retryable?: boolean }> = {
@@ -115,7 +115,7 @@ export const createReportTool: MutantToolDefinition = {
   // hiding it keeps genotypes out of the conversation.
   uiVisibility: ["app"],
   inputSchema: createReportInputSchema,
-  outputSchema: toolResponseOutputSchema,
+  outputSchema: createReportOutputSchema,
   annotations: dnaImportWriteAnnotations,
   handler: async (args, runtime) => {
     const startedAt = Date.now();

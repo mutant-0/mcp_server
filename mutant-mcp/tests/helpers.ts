@@ -1,7 +1,11 @@
 import type { MutantUserContext } from "../src/auth/user-context.js";
 import type { MutantBackendClient } from "../src/clients/mutant-lambda-client.js";
 import type { AppConfig } from "../src/config.js";
-import { CONTRACT_VERSION, type ToolName, type ToolResponse } from "../src/contract.js";
+import {
+  CONTRACT_VERSION,
+  type BackendOperation,
+  type ToolResponse,
+} from "../src/contract.js";
 import { createLogger, type AppLogger, type LogSink } from "../src/logger.js";
 
 /** URI-form scopes for the test resource (derived from MUTANT_MCP_RESOURCE_URI). */
@@ -95,7 +99,7 @@ export function makeErrorResponse(
 }
 
 export interface RecordedCall {
-  operation: ToolName;
+  operation: BackendOperation;
   arguments: Record<string, unknown>;
   userId: string;
   requestId: string;
@@ -106,11 +110,14 @@ export class StubBackendClient implements MutantBackendClient {
   readonly calls: RecordedCall[] = [];
 
   constructor(
-    private readonly responder: (operation: ToolName, args: Record<string, unknown>) => ToolResponse,
+    private readonly responder: (
+      operation: BackendOperation,
+      args: Record<string, unknown>,
+    ) => ToolResponse,
   ) {}
 
   async invoke(
-    operation: ToolName,
+    operation: BackendOperation,
     args: Record<string, unknown>,
     ctx: MutantUserContext,
     requestId: string,
@@ -118,4 +125,242 @@ export class StubBackendClient implements MutantBackendClient {
     this.calls.push({ operation, arguments: args, userId: ctx.userId, requestId });
     return this.responder(operation, args);
   }
+}
+
+/** A complete, valid 3.0.0 `get_analysis_status` data payload for tests. */
+export function makeStatusData(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    dna_status: "available",
+    experience_state: "READY",
+    active_analysis: {
+      status: "ready",
+      analysis_version: "rev42-v3.0.0",
+      generated_at: "2026-01-01T00:00:00Z",
+      scoring_engine_version: "v3.0.0",
+      usable: true,
+    },
+    pending_analysis: null,
+    entitlement: {
+      plan: "mutant_full",
+      hypothesis_scope: "all",
+      genetic_context_scope: "all_analyzed_markers",
+    },
+    capabilities: {
+      can_query_analysis: true,
+      can_show_overview: true,
+      can_refresh_analysis: false,
+      can_search_hypotheses: true,
+      can_explore_genetic_context: true,
+    },
+    ...overrides,
+  };
+}
+
+/** The 2.5 interpretation contract, matching `report-generator/mcp/interpretation.py`. */
+export function makeInterpretation(): Record<string, unknown> {
+  return {
+    version: "2.5",
+    purpose:
+      "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
+    response_rules: [
+      "Lead with the plain-English meaning.",
+      "Distinguish genetic susceptibility from a current condition.",
+    ],
+    evidence_explanation_rules: {
+      organizing_level: "modules_then_patterns_then_variants",
+      rules: [
+        "Explain contributing biological modules before individual genes or variants.",
+        "Count only actual score contributors when describing module breadth.",
+      ],
+      module_first_instruction:
+        "Explain a finding by its contributing modules first, then retained cross-module patterns, then the individual genes and variants.",
+    },
+    score_semantics: {
+      priority_score: "The ordering score; not disease probability.",
+      genetic_support: "Strength of genetic support within the analyzed evidence.",
+      assessment:
+        "The canonical explanation of this hypothesis result, authoritative over surface wording.",
+      genetic_evidence: "The weak/moderate/strong evidence category.",
+      genetic_confidence: "How well the genetic result is measured.",
+      coverage_confidence: "How completely the relevant markers were assessed.",
+      pattern_convergence: "How strongly independent patterns agree.",
+      module_support: "Support contributed by score-eligible variants through modules.",
+      pattern_support: "Additional retained support from a defined combination of variants.",
+    },
+    evidence_boundaries: {
+      genetics_is_not_diagnosis: true,
+      genetic_support_does_not_establish_current_status: true,
+      clinical_correlation_is_catalog_guidance: true,
+      clinical_correlation_is_not_user_record_evidence: true,
+    },
+    health_context_usage: {
+      allowed: true,
+      performed_by: "chatgpt",
+      sent_to_mutant: false,
+      purpose: "relevance_filtering",
+    },
+    presentation_order: [
+      "bottom_line",
+      "support_architecture",
+      "module_contributions",
+      "pattern_contributions",
+      "key_scoring_genes_and_variants",
+      "interpretation_boundary",
+      "minimal_confirmation",
+      "strengthening_and_weakening_evidence",
+      "action_changing_guardrail",
+    ],
+    evidence_model: {
+      primary_units: ["modules", "patterns", "variants"],
+      preferred_explanation_order: ["modules", "patterns", "variants"],
+    },
+    limitations: ["Not a diagnosis."],
+  };
+}
+
+/** A minimal valid `get_analysis_context` payload. */
+export function makeContextData(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    interpretation: makeInterpretation(),
+    coverage: { analyzed_markers: 1000 },
+    access: {
+      plan: "mutant_full",
+      hypothesis_scope: "all",
+      total_ranked: 1,
+      returned: 1,
+      unlocked: 1,
+      locked: 0,
+      scope_message:
+        "Your complete ranked analysis is available. This response previews the top three; use hypothesis search or listing to explore the rest.",
+    },
+    preview: [makeHypothesisSummary()],
+    ...overrides,
+  };
+}
+
+/** A minimal valid `HypothesisSummary`. */
+export function makeHypothesisSummary(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: "HYP_A",
+    rank: 1,
+    name: "Alpha finding",
+    summary: "First summary.",
+    priority_score: 90,
+    genetic_support: 72,
+    genetic_evidence: "strong",
+    coverage_confidence: "high",
+    pattern_convergence: "strong",
+    ...overrides,
+  };
+}
+
+/** A minimal valid `explain_health_hypothesis` payload. */
+export function makeDetailsData(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    hypothesis: {
+      id: "HYP_A",
+      rank: 1,
+      name: "Alpha finding",
+      assessment_state: "assessed",
+      scores: {
+        priority: 90,
+        genetic_support: 72,
+        genetic_confidence: 0.9,
+        coverage: "high",
+        convergence: "strong",
+      },
+    },
+    bottom_line: "Alpha finding is a moderate signal.",
+    explanation: {
+      bottom_line: "Alpha finding is a moderate signal.",
+      why_ranked: "It ranked first on priority score and pattern convergence.",
+      interpretation_boundary: "This is not a diagnosis.",
+      top_contributing_patterns: [],
+    },
+    evidence_shape: {
+      support_distribution: "concentrated",
+      summary: "Support is concentrated in a single locus.",
+    },
+    ranking_drivers: [{ component: "priority_score", value: 90 }],
+    score_breakdown: {
+      priority_score: 90,
+      genetic_support: 72,
+      module_support: 40,
+      pattern_support: 32,
+      converging_pattern_adjustment: 5,
+    },
+    support_architecture: {
+      classification: "single_locus",
+      summary: "Support is concentrated in a single locus.",
+    },
+    modules: [
+      {
+        module_id: "histamine",
+        module_name: "Histamine",
+        scoring_status: "active",
+        role: "primary",
+        retained_support: 40,
+        module_scoring_gene_count: 1,
+        module_scoring_variant_count: 1,
+        top_scoring_genes: ["HNMT"],
+        summary: "Histamine contributed 40 support points.",
+        caveats: [],
+      },
+    ],
+    patterns: [
+      {
+        pattern_id: "PAT_A",
+        pattern_name: "Pattern A",
+        state: "matched",
+        retained_support: 32,
+        module_ids: ["histamine"],
+        participating_gene_count: 2,
+        participating_variant_count: 2,
+        summary: "Retained matched pattern with 2 contributing variants.",
+      },
+    ],
+    provisional_evidence: [],
+    converging_patterns: [],
+    ...overrides,
+  };
+}
+
+/**
+ * A minimal valid `data` payload for any backend operation, so a permissive
+ * stub never trips the tool's own output schema.
+ */
+export function defaultBackendData(operation: BackendOperation): Record<string, unknown> {
+  switch (operation) {
+    case "resolve_analysis_snapshot":
+    case "show_analysis_overview":
+      return {
+        displayed_analysis_version: "rev42-v3.0.0",
+        displayed_hypotheses: [{ id: "HYP_A", rank: 1, name: "Alpha finding" }],
+      };
+    case "get_analysis_status":
+      return makeStatusData();
+    case "get_analysis_context":
+      return makeContextData();
+    case "list_health_hypotheses":
+      return { items: [makeHypothesisSummary()] };
+    case "explain_health_hypothesis":
+      return makeDetailsData();
+    case "get_supporting_evidence":
+      return { kind: "patterns", items: [] };
+    case "get_genetic_context":
+      return { markers: [] };
+    case "get_snp_catalog":
+      return { version: 7, snp_count: 0, snps: {} };
+    case "show_dna_import":
+      return { ui_rendered: true, mode: "initial" };
+    case "create_report":
+      return { analysis_id: "analysis_test", status: "processing" };
+  }
+}
+
+/** A complete success envelope whose `data` validates for the given operation. */
+export function makeToolResponse(operation: BackendOperation): ToolResponse {
+  return makeSuccessResponse(defaultBackendData(operation));
 }

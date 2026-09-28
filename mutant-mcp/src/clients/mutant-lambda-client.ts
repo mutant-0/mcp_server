@@ -6,7 +6,7 @@ import {
   CONTRACT_VERSION,
   ErrorCode,
   isToolResponse,
-  type ToolName,
+  type BackendOperation,
   type ToolResponse,
 } from "../contract.js";
 
@@ -17,7 +17,7 @@ import {
 export interface MutantBackendEvent {
   source: "mutant-mcp";
   contract_version: typeof CONTRACT_VERSION;
-  operation: ToolName;
+  operation: BackendOperation;
   identity: { user_id: string };
   arguments: Record<string, unknown>;
   request_context: { request_id: string };
@@ -25,7 +25,7 @@ export interface MutantBackendEvent {
 
 export interface MutantBackendClient {
   invoke(
-    operation: ToolName,
+    operation: BackendOperation,
     args: Record<string, unknown>,
     ctx: MutantUserContext,
     requestId: string,
@@ -33,7 +33,7 @@ export interface MutantBackendClient {
 }
 
 export function buildBackendEvent(
-  operation: ToolName,
+  operation: BackendOperation,
   args: Record<string, unknown>,
   ctx: MutantUserContext,
   requestId: string,
@@ -93,7 +93,7 @@ export function payloadTooLarge(): ToolResponse {
  * (larger) catalog cap; every other tool uses the general response cap.
  */
 export function responseCap(
-  operation: ToolName,
+  operation: BackendOperation,
   maxResponseBytes: number,
   snpCatalogMaxBytes: number,
 ): number {
@@ -103,7 +103,7 @@ export function responseCap(
   return maxResponseBytes;
 }
 
-export function responseCapFor(config: AppConfig, operation: ToolName): number {
+export function responseCapFor(config: AppConfig, operation: BackendOperation): number {
   return responseCap(
     operation,
     config.MUTANT_MAX_RESPONSE_BYTES,
@@ -155,7 +155,7 @@ export class AwsMutantBackendClient implements MutantBackendClient {
   }
 
   async invoke(
-    operation: ToolName,
+    operation: BackendOperation,
     args: Record<string, unknown>,
     ctx: MutantUserContext,
     requestId: string,
@@ -310,35 +310,25 @@ function mockHypotheses(): Record<string, unknown>[] {
     ["HYP_MOCK_B", "Folate metabolism", "Patterns in your variants related to folate and homocysteine."],
     ["HYP_MOCK_C", "Caffeine clearance", "Reported variant support for how you metabolize caffeine."],
   ];
-  return rows.map(([id, title, bottomLine], index) => ({
+  return rows.map(([id, name, summary], index) => ({
     id,
     rank: index + 1,
-    title,
-    bottom_line: bottomLine,
+    name,
+    summary,
     priority_score: 90 - index * 10,
-    genetic_support_score: 80 - index * 10,
+    genetic_support: 80 - index * 10,
     genetic_evidence: "moderate",
     coverage_confidence: "high",
     pattern_convergence: "moderate",
   }));
 }
 
-/** Synthetic analysis-context data, mirroring the v2 contract shape. */
+/** Synthetic analysis-context data, mirroring the 3.0.0 contract shape. */
 function mockContext(): Record<string, unknown> {
   const hypotheses = mockHypotheses();
-  const previews = hypotheses.map((row) => ({
-    id: row.id,
-    rank: row.rank,
-    title: row.title,
-    bottom_line: row.bottom_line,
-    priority_score: row.priority_score,
-    genetic_evidence: row.genetic_evidence,
-    coverage_confidence: row.coverage_confidence,
-    pattern_convergence: row.pattern_convergence,
-  }));
   return {
-    interpretation_contract: {
-      version: "2.1",
+    interpretation: {
+      version: "2.5",
       purpose:
         "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
       response_rules: [
@@ -358,6 +348,8 @@ function mockContext(): Record<string, unknown> {
         priority_score: "The ordering score; not disease probability.",
         genetic_support: "Strength of genetic support within the analyzed evidence.",
         genetic_evidence: "The weak/moderate/strong evidence category.",
+        genetic_confidence:
+          "How well the genetic result is measured, independent of its direction.",
         coverage_confidence: "How completely the relevant markers were assessed.",
         pattern_convergence: "How strongly independent patterns agree.",
         module_support:
@@ -388,22 +380,26 @@ function mockContext(): Record<string, unknown> {
         "strengthening_and_weakening_evidence",
         "action_changing_guardrail",
       ],
+      evidence_model: {
+        primary_units: ["modules", "patterns", "variants"],
+        preferred_explanation_order: ["modules", "patterns", "variants"],
+      },
       limitations: [
         "This analysis covers only the markers in the Mutant panel.",
         "Absence of a finding is not evidence of absence.",
       ],
     },
     coverage: { analyzed_markers: 1000 },
-    access_summary: {
+    access: {
       plan: "mutant_free",
-      hypothesis_scope: "top_3",
+      hypothesis_scope: "top_three",
       total_ranked: hypotheses.length,
-      returned: previews.length,
-      unlocked: previews.length,
+      returned: hypotheses.length,
+      unlocked: hypotheses.length,
       locked: 0,
       scope_message: "Your top three ranked hypotheses are fully unlocked.",
     },
-    top_hypotheses: previews,
+    preview: hypotheses,
   };
 }
 
@@ -422,7 +418,7 @@ export class MockMutantBackendClient implements MutantBackendClient {
   }
 
   async invoke(
-    operation: ToolName,
+    operation: BackendOperation,
     args: Record<string, unknown>,
     ctx: MutantUserContext,
     requestId: string,
@@ -455,13 +451,25 @@ export class MockMutantBackendClient implements MutantBackendClient {
         ok: true,
         data: {
           dna_status: "missing",
-          analysis_status: "unavailable",
-          entitlement: { plan: "mutant_free", hypothesis_scope: "top_3" },
-          capabilities: { clinical_correlation: true, supporting_evidence: true },
-          regenerate: false,
+          experience_state: "NO_DNA",
+          active_analysis: { status: "none", usable: false },
+          pending_analysis: null,
+          entitlement: {
+            plan: "mutant_free",
+            hypothesis_scope: "top_three",
+            genetic_context_scope: "accessible_hypotheses",
+          },
+          capabilities: {
+            can_query_analysis: false,
+            can_show_overview: false,
+            can_refresh_analysis: false,
+            can_search_hypotheses: false,
+            can_explore_genetic_context: false,
+          },
           next_action: {
             tool: "show_dna_import",
-            reason: "DNA data is required before an analysis can be generated.",
+            reason: "DNA data is required before an analysis can be created.",
+            arguments: { mode: "initial" },
           },
         },
         error: null,
@@ -470,33 +478,50 @@ export class MockMutantBackendClient implements MutantBackendClient {
 
     const createdAt = new Date(record.startedAt).toISOString();
     const ready = Date.now() - record.startedAt >= this.analysisProcessingMs;
-    const status = ready ? "ready" : "processing";
     return {
       contract_version: CONTRACT_VERSION,
       analysis_version: ready ? "mock" : null,
       ok: true,
       data: {
         dna_status: "available",
-        analysis_status: status,
-        analysis_id: record.analysisId,
-        created_at: createdAt,
-        analysis: {
-          generated_at: ready ? createdAt : null,
-          scoring_engine_version: "mock",
+        experience_state: ready ? "READY" : "PROCESSING_INITIAL",
+        active_analysis: ready
+          ? {
+              status: "ready",
+              analysis_version: "mock",
+              generated_at: createdAt,
+              scoring_engine_version: "mock",
+              usable: true,
+            }
+          : { status: "none", usable: false },
+        pending_analysis: ready
+          ? null
+          : { status: "processing", reason: "initial_analysis" },
+        entitlement: {
+          plan: "mutant_free",
+          hypothesis_scope: "top_three",
+          genetic_context_scope: "accessible_hypotheses",
         },
-        entitlement: { plan: "mutant_free", hypothesis_scope: "top_3" },
-        capabilities: { clinical_correlation: true, supporting_evidence: true },
-        regenerate: false,
+        capabilities: {
+          can_query_analysis: ready,
+          can_show_overview: ready,
+          can_refresh_analysis: false,
+          can_search_hypotheses: ready,
+          can_explore_genetic_context: ready,
+        },
         next_action: ready
-          ? { tool: "get_analysis_context", reason: "The current analysis is ready." }
-          : { tool: "get_analysis_status", reason: "The analysis is still processing." },
+          ? undefined
+          : {
+              tool: "get_analysis_status",
+              reason: "The analysis is still processing; call again shortly for an update.",
+            },
       },
       error: null,
     };
   }
 
   private respond(
-    operation: ToolName,
+    operation: BackendOperation,
     args: Record<string, unknown>,
     ctx: MutantUserContext,
     requestId: string,
@@ -543,6 +568,24 @@ export class MockMutantBackendClient implements MutantBackendClient {
       };
     }
 
+    if (operation === "resolve_analysis_snapshot") {
+      const hypotheses = mockAnalyses.has(ctx.userId) ? mockHypotheses() : [];
+      return {
+        contract_version: CONTRACT_VERSION,
+        analysis_version: "mock",
+        ok: true,
+        data: {
+          displayed_analysis_version: "mock",
+          displayed_hypotheses: hypotheses.map((row) => ({
+            id: row.id,
+            rank: row.rank,
+            name: row.name,
+          })),
+        },
+        error: null,
+      };
+    }
+
     if (operation === "list_health_hypotheses") {
       return {
         contract_version: CONTRACT_VERSION,
@@ -562,10 +605,21 @@ export class MockMutantBackendClient implements MutantBackendClient {
           hypothesis: {
             id: "HYP_MOCK_A",
             rank: 1,
-            title: "Lipid metabolism",
+            name: "Lipid metabolism",
             assessment_state: "assessed",
             scores: { priority: 72, genetic_support: 74, coverage: "high", convergence: "moderate" },
           },
+          bottom_line: "Model support for how your variants influence lipid handling.",
+          evidence_shape: {
+            support_distribution: "broad",
+            summary: "Support is distributed across 2 contributing modules and 2 scoring genes.",
+          },
+          ranking_drivers: [
+            { component: "priority_score", value: 72 },
+            { component: "genetic_support", value: 74 },
+            { component: "module_support", value: 62 },
+            { component: "pattern_support", value: 12 },
+          ],
           explanation: {
             bottom_line: "Model support for how your variants influence lipid handling.",
             why_ranked:
@@ -595,7 +649,7 @@ export class MockMutantBackendClient implements MutantBackendClient {
             summary:
               "Support is distributed across 2 contributing modules and 2 scoring genes.",
           },
-          module_contributions: [
+          modules: [
             {
               module_id: "lipid",
               module_name: "Lipid metabolism",
@@ -610,7 +664,7 @@ export class MockMutantBackendClient implements MutantBackendClient {
               caveats: [],
             },
           ],
-          pattern_contributions: [
+          patterns: [
             {
               pattern_id: "PAT_MOCK",
               pattern_name: "Lipid handling convergence",
@@ -622,10 +676,33 @@ export class MockMutantBackendClient implements MutantBackendClient {
               summary: "Retained matched pattern with 1 contributing variant.",
             },
           ],
+          provisional_evidence: [],
+          converging_patterns: [],
           clinical_context: { common_cofactors: [], common_confusers: [], subtypes: [] },
           confirmation: { primary_checks: [] },
           guardrails: [],
         },
+        error: null,
+      };
+    }
+
+    if (operation === "get_supporting_evidence") {
+      const kind = typeof args.kind === "string" ? args.kind : "patterns";
+      return {
+        contract_version: CONTRACT_VERSION,
+        analysis_version: "mock",
+        ok: true,
+        data: { kind, items: [], next_cursor: null },
+        error: null,
+      };
+    }
+
+    if (operation === "get_genetic_context") {
+      return {
+        contract_version: CONTRACT_VERSION,
+        analysis_version: "mock",
+        ok: true,
+        data: { markers: [], next_cursor: null },
         error: null,
       };
     }

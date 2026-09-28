@@ -17,7 +17,8 @@ import {
   makeCapturingLogger,
   makeConfig,
   makeErrorResponse,
-  makeSuccessResponse,
+  makeStatusData,
+  makeToolResponse,
   makeUser,
   StubBackendClient,
 } from "./helpers.js";
@@ -50,12 +51,15 @@ const VALID_IMPORT = {
 
 async function connect(options: {
   scopes?: string[];
-  responder?: (operation: string, args: Record<string, unknown>) => ToolResponse;
+  responder?: (
+    operation: Parameters<typeof makeToolResponse>[0],
+    args: Record<string, unknown>,
+  ) => ToolResponse;
   config?: Partial<Parameters<typeof makeConfig>[0]>;
   logger?: ReturnType<typeof makeCapturingLogger>;
 }) {
   const backendClient = new StubBackendClient(
-    (operation, args) => options.responder?.(operation, args) ?? makeSuccessResponse(),
+    (operation, args) => options.responder?.(operation, args) ?? makeToolResponse(operation),
   );
   const capture = options.logger ?? makeCapturingLogger();
   const server = createMcpServer(
@@ -135,7 +139,8 @@ describe("DNA import authorization", () => {
   it("allows the DNA import tools to a dna.import token", async () => {
     const { client } = await connect({
       scopes: [DNA_SCOPE],
-      responder: (operation) => (operation === "get_snp_catalog" ? ok({ data: CATALOG }) : ok()),
+      responder: (operation) =>
+        operation === "get_snp_catalog" ? ok({ data: CATALOG }) : makeToolResponse(operation),
     });
     for (const name of DNA_TOOLS) {
       const result = await client.callTool({
@@ -427,36 +432,61 @@ describe("transport size caps", () => {
 });
 
 describe("get_analysis_status", () => {
-  it("passes the backend routing fields through unchanged", async () => {
+  it("passes the authoritative 3.0.0 state through unchanged", async () => {
     const nextAction = {
       tool: "show_dna_import",
       reason: "DNA data is required before an analysis can be generated.",
+      arguments: { mode: "initial" },
     };
+    const data = makeStatusData({
+      dna_status: "missing",
+      experience_state: "NO_DNA",
+      active_analysis: { status: "none", usable: false },
+      capabilities: {
+        can_query_analysis: false,
+        can_show_overview: false,
+        can_refresh_analysis: false,
+        can_search_hypotheses: false,
+        can_explore_genetic_context: false,
+      },
+      next_action: nextAction,
+    });
     const { client } = await connect({
-      responder: () =>
-        ok({
-          data: {
-            dna_status: "missing",
-            analysis_status: "unavailable",
-            next_action: nextAction,
-            regenerate: false,
-          },
-          analysis_version: null,
-        }),
+      responder: () => ok({ data, analysis_version: null }),
     });
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    const structuredData = structured(result).data as Record<string, unknown>;
+    expect(structuredData.dna_status).toBe("missing");
+    expect(structuredData.experience_state).toBe("NO_DNA");
+    expect(structuredData.next_action).toEqual(nextAction);
+    expect(structuredData.capabilities).toMatchObject({ can_query_analysis: false });
+  });
+
+  it("never surfaces the removed 2.x compatibility fields", async () => {
+    const { client } = await connect({ responder: () => ok({ data: makeStatusData() }) });
+    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
     const data = structured(result).data as Record<string, unknown>;
-    expect(data.dna_status).toBe("missing");
-    expect(data.analysis_status).toBe("unavailable");
-    expect(data.next_action).toEqual(nextAction);
-    expect(data.regenerate).toBe(false);
+    expect(data.experience_state).toBe("READY");
+    for (const removed of [
+      "analysis_status",
+      "regenerate",
+      "regeneration",
+      "current_results_usable",
+      "optional_actions",
+    ]) {
+      expect(data[removed], `${removed} must be gone`).toBeUndefined();
+    }
+    expect(JSON.stringify(result)).not.toContain("analysis_status");
+  });
+
+  it("reports a backend payload outside the typed schema instead of inventing fields", async () => {
+    const { client } = await connect({ responder: () => ok({ data: { unexpected: true } }) });
+    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    expect(result.isError).toBe(true);
   });
 
   it("adds suggested prompts for a ready analysis", async () => {
-    const { client } = await connect({
-      responder: () =>
-        ok({ data: { dna_status: "available", analysis_status: "ready", regenerate: false } }),
-    });
+    const { client } = await connect({ responder: () => ok({ data: makeStatusData() }) });
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
     const data = structured(result).data as Record<string, unknown>;
     const prompts = data.suggested_prompts as Array<{ id: string; prompt: string }>;
@@ -464,17 +494,10 @@ describe("get_analysis_status", () => {
     expect(prompts.some((prompt) => prompt.id === "top-findings")).toBe(true);
   });
 
-  it("suggests a refresh only when regeneration is available", async () => {
+  it("suggests a refresh only when experience_state says one is available", async () => {
     const { client } = await connect({
       responder: () =>
-        ok({
-          data: {
-            dna_status: "available",
-            analysis_status: "ready",
-            regenerate: true,
-            regeneration: { required: false, current_results_usable: true },
-          },
-        }),
+        ok({ data: makeStatusData({ experience_state: "READY_REFRESH_AVAILABLE" }) }),
     });
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
     const prompts = (structured(result).data as { suggested_prompts: Array<{ id: string }> })
@@ -482,14 +505,21 @@ describe("get_analysis_status", () => {
     expect(prompts.some((prompt) => prompt.id === "why-refresh")).toBe(true);
   });
 
-  it("never rewrites or infers fields the backend omitted", async () => {
-    const { client } = await connect({ responder: () => ok({ data: {} }) });
+  it("mounts the refresh card only for a usable analysis with a pending refresh", async () => {
+    const { client } = await connect({
+      responder: () =>
+        ok({ data: makeStatusData({ experience_state: "READY_REFRESH_AVAILABLE" }) }),
+    });
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
-    const data = structured(result).data as Record<string, unknown>;
-    expect(data.dna_status).toBeUndefined();
-    expect(data.analysis_status).toBeUndefined();
-    expect(data.next_action).toBeUndefined();
-    expect(data.regenerate).toBeUndefined();
+    const meta = result._meta as { ui?: { resourceUri?: string }; mutant?: { mode?: string } };
+    expect(meta.ui?.resourceUri).toBe(DNA_IMPORT_UI_URI);
+    expect(meta.mutant?.mode).toBe("overview");
+  });
+
+  it("does not mount the refresh card for a plain ready analysis", async () => {
+    const { client } = await connect({ responder: () => ok({ data: makeStatusData() }) });
+    const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    expect((result._meta as Record<string, unknown> | undefined)?.ui).toBeUndefined();
   });
 });
 
@@ -501,14 +531,19 @@ describe("dev-mode mock analysis lifecycle", () => {
 
     const before = await client.invoke("get_analysis_status", {}, user, "req");
     expect(before.data?.dna_status).toBe("missing");
+    expect(before.data?.experience_state).toBe("NO_DNA");
 
     await client.invoke("create_report", VALID_IMPORT, user, "req");
 
     const after = await client.invoke("get_analysis_status", {}, user, "req");
-    expect(after.data?.analysis_status).toBe("ready");
+    expect(after.data?.experience_state).toBe("READY");
     expect(after.data?.dna_status).toBe("available");
-    expect(typeof after.data?.analysis_id).toBe("string");
-    expect(typeof after.data?.created_at).toBe("string");
+    const active = after.data?.active_analysis as Record<string, unknown>;
+    expect(active.status).toBe("ready");
+    expect(active.usable).toBe(true);
+    expect(typeof active.analysis_version).toBe("string");
+    expect(typeof active.generated_at).toBe("string");
+    expect(after.data?.pending_analysis).toBeNull();
   });
 
   it("reports processing until the synthetic window elapses", async () => {
@@ -519,7 +554,12 @@ describe("dev-mode mock analysis lifecycle", () => {
     await client.invoke("create_report", VALID_IMPORT, user, "req");
 
     const status = await client.invoke("get_analysis_status", {}, user, "req");
-    expect(status.data?.analysis_status).toBe("processing");
+    expect(status.data?.experience_state).toBe("PROCESSING_INITIAL");
+    expect(status.data?.pending_analysis).toEqual({
+      status: "processing",
+      reason: "initial_analysis",
+    });
+    expect((status.data?.capabilities as Record<string, unknown>).can_query_analysis).toBe(false);
   });
 
   it("returns synthetic hypotheses only once an analysis exists", async () => {

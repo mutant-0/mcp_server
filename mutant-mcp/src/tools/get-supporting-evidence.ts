@@ -1,4 +1,4 @@
-import { getSupportingEvidenceInputSchema, toolResponseOutputSchema } from "../schemas/index.js";
+import { getSupportingEvidenceInputSchema, supportingEvidenceOutputSchema } from "../schemas/index.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
 
@@ -16,7 +16,7 @@ export const getSupportingEvidenceTool: MutantToolDefinition = {
     'clinician").',
   scope: "analysis.read",
   inputSchema: getSupportingEvidenceInputSchema,
-  outputSchema: toolResponseOutputSchema,
+  outputSchema: supportingEvidenceOutputSchema,
   annotations: readOnlyAnnotations,
   handler: async (args, runtime) =>
     respond(

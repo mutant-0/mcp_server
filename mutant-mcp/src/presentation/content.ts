@@ -55,51 +55,43 @@ function errorContent(response: ToolResponse): string {
     `error: ${error?.code ?? "UNKNOWN"}`,
     error?.message ?? "Unknown error",
   ];
-  if (error?.next_action) lines.push(error.next_action);
+  const nextAction = asRecord(error?.next_action);
+  const nextTool = nextAction ? asText(nextAction.tool) : null;
+  if (nextTool) {
+    const reason = asText(nextAction?.reason);
+    lines.push(reason ? `Next: call ${nextTool} (${reason}).` : `Next: call ${nextTool}.`);
+  }
   return lines.join("\n");
 }
 
+/** Plain-language sentence for the canonical experience state. */
+const EXPERIENCE_SENTENCES: Record<string, string> = {
+  NO_DNA: "No DNA data has been imported for this account yet.",
+  PROCESSING_INITIAL: "Your DNA analysis is still being generated.",
+  READY: "Your current DNA analysis is ready.",
+  READY_REFRESH_AVAILABLE:
+    "Your current DNA analysis is ready, and a newer platform version is available; refreshing is optional and your current results remain usable.",
+  READY_REFRESH_PROCESSING:
+    "Your current DNA analysis is ready while a refreshed analysis is being generated.",
+  REFRESH_PROCESSING_NO_USABLE_ANALYSIS:
+    "A refreshed analysis is being generated and no earlier result can answer right now.",
+  PROCESSING_FAILED: "The analysis could not be served and must be regenerated.",
+};
+
 function statusContent(data: JsonObject): string {
-  const dna = asText(data.dna_status) ?? "unknown";
-  const analysis = asText(data.analysis_status) ?? "unknown";
+  const experience = asText(data.experience_state) ?? "";
   const parts: string[] = [];
+  parts.push(
+    EXPERIENCE_SENTENCES[experience] ??
+      "DNA data is on file, but no analysis is available yet.",
+  );
 
-  if (dna === "missing") {
-    parts.push("No DNA data has been imported for this account yet.");
-  } else if (analysis === "ready") {
-    parts.push("Your current DNA analysis is ready.");
-  } else if (analysis === "processing") {
-    parts.push("Your DNA analysis is still processing.");
-  } else if (analysis === "failed") {
-    parts.push("Your last DNA analysis did not complete.");
+  if (experience === "READY" || experience === "READY_REFRESH_AVAILABLE") {
+    parts.push("For an overview, open the analysis card with show_analysis_overview.");
   } else {
-    parts.push("DNA data is on file, but no analysis is available yet.");
-  }
-
-  const regeneration = asRecord(data.regeneration);
-  if (data.regenerate === true && regeneration) {
-    if (regeneration.required === true) {
-      parts.push("A refreshed analysis is required, so DNA must be resubmitted.");
-    } else if (regeneration.current_results_usable !== false) {
-      parts.push(
-        "A newer platform version is also available; resubmitting your DNA is optional, " +
-          "and your current results remain usable.",
-      );
-    } else {
-      parts.push("A refreshed analysis is available.");
-    }
-  }
-
-  const nextAction = asRecord(data.next_action);
-  const nextTool = nextAction ? asText(nextAction.tool) : null;
-  if (analysis === "ready") {
-    parts.push(
-      data.regenerate === true
-        ? "The analysis card offers a refresh action."
-        : "For an overview, open the analysis card with show_analysis_overview.",
-    );
-  } else if (nextTool) {
-    parts.push(`Next: call ${nextTool}.`);
+    const nextAction = asRecord(data.next_action);
+    const nextTool = nextAction ? asText(nextAction.tool) : null;
+    if (nextTool) parts.push(`Next: call ${nextTool}.`);
   }
 
   return parts.join(" ");
@@ -109,17 +101,17 @@ function hypothesisLine(entry: unknown): string | null {
   const item = asRecord(entry);
   if (!item) return null;
   const rank = asNumber(item.rank);
-  const title = asText(item.title);
-  if (!title) return null;
-  const bottom = asText(item.bottom_line);
-  const head = rank !== null ? `#${rank} ${title}` : title;
-  return bottom ? `${head}: ${bottom}` : head;
+  const name = asText(item.name);
+  if (!name) return null;
+  const summary = asText(item.summary);
+  const head = rank !== null ? `#${rank} ${name}` : name;
+  return summary ? `${head}: ${summary}` : head;
 }
 
 function contextContent(data: JsonObject): string {
   const coverage = asRecord(data.coverage);
-  const contract = asRecord(data.interpretation_contract);
-  const access = asRecord(data.access_summary);
+  const contract = asRecord(data.interpretation);
+  const access = asRecord(data.access);
   const markers = coverage ? asNumber(coverage.analyzed_markers) : null;
   const parts: string[] = [];
 
@@ -130,16 +122,16 @@ function contextContent(data: JsonObject): string {
       : "Your DNA analysis is ready.";
   parts.push(purpose ? `${readiness} ${purpose}` : readiness);
 
-  const previews = asList(data.top_hypotheses)
+  const previews = asList(data.preview)
     .map((entry) => asRecord(entry))
     .filter((entry): entry is JsonObject => entry !== null)
     .slice(0, 3);
   if (previews.length > 0) {
     const lines = previews.map((preview, index) => {
       const rank = asNumber(preview.rank) ?? index + 1;
-      const title = clampText(asText(preview.title) ?? "Untitled finding", 120);
-      const bottom = asText(preview.bottom_line);
-      return bottom ? `${rank}. ${title} - ${clampText(bottom, 200)}` : `${rank}. ${title}`;
+      const name = clampText(asText(preview.name) ?? "Untitled finding", 120);
+      const summary = asText(preview.summary);
+      return summary ? `${rank}. ${name} - ${clampText(summary, 200)}` : `${rank}. ${name}`;
     });
     parts.push(`Your highest-ranked findings are:\n${lines.join("\n")}`);
   }
@@ -178,7 +170,7 @@ function detailsContent(data: JsonObject): string {
   const parts: string[] = [];
 
   // 1. Bottom line.
-  const bottomLine = explanation ? asText(explanation.bottom_line) : null;
+  const bottomLine = asText(data.bottom_line) ?? (explanation ? asText(explanation.bottom_line) : null);
   if (bottomLine) parts.push(bottomLine);
 
   // 2. Support architecture (module-first). The legacy fallback summary is
@@ -192,7 +184,7 @@ function detailsContent(data: JsonObject): string {
   }
 
   // 3. Top module contributions (already capped at three by the backend).
-  const modules = asList(data.module_contributions)
+  const modules = asList(data.modules)
     .map((entry) => asRecord(entry))
     .filter((entry): entry is JsonObject => entry !== null);
   const moduleSummaries = modules
@@ -204,7 +196,7 @@ function detailsContent(data: JsonObject): string {
   }
 
   // 4. Retained pattern contributions.
-  const patterns = asList(data.pattern_contributions)
+  const patterns = asList(data.patterns)
     .map((entry) => asRecord(entry))
     .filter((entry): entry is JsonObject => entry !== null);
   if (patterns.length > 0) {
@@ -235,7 +227,7 @@ function detailsContent(data: JsonObject): string {
 
   // 4b. Converging patterns are a separate, priority-only family. Reported
   // separately and never described as adding to module or pattern support.
-  const converging = asList(data.converging_pattern_contributions)
+  const converging = asList(data.converging_patterns)
     .map((entry) => asRecord(entry))
     .filter((entry): entry is JsonObject => entry !== null)
     .map((entry) => asText(entry.pattern_id))
@@ -295,8 +287,8 @@ function detailsContent(data: JsonObject): string {
   if (guardrail) parts.push(guardrail);
 
   if (parts.length === 0) {
-    const title = hypothesis ? asText(hypothesis.title) : null;
-    return title ? `Finding: ${title}.` : "Finding details are not available.";
+    const name = hypothesis ? asText(hypothesis.name) : null;
+    return name ? `Finding: ${name}.` : "Finding details are not available.";
   }
   return parts.join(" ");
 }
