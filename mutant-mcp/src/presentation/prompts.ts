@@ -29,10 +29,6 @@ function asText(value: unknown): string | null {
   return text.length > 0 ? text : null;
 }
 
-function asNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
 function action(
   intent: PromptSuggestion["intent"],
   analysisVersion: string | null,
@@ -148,7 +144,6 @@ function statusPrompts(data: JsonObject, analysisVersion: string | null): Prompt
 function contextPrompts(data: JsonObject, analysisVersion: string | null): PromptSuggestion[] {
   const access = asRecord(data.access);
   const isFull = access ? asText(access.hypothesis_scope) === "all" : false;
-  const locked = access ? asNumber(access.locked) : null;
   const previews = Array.isArray(data.preview) ? data.preview : [];
   const firstPreview = asRecord(previews[0]);
   const firstId = firstPreview ? asText(firstPreview.id) : null;
@@ -170,9 +165,9 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
     },
     {
       id: "compare-medical-records",
-      label: "Compare with my records",
+      label: "Compare with my history",
       prompt:
-        "Compare my accessible Mutant findings with medical records you can actually access in this conversation, including connected health records if available. First check what records are accessible; do not infer access from my account or claim to have read records you cannot see. If none are accessible, ask me to provide records here. Do not assume symptoms or test results I have not given you.",
+        "Which of my top three Mutant findings seems most relevant to the health history I've shared? What supports or argues against each? If I have not shared any health history in this conversation, ask me what I want to share before comparing; do not imply access to records I have not provided, and do not assume symptoms or test results I have not given you.",
       intent: "comparison",
       action: action("comparison", analysisVersion),
     },
@@ -193,15 +188,6 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
         "Compare all findings in my complete Mutant analysis with medical records you can actually access in this conversation, including connected health records if available. First check what records are accessible; do not infer access from my account or claim to have read records you cannot see. If none are accessible, ask me to provide records here. Keep genetic findings separate from my clinical records.",
       intent: "comparison",
       action: action("comparison", analysisVersion),
-    });
-  } else if (locked !== null && locked > 0) {
-    out.push({
-      id: "full-scope",
-      label: "Compare all with Full",
-      prompt:
-        "How would Mutant Full let me compare all ranked hypotheses with my medical records? Explain what it unlocks beyond my accessible top three without revealing locked findings.",
-      intent: "overview",
-      action: action("overview", analysisVersion),
     });
   }
 

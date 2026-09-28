@@ -483,7 +483,7 @@ describe("contract v3.0 acceptance", () => {
     expect(explain?.action?.intent).toBe("explain");
   });
 
-  it("offers a Full-scope prompt to Free accounts with locked hypotheses", async () => {
+  it("keeps the Free hint row to explain/compare-history without a Full-scope chip", async () => {
     const { client } = await connect((operation) => {
       if (operation !== "get_analysis_context") {
         return makeSuccessResponse(dataFor(operation));
@@ -504,12 +504,32 @@ describe("contract v3.0 acceptance", () => {
     });
     const result = await client.callTool({ name: "get_analysis_context", arguments: {} });
     const data = envelopeOf(result).data as {
-      suggested_prompts?: Array<{ id: string }>;
+      suggested_prompts?: Array<{
+        id: string;
+        label: string;
+        action?: { analysis_version?: string; hypothesis_id?: string; intent?: string };
+      }>;
     };
-    const ids = (data.suggested_prompts ?? []).map((prompt) => prompt.id);
-    expect(ids).toContain("full-scope");
+    const prompts = data.suggested_prompts ?? [];
+    const ids = prompts.map((prompt) => prompt.id);
+    expect(ids).toContain("explain-first");
+    expect(ids).toContain("compare-top-three");
+    expect(ids).toContain("compare-medical-records");
+    expect(ids).not.toContain("full-scope");
     expect(ids).not.toContain("search-all");
     expect(ids).not.toContain("compare-all");
+
+    // The upgrade is a separate link, never a hint-row chip.
+    expect(prompts.some((prompt) => prompt.label === "Compare all with Full")).toBe(false);
+
+    const history = prompts.find((prompt) => prompt.id === "compare-medical-records");
+    expect(history?.label).toBe("Compare with my history");
+    expect(history?.action?.analysis_version).toBe("rev42-v3.0.0");
+    expect(history?.action?.intent).toBe("comparison");
+
+    const compareTop = prompts.find((prompt) => prompt.id === "compare-top-three");
+    expect(compareTop?.action?.analysis_version).toBe("rev42-v3.0.0");
+    expect(compareTop?.action?.hypothesis_id).toBe("HYP_A");
   });
 
   it("reports errors as short text without echoing the envelope", async () => {

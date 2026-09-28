@@ -805,8 +805,8 @@ describe("DNA import component", () => {
             suggested_prompts: [
               {
                 id: "compare-medical-records",
-                label: "Compare with my records",
-                prompt: "Compare my findings with records I shared.",
+                label: "Compare with my history",
+                prompt: "Compare my findings with the health history I shared.",
                 intent: "comparison",
               },
             ],
@@ -817,7 +817,7 @@ describe("DNA import component", () => {
     );
 
     await screen.findByText(/Alpha finding/i);
-    await screen.findByRole("button", { name: "Compare with my records" });
+    await screen.findByRole("button", { name: "Compare with my history" });
     expect(screen.queryByRole("button", { name: /view my top 3 findings/i })).toBeNull();
     expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
     expect(bridge.callsTo("get_analysis_context")).toHaveLength(1);
@@ -850,7 +850,7 @@ describe("DNA import component", () => {
     expect(screen.queryByText(/temporarily unavailable/i)).toBeNull();
   });
 
-  it("offers record comparison and the Full upgrade only to Free accounts", async () => {
+  it("offers history comparison and the Full upgrade link only to Free accounts", async () => {
     const bridge = renderWith({
       poll_analysis_status: statusResponse("ready"),
       get_analysis_context: makeSuccessResponse(
@@ -858,16 +858,22 @@ describe("DNA import component", () => {
           upgrade: { label: "Unlock Full Analysis", url: "https://mutantgenomics.com/upgrade" },
           suggested_prompts: [
             {
-              id: "compare-medical-records",
-              label: "Compare with my records",
-              prompt: "Compare my accessible findings with records I have shared.",
+              id: "explain-first",
+              label: "Explain #1",
+              prompt: "Explain my #1 finding in plain English.",
+              intent: "explain",
+            },
+            {
+              id: "compare-top-three",
+              label: "Compare top 3",
+              prompt: "Compare my top three findings and explain how they differ.",
               intent: "comparison",
             },
             {
-              id: "full-scope",
-              label: "Compare all with Full",
-              prompt: "How would Full compare all ranked hypotheses with my records?",
-              intent: "overview",
+              id: "compare-medical-records",
+              label: "Compare with my history",
+              prompt: "Compare my accessible findings with the health history I have shared.",
+              intent: "comparison",
             },
           ],
         }),
@@ -876,8 +882,10 @@ describe("DNA import component", () => {
 
     await screen.findByText(/Analysis ready/i);
     fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
-    await screen.findByRole("button", { name: "Compare with my records" });
-    expect(screen.getByRole("button", { name: "Compare all with Full" })).toBeDefined();
+    await screen.findByRole("button", { name: "Explain #1" });
+    expect(screen.getByRole("button", { name: "Compare top 3" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Compare with my history" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Compare all with Full" })).toBeNull();
     const upgradeLink = screen.getByRole("link", { name: "Upgrade to Mutant Full" });
     expect(upgradeLink.getAttribute("href")).toBe("https://mutantgenomics.com/upgrade");
     expect(upgradeLink.getAttribute("target")).toBe("_blank");
@@ -934,8 +942,8 @@ describe("DNA import component", () => {
           suggested_prompts: [
             {
               id: "compare-medical-records",
-              label: "Compare with my records",
-              prompt: "Compare my findings with records I shared.",
+              label: "Compare with my history",
+              prompt: "Compare my findings with the health history I shared.",
               intent: "comparison",
             },
           ],
@@ -947,7 +955,7 @@ describe("DNA import component", () => {
     bridge.sendToolResult(status, { mutant: { mode: "overview" } });
 
     await screen.findByText(/Alpha finding/i);
-    await screen.findByRole("button", { name: "Compare with my records" });
+    await screen.findByRole("button", { name: "Compare with my history" });
     expect(screen.getByRole("button", { name: /refresh analysis/i })).toBeDefined();
   });
 

@@ -1153,9 +1153,10 @@ add a `suggested_prompts` array to their `data`
   why-refresh and start-refresh in the refresh states), the two no-usable-analysis
   processing states (**none** — the component owns those states), `PROCESSING_FAILED`
   (regenerate), analysis context
-  (explain #1 / compare top three / compare with medical records shared in the
-  chat, plus compare-all for Full or a Full-scope prompt for Free accounts with
-  locked findings), and hypothesis detail (why ranked / evidence / confirmation /
+  (explain #1 / compare top three / compare with the health history shared in the
+  chat, plus compare-all for Full; Free accounts with locked findings get no
+  Full-scope chip, only the separate `Upgrade to Mutant Full` link), and
+  hypothesis detail (why ranked / evidence / confirmation /
   what changes it / clinician).
 - `prompt` is exact user-visible natural language. It must never contain an
   internal command, a tool name, or a raw hypothesis id. `explain_health_hypothesis`
