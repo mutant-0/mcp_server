@@ -34,6 +34,7 @@ import {
 /** Minimal arguments that satisfy each tool's input schema. */
 const MINIMAL_ARGS: Record<ToolName, Record<string, unknown>> = {
   get_analysis_status: {},
+  poll_analysis_status: {},
   show_analysis_overview: {},
   get_analysis_context: {},
   list_health_hypotheses: {},
@@ -166,6 +167,7 @@ function dataFor(operation: BackendOperation): Record<string, unknown> {
         ],
       };
     case "get_analysis_status":
+    case "poll_analysis_status":
       return makeStatusData();
     case "get_analysis_context":
       return contextData();

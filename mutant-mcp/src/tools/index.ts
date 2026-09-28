@@ -10,6 +10,7 @@ import { explainHealthHypothesisTool } from "./explain-health-hypothesis.js";
 import { getSnpCatalogTool } from "./get-snp-catalog.js";
 import { getSupportingEvidenceTool } from "./get-supporting-evidence.js";
 import { listHealthHypothesesTool } from "./list-health-hypotheses.js";
+import { pollAnalysisStatusTool } from "./poll-analysis-status.js";
 import { respond } from "./respond.js";
 import { enforceScope } from "./scope-guard.js";
 import { showAnalysisOverviewTool } from "./show-analysis-overview.js";
@@ -18,6 +19,7 @@ import type { MutantToolDefinition, ToolRuntime } from "./types.js";
 
 export const TOOL_DEFINITIONS: MutantToolDefinition[] = [
   getAnalysisStatusTool,
+  pollAnalysisStatusTool,
   showAnalysisOverviewTool,
   getAnalysisContextTool,
   listHealthHypothesesTool,

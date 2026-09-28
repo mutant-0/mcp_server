@@ -22,7 +22,7 @@ function inputKeys(tool: MutantToolDefinition): string[] {
 }
 
 describe("tool definitions", () => {
-  it("exposes exactly the ten contract tools in order", () => {
+  it("exposes exactly the eleven contract tools in order", () => {
     expect(TOOL_DEFINITIONS.map((tool) => tool.name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_DEFINITIONS).toHaveLength(
       ANALYSIS_TOOL_NAMES.length + DNA_IMPORT_TOOL_NAMES.length,
@@ -119,12 +119,29 @@ describe("tool definitions", () => {
 
   it("hides the component-support tools from the model", () => {
     const config = makeConfig();
-    for (const name of ["get_snp_catalog", "create_report"]) {
+    for (const name of ["poll_analysis_status", "get_snp_catalog", "create_report"]) {
       const tool = TOOL_DEFINITIONS.find((candidate) => candidate.name === name);
       expect(tool?.uiVisibility).toEqual(["app"]);
       const meta = toolMeta(tool!, config) as { ui?: { visibility?: string[] } };
       expect(meta.ui?.visibility).toEqual(["app"]);
     }
+  });
+
+  it("prohibits future-capability speculation in the status instructions", () => {
+    const status = TOOL_DEFINITIONS.find((tool) => tool.name === "get_analysis_status");
+    const description = status?.description ?? "";
+    expect(description).toContain('"PROCESSING_INITIAL"');
+    expect(description).toContain('"REFRESH_PROCESSING_NO_USABLE_ANALYSIS"');
+    expect(description).toContain("Do not describe, preview, or speculate about future");
+    expect(description).toContain("Do not enumerate future genes, modules, rsIDs");
+    expect(description).toContain("let it own the experience");
+    expect(description).toContain("do not initiate assistant polling loops");
+    expect(description).toContain("Silence is preferred");
+    // The known-bad response is named explicitly, and the description no longer
+    // claims this tool is what the component polls.
+    expect(description).toContain("Once processing completes, I can show your DNA at");
+    expect(description).toContain("poll_analysis_status");
+    expect(description).not.toContain("polls this tool");
   });
 
   it("echoes the UI descriptor on the show_dna_import result metadata", () => {

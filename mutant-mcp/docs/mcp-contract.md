@@ -119,6 +119,11 @@ genotypes except where the tool legitimately returns markers
 precision stays in `data`. Errors render as a short code/message/next-action
 block without the envelope.
 
+For `PROCESSING_INITIAL` and `REFRESH_PROCESSING_NO_USABLE_ANALYSIS` the content
+is exactly one non-instructional sentence — `Analysis is processing.` and
+`Analysis refresh is processing.` — on both the model-facing and component-owned
+paths. No next-action hint, call to action, or future-capability claim appears.
+
 ### `_meta` is widget-only
 
 `_meta` carries only the auth challenge (`mcp/www_authenticate`), the Apps SDK
@@ -204,13 +209,20 @@ question, or browse, so pinning one action would over-constrain the model.
 | DNA on file, no report row | `show_dna_import` (`arguments: {mode: "initial"}`). |
 | `READY*` | omitted. |
 
+The backend always emits the polling `next_action` for the two no-usable-analysis
+processing states. The Lambda strips it only on the component-owned
+`poll_analysis_status` path, where the card polls on its own and the hint would
+only invite the model to poll or narrate. The model-facing
+`get_analysis_status` keeps it for the non-UI path.
+
 ## Tools
 
 Each tool maps to a distinct user goal. The routing contract is:
 
 | Tool | Responsibility |
 |---|---|
-| `get_analysis_status` | Establish connection, DNA readiness, the canonical `experience_state`, entitlement, capabilities, and the single next action. |
+| `get_analysis_status` | Establish connection, DNA readiness, the canonical `experience_state`, entitlement, capabilities, and the single next action. Model-facing. |
+| `poll_analysis_status` | App-only (`app` visibility) status read used by the DNA import component while it owns the processing experience. Same payload as `get_analysis_status`, minus polling hints and suggested prompts. |
 | `show_analysis_overview` | Resolve one immutable analysis snapshot and open the ready-analysis Apps SDK card bound to it. |
 | `get_analysis_context` | Supply the interpretation contract, coverage, access scope, a compact top-hypothesis preview, and useful next questions for specific analysis questions. |
 | `list_health_hypotheses` | Browse, search, sort, paginate, and compare accessible hypotheses. |
@@ -302,9 +314,15 @@ payload is missing, stale, or from a different scoring engine is reported as
 never advertised as `READY` while `get_analysis_context` would refuse it.
 
 While `experience_state` is a processing state, the DNA import component polls
-this tool itself (about every 7 seconds, up to 10 minutes) after it creates a
-report. The model should not tell the user to keep asking whether processing has
-finished, and should not narrate the status while that component is on screen.
+its own app-only `poll_analysis_status` tool (about every 7 seconds, up to 10
+minutes) after it creates a report; this tool is the model-facing path. In the
+two no-usable-analysis processing states the published instructions forbid
+calling any analysis, overview, hypothesis, evidence, or genetic-context tool,
+describing or speculating about future capabilities, enumerating future genes,
+modules, rsIDs, variants, hypotheses, scores, or patterns, starting an assistant
+polling loop, or narrating the state while the component is on screen. An
+explicit question about what is happening is answered briefly from the payload
+alone; silence is preferred over describing unavailable capabilities.
 
 #### Refresh semantics
 
@@ -322,6 +340,23 @@ finished, and should not narrate the status while that component is on screen.
   the active analysis unusable and yields `PROCESSING_FAILED` with a regeneration
   action; a transient miss (a regeneration still writing) clears on its own and
   yields a processing state.
+
+### `poll_analysis_status`
+
+Input: `{}`. The component-owned counterpart of `get_analysis_status`, advertised
+with `app` visibility only, so it never appears in the model's tool list.
+
+It performs the same backend read (`get_analysis_status`) and returns the same
+typed `data`, with two deterministic differences:
+
+- the polling `next_action` is removed in `PROCESSING_INITIAL` and
+  `REFRESH_PROCESSING_NO_USABLE_ANALYSIS`; and
+- `suggested_prompts` is never attached (the card renders completion prompts from
+  `get_analysis_context` once results exist, not from a processing payload).
+
+Because tool identity is the ownership signal, the presence of
+`poll_analysis_status` is what proves the component owns polling. It never
+changes the payload in a ready, failed, or no-DNA state.
 
 ### `get_analysis_context`
 
@@ -991,7 +1026,7 @@ the server only through the host bridge (`tools/call`), so it declares neither
 
 The component (`src/ui/dna-import/main.tsx` mounts `app.tsx`) owns the whole
 asynchronous lifecycle. On mount it calls `get_snp_catalog` and
-`get_analysis_status` in parallel, which is how a rerender or a reopened panel
+`poll_analysis_status` in parallel, which is how a rerender or a reopened panel
 resumes an in-flight analysis instead of starting a new one: a processing
 `experience_state` opens the progress card and resumes polling, a `READY*` state
 opens the completion card, and `PROCESSING_FAILED` opens the recovery card. It
@@ -1000,12 +1035,13 @@ parses the selected file with the vendored shared processor
 `front-end-web/src/genomics`), filters to catalog-matched variants, and submits
 via `create_report` with one `crypto.randomUUID()` per attempt.
 
-After a successful `create_report` the component polls `get_analysis_status`
+After a successful `create_report` the component polls `poll_analysis_status`
 itself (about every 7 seconds, up to 10 minutes) and stops when
 `experience_state` is no longer a processing state, on unmount, on a new import,
-or on the ceiling. It shows an elapsed timer measured from
-`active_analysis.generated_at` (falling back to its own clock), never a
-countdown, percentage, or estimated time remaining.
+or on the ceiling. Because that tool is advertised with `app` visibility only,
+the model cannot call it or start its own polling loop. It shows an elapsed timer
+measured from `active_analysis.generated_at` (falling back to its own clock),
+never a countdown, percentage, or estimated time remaining.
 
 When the analysis is ready the same card becomes the completion view, offering
 either `View my top 3 findings`, which calls `list_health_hypotheses` from the
@@ -1064,8 +1100,9 @@ add a `suggested_prompts` array to their `data`
 - State-aware, driven by `experience_state` and `capabilities` (never the removed
   `analysis_status` / `regenerate`): `NO_DNA` (import format/privacy),
   `can_query_analysis` (overview / explain / compare / clinician, plus
-  why-refresh and start-refresh in the refresh states), the processing states
-  (what happens next), `PROCESSING_FAILED` (regenerate), analysis context
+  why-refresh and start-refresh in the refresh states), the two no-usable-analysis
+  processing states (**none** — the component owns those states), `PROCESSING_FAILED`
+  (regenerate), analysis context
   (explain #1 / compare top three / compare with medical records shared in the
   chat, plus compare-all for Full or a Full-scope prompt for Free accounts with
   locked findings), and hypothesis detail (why ranked / evidence / confirmation /
@@ -1077,6 +1114,10 @@ add a `suggested_prompts` array to their `data`
 - `action` is the structured follow-up binding (`{analysis_version?,
   hypothesis_id?, intent}`). `analysis_version` pins the click to the revision
   the chip was rendered from.
+- `suggested_prompts` is omitted entirely (the property is absent, not null or
+  empty) in `PROCESSING_INITIAL` and `REFRESH_PROCESSING_NO_USABLE_ANALYSIS`, so
+  neither the model nor the card is offered a question that cannot be answered.
+  `poll_analysis_status` never receives suggestions in any state.
 - These fields are added at the MCP boundary, not by the backend. The backend
   owns the typed facts; the Lambda owns the presentation.
 
@@ -1363,6 +1404,24 @@ locus name; a multi-module result must name at least two contributing modules
 and must not claim one SNP explains the result unless the dominant-driver data
 supports it.
 
+#### Processing-state evaluations
+
+Run these in both `PROCESSING_INITIAL` and `REFRESH_PROCESSING_NO_USABLE_ANALYSIS`,
+with a component that owns polling and with no active component. Instruction
+snapshots alone do not establish model behavior; the model must be exercised.
+
+| Prompt | Required answer behavior |
+|---|---|
+| (no question, component visible) | Adds no processing prose; does not call any analytical tool. |
+| "What is happening?" | One brief answer grounded in the status payload; no capability promises, no completion-time estimate, no tool calls. |
+| "What will I be able to see?" | Declines to predict. Never promises future genes, modules, rsIDs, variants, hypotheses, scores, or patterns. |
+| "Show me the rsID details for rs4680." | Refuses while no usable analysis exists; does not call genetic-context, evidence, or hypothesis tools. |
+
+Rejected behaviors: future-capability promises (the prior "Once processing
+completes, I can show your DNA at the marker level…" response is the canonical
+negative example), calls to unavailable analytical tools, duplicate narration of
+the card, and assistant-initiated polling loops.
+
 ### Catalog regression note
 
 The plan's Steroid fixture described a retired-or-active contradiction that does
@@ -1425,13 +1484,22 @@ The contract is covered by:
   prompts with structured actions, that `show_analysis_overview` returns a bound
   `displayed_analysis_version`, and that `_meta` stays widget-only.
 - `mutant-mcp/tests/schemas.test.ts` — per-tool output schemas, the object
-  `next_action`, and the `analysis_version` input.
-- `mutant-mcp/tests/tools.test.ts` — ten tools, version, and input schemas
-  (including `show_dna_import.mode`, the `modules` evidence kind, and
-  `include_context`).
+  `next_action`, the processing payload with no `next_action`/`suggested_prompts`,
+  and the `analysis_version` input.
+- `mutant-mcp/tests/tools.test.ts` — eleven tools, version, and input schemas
+  (including `show_dna_import.mode`, the `modules` evidence kind,
+  `include_context`), the `app`-only visibility of `poll_analysis_status`, and
+  that the `get_analysis_status` description carries the no-usable-analysis
+  prohibitions (including the forbidden future-capability example).
 - `mutant-mcp/tests/dna-import.test.ts` — status pass-through (no Lambda
-  routing shim), prompt injection, and `show_dna_import` mode.
+  routing shim), prompt injection, `poll_analysis_status` authorization, and that
+  the two target states omit `suggested_prompts` and (on the component path)
+  `next_action` while returning the exact short content.
 - `mutant-mcp/tests/dna-import-ui.test.tsx` — prompt chips and the refresh
-  banner driven by `experience_state`.
+  banner driven by `experience_state`, and that the card polls to a terminal
+  state (ready or failed) with no `next_action` or `suggested_prompts`.
 - `mutant-mcp/tests/mcp-server.test.ts` — `modules`/`include_context`
-  pass-through and that `structuredContent` is never duplicated into `content`.
+  pass-through, that `structuredContent` is never duplicated into `content`, and
+  the parameterized target-state assertions (property absence, exact text, false
+  capability flags, preserved success envelope, and the model-path/component-path
+  `next_action` split).

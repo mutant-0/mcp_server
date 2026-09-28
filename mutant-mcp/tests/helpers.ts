@@ -340,6 +340,7 @@ export function defaultBackendData(operation: BackendOperation): Record<string, 
         displayed_hypotheses: [{ id: "HYP_A", rank: 1, name: "Alpha finding" }],
       };
     case "get_analysis_status":
+    case "poll_analysis_status":
       return makeStatusData();
     case "get_analysis_context":
       return makeContextData();

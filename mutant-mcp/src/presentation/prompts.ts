@@ -126,13 +126,9 @@ function statusPrompts(data: JsonObject, analysisVersion: string | null): Prompt
     experience === "PROCESSING_INITIAL" ||
     experience === "REFRESH_PROCESSING_NO_USABLE_ANALYSIS"
   ) {
-    out.push({
-      id: "what-happens",
-      label: "What happens next?",
-      prompt: "What happens while my analysis is processing, and what will I be able to see?",
-      intent: "import_help",
-      action: action("import_help", analysisVersion),
-    });
+    // Component-owned: no suggested prompts. The card owns the processing
+    // experience and the model must not offer to describe what will become
+    // available.
     return out.slice(0, MAX_SUGGESTIONS);
   }
 

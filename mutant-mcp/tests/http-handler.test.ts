@@ -189,14 +189,14 @@ describe("HTTP handler (dev mode)", () => {
     expect(body.result.serverInfo.name).toBe("mutant-mcp");
   });
 
-  it("lists ten tools over HTTP with a valid dev token", async () => {
+  it("lists eleven tools over HTTP with a valid dev token", async () => {
     const response = await post(
       { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
       { Authorization: "Bearer dev-free", Accept: "application/json, text/event-stream" },
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as { result: { tools: Array<{ name: string }> } };
-    expect(body.result.tools).toHaveLength(10);
+    expect(body.result.tools).toHaveLength(11);
   });
 
   it("answers CORS preflight for an allowed origin", async () => {

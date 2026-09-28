@@ -30,9 +30,27 @@ export const getAnalysisStatusTool: MutantToolDefinition = {
     "tool result mounts the Apps SDK card with a refresh action. Let the card present the " +
     "update option instead of asking which finding to explore in prose. The current results " +
     "remain usable until the user selects refresh.\n\n" +
-    'The DNA import component polls this tool itself while experience_state is a processing ' +
-    "state, so do not tell the user to keep asking whether processing has finished and do not " +
-    "narrate the analysis status while that component is active.",
+    'When experience_state is "PROCESSING_INITIAL" or ' +
+    '"REFRESH_PROCESSING_NO_USABLE_ANALYSIS":\n' +
+    "- Do not call analysis, overview, hypothesis, evidence, or genetic-context tools while no " +
+    "usable analysis exists.\n" +
+    "- Do not describe, preview, or speculate about future unavailable capabilities, even when " +
+    "asked what will become available. Do not infer future availability from the existence of " +
+    "other MCP tools or from entitlement metadata.\n" +
+    "- Do not enumerate future genes, modules, rsIDs, variants, hypotheses, scores, or patterns.\n" +
+    '- Never promise a future capability. "Once processing completes, I can show your DNA at ' +
+    'the marker level" is a forbidden response.\n' +
+    "- When a Mutant component is rendering this state, let it own the experience; do not add " +
+    "unsolicited processing narration.\n" +
+    "- If the user explicitly asks what is happening or what comes next, answer briefly using " +
+    "only the current status payload, without predicting capabilities or completion time.\n" +
+    "- When the component owns polling, do not initiate assistant polling loops or tell the " +
+    "user to keep asking for updates.\n" +
+    "- Silence is preferred over describing unavailable Mutant capabilities.\n\n" +
+    "The DNA import component polls its own app-only poll_analysis_status tool while " +
+    "experience_state is a processing state, so do not tell the user to keep asking whether " +
+    "processing has finished, do not re-call this tool to poll, and do not narrate the " +
+    "analysis status while that component is active.",
   scope: "analysis.read",
   inputSchema: getAnalysisStatusInputSchema,
   outputSchema: analysisStatusOutputSchema,

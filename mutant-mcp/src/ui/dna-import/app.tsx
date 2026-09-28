@@ -3,7 +3,7 @@
  *
  * Renders the DNA upload experience inside ChatGPT and owns the entire
  * asynchronous lifecycle: file selection, the local parse, report creation, then
- * polling `get_analysis_status` until the analysis is ready or fails. The user
+ * polling `poll_analysis_status` until the analysis is ready or fails. The user
  * never has to ask ChatGPT again just to find out whether processing finished.
  *
  * The raw file is read here, in the sandboxed app iframe, and never leaves it:
@@ -11,7 +11,11 @@
  * the Mutant MCP server only through the host bridge (`app.callServerTool`):
  *
  *   get_snp_catalog -> parse the raw file locally -> create_report
- *   get_analysis_status -> poll while processing -> list_health_hypotheses
+ *   poll_analysis_status -> poll while processing -> list_health_hypotheses
+ *
+ * `poll_analysis_status` is the app-only, component-owned status channel: the
+ * host never exposes it to the model, so the model cannot start its own polling
+ * loop or duplicate the narration the card already owns.
  *
  * so the only things that cross the boundary are the normalized subset of
  * Mutant-relevant variants and ordinary analysis reads.
@@ -113,7 +117,7 @@ type DnaStatus = "missing" | "available" | "unknown";
  */
 type ImportMode = "initial" | "regenerate" | "overview";
 
-/** What `get_analysis_status` told us about the account. */
+/** What `poll_analysis_status` told us about the account. */
 interface StatusInfo {
   dnaStatus: DnaStatus;
   analysisStatus: LifecycleStatus | "unknown";
@@ -413,7 +417,7 @@ function normalizeStatus(value: unknown): LifecycleStatus | null {
 }
 
 /**
- * Read the routing and plan fields out of a `get_analysis_status` envelope.
+ * Read the routing and plan fields out of a `poll_analysis_status` envelope.
  *
  * The 3.0.0 backend reports the canonical `experience_state` plus
  * `active_analysis` / `pending_analysis` / `capabilities`; the component keeps
@@ -955,7 +959,7 @@ export function DnaImportApp({
   const findingsRef = useRef<FindingsState>({ status: "idle" });
   /**
    * The analysis revision this card is displaying. Set from a bound overview
-   * snapshot or from `get_analysis_status`, then sent on follow-up analysis
+   * snapshot or from `poll_analysis_status`, then sent on follow-up analysis
    * calls so the backend answers the same revision the user is looking at.
    */
   const displayedVersionRef = useRef<string | null>(null);
@@ -1010,7 +1014,7 @@ export function DnaImportApp({
    */
   const loadStatus = useCallback(async (client: App) => {
     try {
-      const result = await client.callServerTool({ name: "get_analysis_status", arguments: {} });
+      const result = await client.callServerTool({ name: "poll_analysis_status", arguments: {} });
       const envelope = envelopeOf(result);
       if (result.isError || !envelope || !envelope.ok) {
         const code = envelope?.error?.code;
@@ -1296,7 +1300,7 @@ export function DnaImportApp({
     [parsed, maxPollingMs, reportToModel, setFindingsState],
   );
 
-  // Poll `get_analysis_status` until the analysis is terminal, the ceiling is
+  // Poll `poll_analysis_status` until the analysis is terminal, the ceiling is
   // reached, the grant cannot read status, or the component unmounts. The loop
   // is self-scheduling (`setTimeout` per tick) so the interval is measured from
   // each response rather than from the moment polling started.
@@ -1327,7 +1331,7 @@ export function DnaImportApp({
 
         let result;
         try {
-          result = await app.callServerTool({ name: "get_analysis_status", arguments: {} });
+          result = await app.callServerTool({ name: "poll_analysis_status", arguments: {} });
         } catch (err) {
           logBridgeError(err);
           failures += 1;

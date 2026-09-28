@@ -40,6 +40,25 @@ describe("per-tool output schemas (contract 3.0.0)", () => {
     );
   });
 
+  it("accepts a processing envelope with no next_action or suggested_prompts", () => {
+    for (const state of ["PROCESSING_INITIAL", "REFRESH_PROCESSING_NO_USABLE_ANALYSIS"]) {
+      const data = makeStatusData({
+        experience_state: state,
+        active_analysis: { status: "none", usable: false },
+        pending_analysis: { status: "processing", reason: "initial_analysis" },
+        capabilities: {
+          can_query_analysis: false,
+          can_show_overview: false,
+          can_refresh_analysis: false,
+          can_search_hypotheses: false,
+          can_explore_genetic_context: false,
+        },
+      });
+      const parsed = analysisStatusOutputSchema.safeParse(makeSuccessResponse(data));
+      expect(parsed.success, state).toBe(true);
+    }
+  });
+
   it("accepts a structured error envelope with an object next_action", () => {
     expect(
       analysisStatusOutputSchema.safeParse(

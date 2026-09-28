@@ -31,11 +31,11 @@ async function connectServer(
 }
 
 describe("MCP server integration", () => {
-  it("lists the ten contract tools with schemas", async () => {
+  it("lists the eleven contract tools with schemas", async () => {
     const { client } = await connectServer();
     const result = await client.listTools();
     expect(result.tools.map((tool) => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
-    expect(result.tools).toHaveLength(10);
+    expect(result.tools).toHaveLength(11);
     for (const tool of result.tools) {
       expect(tool.inputSchema).toBeDefined();
       expect(tool.outputSchema).toBeDefined();
@@ -229,5 +229,82 @@ describe("MCP server integration", () => {
       .join("\n");
     expect(content).not.toContain(structured);
     expect(content).not.toMatch(/^\s*[{[]/);
+  });
+});
+
+/** The two states where no usable analysis exists yet. */
+const PROCESSING_STATES = [
+  { state: "PROCESSING_INITIAL", text: "Analysis is processing." },
+  { state: "REFRESH_PROCESSING_NO_USABLE_ANALYSIS", text: "Analysis refresh is processing." },
+] as const;
+
+function processingStatusData(state: string): Record<string, unknown> {
+  return makeStatusData({
+    experience_state: state,
+    active_analysis: { status: "none", usable: false },
+    pending_analysis: {
+      status: "processing",
+      reason: state === "PROCESSING_INITIAL" ? "initial_analysis" : "platform_refresh",
+    },
+    capabilities: {
+      can_query_analysis: false,
+      can_show_overview: false,
+      can_refresh_analysis: false,
+      can_search_hypotheses: false,
+      can_explore_genetic_context: false,
+    },
+    next_action: {
+      tool: "get_analysis_status",
+      reason: "The analysis is still processing; call again shortly for an update.",
+    },
+  });
+}
+
+describe("processing-state UX (component-owned)", () => {
+  for (const { state, text } of PROCESSING_STATES) {
+    it(`omits prompts, shortens content, and keeps flags false for ${state}`, async () => {
+      const { client } = await connectServer(() => makeSuccessResponse(processingStatusData(state)));
+      for (const tool of ["get_analysis_status", "poll_analysis_status"]) {
+        const result = await client.callTool({ name: tool, arguments: {} });
+        expect(result.isError).toBe(false);
+        const structured = result.structuredContent as ToolResponse;
+        expect(structured.ok).toBe(true);
+        expect(structured.error).toBeNull();
+        const data = structured.data as Record<string, unknown>;
+        // Property absence, not null/empty.
+        expect("suggested_prompts" in data).toBe(false);
+        expect(data.capabilities).toEqual({
+          can_query_analysis: false,
+          can_show_overview: false,
+          can_refresh_analysis: false,
+          can_search_hypotheses: false,
+          can_explore_genetic_context: false,
+        });
+        const content = (result.content as Array<{ text: string }>)[0]?.text;
+        expect(content).toBe(text);
+      }
+    });
+
+    it(`keeps the polling next_action only on the model path (${state})`, async () => {
+      const { client } = await connectServer(() => makeSuccessResponse(processingStatusData(state)));
+      const model = (await client.callTool({ name: "get_analysis_status", arguments: {} }))
+        .structuredContent as ToolResponse;
+      expect((model.data as Record<string, unknown>).next_action).toEqual({
+        tool: "get_analysis_status",
+        reason: "The analysis is still processing; call again shortly for an update.",
+      });
+      const component = (await client.callTool({ name: "poll_analysis_status", arguments: {} }))
+        .structuredContent as ToolResponse;
+      expect("next_action" in (component.data as Record<string, unknown>)).toBe(false);
+    });
+  }
+
+  it("hides poll_analysis_status from the model", async () => {
+    const { client } = await connectServer();
+    const result = await client.listTools();
+    const tool = result.tools.find((entry) => entry.name === "poll_analysis_status");
+    const visibility = (tool?._meta as { ui?: { visibility?: string[] } } | undefined)?.ui
+      ?.visibility;
+    expect(visibility).toEqual(["app"]);
   });
 });

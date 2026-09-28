@@ -26,6 +26,7 @@ import {
 const DNA_TOOLS = ["show_dna_import", "get_snp_catalog", "create_report"] as const;
 const ANALYSIS_TOOLS = [
   "get_analysis_status",
+  "poll_analysis_status",
   "get_analysis_context",
   "list_health_hypotheses",
   "explain_health_hypothesis",
@@ -118,6 +119,7 @@ describe("DNA import authorization", () => {
     // Valid arguments so the denial is the reason for failure, not schema validation.
     const args: Record<string, unknown> = {
       get_analysis_status: {},
+      poll_analysis_status: {},
       get_analysis_context: {},
       list_health_hypotheses: {},
       explain_health_hypothesis: { hypothesis_id: "HYP_TEST" },
@@ -492,6 +494,43 @@ describe("get_analysis_status", () => {
     const prompts = data.suggested_prompts as Array<{ id: string; prompt: string }>;
     expect(prompts.length).toBeGreaterThan(0);
     expect(prompts.some((prompt) => prompt.id === "top-findings")).toBe(true);
+  });
+
+  it.each([
+    ["PROCESSING_INITIAL", "Analysis is processing."],
+    ["REFRESH_PROCESSING_NO_USABLE_ANALYSIS", "Analysis refresh is processing."],
+  ])("omits prompts and shortens content for %s", async (experience, text) => {
+    const data = makeStatusData({
+      experience_state: experience,
+      active_analysis: { status: "none", usable: false },
+      pending_analysis: { status: "processing", reason: "initial_analysis" },
+      capabilities: {
+        can_query_analysis: false,
+        can_show_overview: false,
+        can_refresh_analysis: false,
+        can_search_hypotheses: false,
+        can_explore_genetic_context: false,
+      },
+      next_action: {
+        tool: "get_analysis_status",
+        reason: "The analysis is still processing; call again shortly for an update.",
+      },
+    });
+    const { client } = await connect({ responder: () => ok({ data }) });
+
+    // Model-facing path: no suggested prompts, exact short content, next action kept.
+    const model = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    const modelData = structured(model).data as Record<string, unknown>;
+    expect("suggested_prompts" in modelData).toBe(false);
+    expect((model.content as Array<{ text: string }>)[0]?.text).toBe(text);
+    expect(modelData.next_action).toBeDefined();
+
+    // Component-owned path: no prompts and no polling next_action.
+    const component = await client.callTool({ name: "poll_analysis_status", arguments: {} });
+    const componentData = structured(component).data as Record<string, unknown>;
+    expect("suggested_prompts" in componentData).toBe(false);
+    expect("next_action" in componentData).toBe(false);
+    expect((component.content as Array<{ text: string }>)[0]?.text).toBe(text);
   });
 
   it("suggests a refresh only when experience_state says one is available", async () => {

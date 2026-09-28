@@ -22,10 +22,17 @@
 export const CONTRACT_VERSION = "3.0.0";
 
 /**
- * Model-facing analysis tools. These require `analysis.read`.
+ * Analysis tools. These require `analysis.read`.
+ *
+ * `poll_analysis_status` is the app-only counterpart of `get_analysis_status`:
+ * it is hidden from the model (`uiVisibility: ["app"]`) and is called only by the
+ * DNA import component while it owns the processing experience. Its presence is
+ * what lets the server distinguish a component-owned status read from a
+ * model-facing one.
  */
 export const ANALYSIS_TOOL_NAMES = [
   "get_analysis_status",
+  "poll_analysis_status",
   "show_analysis_overview",
   "get_analysis_context",
   "list_health_hypotheses",

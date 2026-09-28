@@ -7,6 +7,7 @@
  * decision-relevant facts, within the contract's per-tool budgets.
  */
 import type { ToolName, ToolResponse } from "../contract.js";
+import { processingStatusText } from "./processing.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -67,19 +68,24 @@ function errorContent(response: ToolResponse): string {
 /** Plain-language sentence for the canonical experience state. */
 const EXPERIENCE_SENTENCES: Record<string, string> = {
   NO_DNA: "No DNA data has been imported for this account yet.",
-  PROCESSING_INITIAL: "Your DNA analysis is still being generated.",
   READY: "Your current DNA analysis is ready.",
   READY_REFRESH_AVAILABLE:
     "Your current DNA analysis is ready, and a newer platform version is available; refreshing is optional and your current results remain usable.",
   READY_REFRESH_PROCESSING:
     "Your current DNA analysis is ready while a refreshed analysis is being generated.",
-  REFRESH_PROCESSING_NO_USABLE_ANALYSIS:
-    "A refreshed analysis is being generated and no earlier result can answer right now.",
   PROCESSING_FAILED: "The analysis could not be served and must be regenerated.",
 };
 
 function statusContent(data: JsonObject): string {
   const experience = asText(data.experience_state) ?? "";
+
+  // The two no-usable-analysis processing states are component-owned: the model
+  // gets one non-instructional sentence, never a next-action hint. Describing
+  // future capabilities or asking the user to keep checking would duplicate what
+  // the card already does.
+  const processingText = processingStatusText(experience);
+  if (processingText) return processingText;
+
   const parts: string[] = [];
   parts.push(
     EXPERIENCE_SENTENCES[experience] ??
@@ -395,6 +401,7 @@ export function buildContent(operation: ToolName | undefined, response: ToolResp
   if (!data) return "No data returned.";
   switch (operation) {
     case "get_analysis_status":
+    case "poll_analysis_status":
       return statusContent(data);
     case "get_analysis_context":
       return contextContent(data);

@@ -162,7 +162,7 @@ npx @modelcontextprotocol/inspector
 ```
 
 Connect to `http://localhost:8080/mcp` with `Bearer dev-paid` (or `dev-free`).
-All ten tools must be discoverable. Call `get_analysis_status`, then
+All eleven tools must be discoverable. Call `get_analysis_status`, then
 `show_analysis_overview` to verify the ready card and hints, and
 `get_analysis_context` followed by `explain_health_hypothesis` for a returned id.
 
@@ -209,10 +209,10 @@ live in process memory, so restarting the dev server clears them.
 - The component parses the file locally: no request carries raw file bytes, and
   `create_report` receives only catalog-matched variants.
 - **Polling completes without another prompt.** After the file is submitted the
-  card polls `get_analysis_status` (about every 7 seconds) and turns into the
+  card polls `poll_analysis_status` (about every 7 seconds) and turns into the
   completion view on its own when `experience_state` leaves the processing states
   (`PROCESSING_INITIAL` / `REFRESH_PROCESSING_NO_USABLE_ANALYSIS` →
-  `READY*`). Watch the connector traffic: repeated `get_analysis_status` calls
+  `READY*`). Watch the connector traffic: repeated `poll_analysis_status` calls
   with `{}` are the component, not the model. If the card stalls, check whether
   the last read returned a `READY*` or `PROCESSING_FAILED` state, or whether
   polling was capped at 10 minutes, which surfaces as the "still working"

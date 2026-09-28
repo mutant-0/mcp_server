@@ -7,7 +7,7 @@
  * `ui/initialize`, records every `tools/call`, `ui/message`, and
  * `ui/update-model-context`, and can push a tool result the way a host does.
  *
- * The component now owns the whole lifecycle - it reads `get_analysis_status` on
+ * The component now owns the whole lifecycle - it reads `poll_analysis_status` on
  * mount, polls it after `create_report`, and paints the completion card - so the
  * fake host answers the analysis reads too, and every test renders with a short
  * poll interval so polling settles inside the test rather than after 7 seconds.
@@ -124,7 +124,7 @@ function pendingProcessing(startedAt: string): Record<string, unknown> {
   };
 }
 
-/** Build a 3.0.0 `get_analysis_status` payload for one experience state. */
+/** Build a 3.0.0 `poll_analysis_status` payload for one experience state. */
 function statusResponse(
   status: "not_started" | "processing" | "ready" | "failed",
   overrides: Record<string, unknown> = {},
@@ -223,7 +223,7 @@ type Responders = Record<
 /** The parts of the lifecycle a test does not care about. */
 function defaultRespond(name: string): ToolResponse {
   if (name === "get_snp_catalog") return CATALOG;
-  if (name === "get_analysis_status") return STATUS_MISSING;
+  if (name === "poll_analysis_status") return STATUS_MISSING;
   if (name === "list_health_hypotheses") return FINDINGS;
   if (name === "create_report") {
     return makeSuccessResponse({ analysis_id: "analysis_1", status: "processing" });
@@ -419,8 +419,8 @@ describe("DNA import component", () => {
   it("checks the account status on mount and loads the catalog", async () => {
     const bridge = await renderApp();
 
-    expect(bridge.callsTo("get_analysis_status")).toHaveLength(1);
-    expect(bridge.callsTo("get_analysis_status")[0]?.arguments).toEqual({});
+    expect(bridge.callsTo("poll_analysis_status")).toHaveLength(1);
+    expect(bridge.callsTo("poll_analysis_status")[0]?.arguments).toEqual({});
     expect(bridge.callsTo("get_snp_catalog")).toHaveLength(1);
     expect(bridge.callsTo("get_snp_catalog")[0]?.arguments).toEqual({});
     // Nothing is created just by opening the panel.
@@ -464,7 +464,7 @@ describe("DNA import component", () => {
 
   it("reports an unlinked account without offering the dropzone", async () => {
     renderWith({
-      get_analysis_status: makeErrorResponse("ACCOUNT_NOT_AVAILABLE", "no account"),
+      poll_analysis_status: makeErrorResponse("ACCOUNT_NOT_AVAILABLE", "no account"),
     });
 
     await screen.findByText(/Connect your Mutant account first/i);
@@ -473,7 +473,7 @@ describe("DNA import component", () => {
 
   it("says when DNA data is already on file without blocking a re-import", async () => {
     renderWith({
-      get_analysis_status: statusResponse("not_started"),
+      poll_analysis_status: statusResponse("not_started"),
     });
 
     await screen.findByText(/DNA data is already on file/i);
@@ -482,7 +482,7 @@ describe("DNA import component", () => {
 
   it("ignores the removed 2.x status fields", async () => {
     renderWith({
-      get_analysis_status: makeSuccessResponse({
+      poll_analysis_status: makeSuccessResponse({
         ...(STATUS_MISSING.data as Record<string, unknown>),
         analysis_status: "unavailable",
         regenerate: true,
@@ -533,7 +533,7 @@ describe("DNA import component", () => {
   });
 
   it("shows a truthful processing card without internal identifiers", async () => {
-    renderWith({ get_analysis_status: statusResponse("processing") });
+    renderWith({ poll_analysis_status: statusResponse("processing") });
 
     await screen.findByText(PROCESSING_HEADING);
 
@@ -556,7 +556,7 @@ describe("DNA import component", () => {
   it("resumes an in-flight analysis on mount and polls it to ready", async () => {
     let ready = false;
     const bridge = renderWith({
-      get_analysis_status: () => statusResponse(ready ? "ready" : "processing"),
+      poll_analysis_status: () => statusResponse(ready ? "ready" : "processing"),
     });
 
     await screen.findByText(PROCESSING_HEADING);
@@ -566,12 +566,12 @@ describe("DNA import component", () => {
     ready = true;
     await screen.findByText(/Analysis ready/i);
 
-    expect(bridge.callsTo("get_analysis_status").length).toBeGreaterThan(1);
+    expect(bridge.callsTo("poll_analysis_status").length).toBeGreaterThan(1);
     expect(bridge.callsTo("create_report")).toHaveLength(0);
   });
 
   it("opens directly on the ready card when the analysis is already complete", async () => {
-    renderWith({ get_analysis_status: statusResponse("ready") });
+    renderWith({ poll_analysis_status: statusResponse("ready") });
 
     await screen.findByText(/Analysis ready/i);
     expect(screen.getByText(/Your DNA analysis is complete/i)).toBeDefined();
@@ -585,7 +585,7 @@ describe("DNA import component", () => {
     const bridge = await renderToProcessing({
       // The mount check opens on the picker; every later read reports the
       // analysis this component just created.
-      get_analysis_status: (_args, call) => (call === 1 ? STATUS_MISSING : statusResponse(status)),
+      poll_analysis_status: (_args, call) => (call === 1 ? STATUS_MISSING : statusResponse(status)),
     });
 
     expect(bridge.callsTo("create_report")).toHaveLength(1);
@@ -600,9 +600,45 @@ describe("DNA import component", () => {
     expect(JSON.stringify(bridge.modelContextUpdates[1])).toMatch(/ready/i);
   });
 
+  it("polls to a terminal state with no next_action or suggested_prompts", async () => {
+    // The component's status reads never carry prompts or a polling hint, so
+    // assert the fixtures are honest before relying on them.
+    for (const status of ["processing", "ready", "failed"] as const) {
+      const payload = statusResponse(status).data as Record<string, unknown>;
+      expect("suggested_prompts" in payload, status).toBe(false);
+      expect("next_action" in payload, status).toBe(false);
+    }
+
+    let status: "processing" | "ready" = "processing";
+    const bridge = await renderToProcessing({
+      poll_analysis_status: (_args, call) => (call === 1 ? STATUS_MISSING : statusResponse(status)),
+    });
+
+    status = "ready";
+    await screen.findByText(/Analysis ready/i);
+    const afterReady = bridge.callsTo("poll_analysis_status").length;
+    // Polling stops on completion: no further reads arrive.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(bridge.callsTo("poll_analysis_status").length).toBe(afterReady);
+
+    cleanup();
+    activeBridge?.stop();
+    activeBridge = null;
+
+    const failed = await renderToProcessing({
+      poll_analysis_status: (_args, call) =>
+        call === 1 ? STATUS_MISSING : statusResponse("failed"),
+    });
+    await screen.findByText(/We couldn't complete your analysis/i);
+    const afterFailed = failed.callsTo("poll_analysis_status").length;
+    // Polling stops on failure too.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(failed.callsTo("poll_analysis_status").length).toBe(afterFailed);
+  });
+
   it("advances the elapsed timer once per second", async () => {
     renderWith({
-      get_analysis_status: statusResponse("processing", {
+      poll_analysis_status: statusResponse("processing", {
         pending_analysis: pendingProcessing(new Date(Date.now() - 30_000).toISOString()),
       }),
     });
@@ -613,7 +649,7 @@ describe("DNA import component", () => {
 
   it("changes the message when the analysis runs long", async () => {
     renderWith({
-      get_analysis_status: statusResponse("processing", {
+      poll_analysis_status: statusResponse("processing", {
         pending_analysis: pendingProcessing(new Date(Date.now() - 4 * 60_000).toISOString()),
       }),
     });
@@ -628,7 +664,7 @@ describe("DNA import component", () => {
     activeBridge = null;
 
     renderWith({
-      get_analysis_status: statusResponse("processing", {
+      poll_analysis_status: statusResponse("processing", {
         pending_analysis: pendingProcessing(new Date(Date.now() - 6 * 60_000).toISOString()),
       }),
     });
@@ -638,14 +674,14 @@ describe("DNA import component", () => {
   it("offers a recoverable state when the polling ceiling is reached", async () => {
     let ready = false;
     const bridge = renderWith(
-      { get_analysis_status: () => statusResponse(ready ? "ready" : "processing") },
+      { poll_analysis_status: () => statusResponse(ready ? "ready" : "processing") },
       // The interval is short and the ceiling is a small multiple of it, so both
       // the exhausted state and the resumed read land well inside the window.
       { pollIntervalMs: 5, maxPollingMs: 40 },
     );
 
     await screen.findByText(/stopped checking automatically/i);
-    const before = bridge.callsTo("get_analysis_status").length;
+    const before = bridge.callsTo("poll_analysis_status").length;
     // Exceeding the expected range is not an error.
     expect(screen.queryByText(/Something went wrong/i)).toBeNull();
 
@@ -653,12 +689,12 @@ describe("DNA import component", () => {
     fireEvent.click(screen.getByRole("button", { name: /check again/i }));
 
     await screen.findByText(/Analysis ready/i);
-    expect(bridge.callsTo("get_analysis_status").length).toBeGreaterThan(before);
+    expect(bridge.callsTo("poll_analysis_status").length).toBeGreaterThan(before);
   });
 
   it("reports a failed analysis and retries with a new idempotency key", async () => {
     const bridge = await renderToProcessing({
-      get_analysis_status: (_args, call) =>
+      poll_analysis_status: (_args, call) =>
         call === 1 ? STATUS_MISSING : statusResponse("failed"),
     });
 
@@ -677,7 +713,7 @@ describe("DNA import component", () => {
   });
 
   it("asks for a file again when a resumed session cannot retry in place", async () => {
-    const bridge = renderWith({ get_analysis_status: statusResponse("failed") });
+    const bridge = renderWith({ poll_analysis_status: statusResponse("failed") });
 
     await screen.findByText(/We couldn't complete your analysis/i);
     fireEvent.click(screen.getByRole("button", { name: /try again/i }));
@@ -687,7 +723,7 @@ describe("DNA import component", () => {
   });
 
   it("renders the top findings inline when the user asks for them", async () => {
-    const bridge = renderWith({ get_analysis_status: statusResponse("ready") });
+    const bridge = renderWith({ poll_analysis_status: statusResponse("ready") });
 
     await screen.findByText(/Analysis ready/i);
     fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
@@ -707,7 +743,7 @@ describe("DNA import component", () => {
   });
 
   it("hands a finding to ChatGPT only when the user asks", async () => {
-    const bridge = renderWith({ get_analysis_status: statusResponse("ready") });
+    const bridge = renderWith({ poll_analysis_status: statusResponse("ready") });
 
     await screen.findByText(/Analysis ready/i);
     fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
@@ -729,7 +765,7 @@ describe("DNA import component", () => {
 
   it("renders state-aware prompt chips and sends one on click", async () => {
     const bridge = renderWith({
-      get_analysis_status: statusResponse("ready"),
+      poll_analysis_status: statusResponse("ready"),
       get_analysis_context: makeSuccessResponse(
         makeContextData({
           suggested_prompts: [
@@ -763,7 +799,7 @@ describe("DNA import component", () => {
   it("opens the overview route with findings and hints already visible", async () => {
     const bridge = renderWith(
       {
-        get_analysis_status: statusResponse("ready"),
+        poll_analysis_status: statusResponse("ready"),
         get_analysis_context: makeSuccessResponse(
           makeContextData({
             suggested_prompts: [
@@ -788,7 +824,7 @@ describe("DNA import component", () => {
   });
 
   it("opens findings when the host delivers the overview tool result", async () => {
-    const bridge = renderWith({ get_analysis_status: statusResponse("ready") });
+    const bridge = renderWith({ poll_analysis_status: statusResponse("ready") });
 
     await screen.findByText(/Analysis ready/i);
     bridge.sendToolResult(makeSuccessResponse({ ui_rendered: true, mode: "overview" }));
@@ -800,7 +836,7 @@ describe("DNA import component", () => {
   it("surfaces an unmatched analysis error instead of the transient outage copy", async () => {
     renderWith(
       {
-        get_analysis_status: statusResponse("ready"),
+        poll_analysis_status: statusResponse("ready"),
         list_health_hypotheses: makeErrorResponse(
           "ANALYSIS_NOT_READY",
           "The saved analysis was produced by a different scoring engine and cannot be served. Regenerate the analysis to bring it up to date.",
@@ -816,7 +852,7 @@ describe("DNA import component", () => {
 
   it("offers record comparison and the Full upgrade only to Free accounts", async () => {
     const bridge = renderWith({
-      get_analysis_status: statusResponse("ready"),
+      poll_analysis_status: statusResponse("ready"),
       get_analysis_context: makeSuccessResponse(
         makeContextData({
           upgrade: { label: "Unlock Full Analysis", url: "https://mutantgenomics.com/cart" },
@@ -851,7 +887,7 @@ describe("DNA import component", () => {
 
   it("does not offer an upgrade to a Full account", async () => {
     const bridge = renderWith({
-      get_analysis_status: statusResponse("ready", {
+      poll_analysis_status: statusResponse("ready", {
         entitlement: { plan: "mutant_full", hypothesis_scope: "all" },
         capabilities: { ...READY_CAPABILITIES, can_search_hypotheses: true },
       }),
@@ -878,7 +914,7 @@ describe("DNA import component", () => {
 
   it("offers an optional refresh when a newer analysis is available", async () => {
     const bridge = renderWith({
-      get_analysis_status: refreshAvailable(),
+      poll_analysis_status: refreshAvailable(),
     });
 
     await screen.findByText(/Analysis ready/i);
@@ -892,7 +928,7 @@ describe("DNA import component", () => {
   it("loads hints when a refresh status result mounts the card", async () => {
     const status = refreshAvailable();
     const bridge = renderWith({
-      get_analysis_status: status,
+      poll_analysis_status: status,
       get_analysis_context: makeSuccessResponse(
         makeContextData({
           suggested_prompts: [
@@ -918,7 +954,7 @@ describe("DNA import component", () => {
   it("opens the resubmission flow when the host selected a refresh", async () => {
     await renderApp(
       {
-        get_analysis_status: refreshAvailable(),
+        poll_analysis_status: refreshAvailable(),
       },
       { mode: "regenerate" },
     );
@@ -934,7 +970,7 @@ describe("DNA import component", () => {
 
   it("moves off the ready card when a regenerate result arrives after mount", async () => {
     const bridge = renderWith({
-      get_analysis_status: refreshAvailable(),
+      poll_analysis_status: refreshAvailable(),
     });
 
     await screen.findByText(/Analysis ready/i);
@@ -950,7 +986,7 @@ describe("DNA import component", () => {
   });
 
   it("sends exactly one host follow-up per action and never renders the prompt", async () => {
-    const bridge = renderWith({ get_analysis_status: statusResponse("ready") });
+    const bridge = renderWith({ poll_analysis_status: statusResponse("ready") });
 
     await screen.findByText(/Analysis ready/i);
     fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
@@ -989,7 +1025,7 @@ describe("DNA import component", () => {
       writable: true,
     });
     try {
-      const bridge = renderWith({ get_analysis_status: statusResponse("ready") });
+      const bridge = renderWith({ poll_analysis_status: statusResponse("ready") });
 
       await screen.findByText(/Analysis ready/i);
       fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
@@ -1012,7 +1048,7 @@ describe("DNA import component", () => {
 
   it("shows a user-visible error when the host rejects the follow-up", async () => {
     const bridge = renderWith(
-      { get_analysis_status: statusResponse("ready") },
+      { poll_analysis_status: statusResponse("ready") },
       {},
       { messageResult: { isError: true } },
     );
@@ -1037,7 +1073,7 @@ describe("DNA import component", () => {
   });
 
   it("exposes a low-emphasis replace action once the analysis is ready", async () => {
-    const bridge = renderWith({ get_analysis_status: statusResponse("ready") });
+    const bridge = renderWith({ poll_analysis_status: statusResponse("ready") });
 
     await screen.findByText(/Analysis ready/i);
     // No re-import control while processing; a quiet one when ready.
@@ -1051,7 +1087,7 @@ describe("DNA import component", () => {
 
   it("keeps the card alive but stops polling without the read scope", async () => {
     const bridge = renderWith({
-      get_analysis_status: makeErrorResponse("INSUFFICIENT_SCOPE", "scope missing", {
+      poll_analysis_status: makeErrorResponse("INSUFFICIENT_SCOPE", "scope missing", {
         app_code: "insufficient_scope",
         required_scope: "https://mcp.mutantgenomics.com/mcp/analysis.read",
       }),
@@ -1065,7 +1101,7 @@ describe("DNA import component", () => {
     await screen.findByText(PROCESSING_HEADING);
     expect(screen.getByText(/Ask ChatGPT when your analysis is ready/i)).toBeDefined();
     // The mount check plus nothing else: polling never started.
-    expect(bridge.callsTo("get_analysis_status")).toHaveLength(1);
+    expect(bridge.callsTo("poll_analysis_status")).toHaveLength(1);
   });
 
   it("reuses one idempotency key when the same attempt is retried", async () => {

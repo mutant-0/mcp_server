@@ -4,7 +4,7 @@ A deployable, stateless [Model Context Protocol](https://modelcontextprotocol.io
 server for Mutant Genomics. It runs as an AWS Lambda behind API Gateway at a
 custom domain (e.g. `https://dev-api.mutantbiotech.com/mcp`), authenticates users
 with Mutant's Cognito OAuth (authorization code + PKCE S256), and exposes the
-**ten-tool MCP surface using contract 3.0.0** backed by the existing `report-generator` Lambda,
+**eleven-tool MCP surface using contract 3.0.0** backed by the existing `report-generator` Lambda,
 plus a [ChatGPT Apps SDK](https://developers.openai.com/apps-sdk) component for
 DNA import.
 
@@ -23,14 +23,16 @@ Mutant catalog ever leave the browser, are submitted through `create_report`, an
 are persisted by the backend. The raw file is never uploaded.
 
 The component owns the entire asynchronous lifecycle. It reads
-`get_analysis_status` on mount (so a rerender or a reopened panel resumes an
-in-flight analysis instead of starting a new one), polls that tool itself after
-`create_report` until the analysis is `ready` or `failed`, shows an elapsed timer
-rather than a countdown or a simulated percentage, and transforms the same card
-in place into the completion view. The user never has to ask ChatGPT whether
-processing finished. `show_dna_import` returns only `{ ui_rendered: true, mode }`
-(plus widget-only `_meta.mutant.mode`), so there is no stale status for the model
-to narrate.
+`poll_analysis_status` on mount (so a rerender or a reopened panel resumes an
+in-flight analysis instead of starting a new one), polls that app-only tool itself
+after `create_report` until the analysis is `ready` or `failed`, shows an elapsed
+timer rather than a countdown or a simulated percentage, and transforms the same
+card in place into the completion view. The user never has to ask ChatGPT whether
+processing finished. Because `poll_analysis_status` is advertised with `app`
+visibility only, the model cannot see or call it, so it cannot start its own
+polling loop or duplicate the card's narration. `show_dna_import` returns only
+`{ ui_rendered: true, mode }` (plus widget-only `_meta.mutant.mode`), so there is
+no stale status for the model to narrate.
 
 `show_analysis_overview` opens the same component under `analysis.read` for a
 ready analysis, bound to one immutable snapshot: it calls the internal
@@ -61,7 +63,7 @@ API Gateway HTTP API  $default (catch-all)
    v
 Mutant MCP Lambda (Node HTTP server on :8080)
    |-- OAuth discovery + token validation (jose / OIDC JWKS)
-   |-- Ten MCP tools (schemas, envelope, deterministic content, per-tool scopes)
+   |-- Eleven MCP tools (schemas, envelope, deterministic content, per-tool scopes)
    |-- Apps SDK resource ui://mutant/dna-import/v1.html
    `-- Versioned internal contract 3.0.0 (direct InvokeCommand, IAM-scoped)
           |
@@ -96,7 +98,7 @@ mutant-mcp/
 │   │   ├── token-validator.ts     # JWT/JWKS + client/scope/resource checks
 │   │   ├── oauth-metadata.ts      # RFC 9728 PRM + AS metadata mirror
 │   │   └── user-context.ts        # MutantUserContext (userId + scopes)
-│   ├── tools/                     # ten tool definitions + registration
+│   ├── tools/                     # eleven tool definitions + registration
 │   │   └── scope-guard.ts         # per-tool scope enforcement
 │   ├── schemas/                   # Zod input schemas + per-tool typed output schemas
 │   ├── presentation/              # deterministic content builders + prompts
@@ -134,7 +136,8 @@ mutant-mcp/
 
 | Tool | Scope | Purpose |
 |---|---|---|
-| `get_analysis_status` | `analysis.read` | Routing gate: `dna_status`, the canonical `experience_state`, `active_analysis`/`pending_analysis`, entitlement/capabilities, and the single `next_action`. Polled by the DNA import component while an analysis is processing. |
+| `get_analysis_status` | `analysis.read` | Routing gate: `dna_status`, the canonical `experience_state`, `active_analysis`/`pending_analysis`, entitlement/capabilities, and the single `next_action`. Model-facing; in the two no-usable-analysis processing states it returns one short sentence and no suggested prompts. |
+| `poll_analysis_status` | `analysis.read` | App-only status channel (`app` visibility) used by the DNA import component while it owns the processing experience. Same payload as `get_analysis_status`, without the polling `next_action` or suggested prompts. |
 | `show_analysis_overview` | `analysis.read` | Resolves one immutable analysis snapshot (`resolve_analysis_snapshot`) and renders the ready-analysis card bound to that revision. No status echoed. |
 | `get_analysis_context` | `analysis.read` | The versioned interpretation contract, coverage, access scope, a compact hypothesis preview, and suggested prompts for specific questions. |
 | `list_health_hypotheses` | `analysis.read` | List/search hypotheses (`items` + `next_cursor`; Free: fixed top three, Full: whole set). |
@@ -216,7 +219,7 @@ npx @modelcontextprotocol/inspector
 ```
 
 Connect to `http://localhost:8080/mcp` with `Bearer dev-paid` or `Bearer dev-free`.
-All ten tools are discoverable. The `dev-*` tokens carry different scopes so the
+All eleven tools are discoverable. The `dev-*` tokens carry different scopes so the
 per-tool authorization boundary can be exercised locally:
 
 | Token | Scopes granted |
