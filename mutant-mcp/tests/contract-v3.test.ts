@@ -198,7 +198,7 @@ function dataFor(operation: BackendOperation): Record<string, unknown> {
           scores: {
             priority: 90,
             genetic_support: 72,
-            genetic_confidence: 0.9,
+            genetic_confidence: { score: 90, level: "high" },
             coverage: "high",
             convergence: "strong",
           },

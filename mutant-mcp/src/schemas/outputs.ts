@@ -175,7 +175,13 @@ export const hypothesisSummarySchema = z.looseObject({
     .describe(
       "Strength of genetic support within the analyzed evidence. Null means no value was calculated; zero is a calculated value that did not qualify.",
     ),
-  genetic_confidence: z.string().nullable().optional(),
+  genetic_confidence: z
+    .looseObject({
+      score: z.number().nullable(),
+      level: z.string().nullable(),
+    })
+    .nullable()
+    .optional(),
   genetic_evidence: z
     .string()
     .nullable()
@@ -251,7 +257,13 @@ export const explainHypothesisDataSchema = z.looseObject({
     scores: z.looseObject({
       priority: z.number().nullable(),
       genetic_support: z.number().nullable(),
-      genetic_confidence: z.number().nullable().optional(),
+      genetic_confidence: z
+        .looseObject({
+          score: z.number().nullable(),
+          level: z.string().nullable(),
+        })
+        .nullable()
+        .optional(),
       coverage: z.string().nullable(),
       convergence: z.string().nullable(),
     }),
