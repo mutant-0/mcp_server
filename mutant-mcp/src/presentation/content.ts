@@ -169,134 +169,64 @@ function listContent(data: JsonObject): string {
   return parts.join("\n");
 }
 
+/**
+ * Concise, decision-relevant explanation (~150-220 words) in three sections:
+ * What it means, Why it appeared, What could clarify it. Everything else the
+ * explanation could say (module list, retained patterns, key genes, converging
+ * patterns, stronger/weakening prose, the guardrail list, exact scores) stays in
+ * `structuredContent` and is reachable through `get_supporting_evidence`.
+ */
 function detailsContent(data: JsonObject): string {
   const hypothesis = asRecord(data.hypothesis);
   const explanation = asRecord(data.explanation);
   const confirmation = asRecord(data.confirmation);
-  const parts: string[] = [];
-
-  // 1. Bottom line.
-  const bottomLine = asText(data.bottom_line) ?? (explanation ? asText(explanation.bottom_line) : null);
-  if (bottomLine) parts.push(bottomLine);
-
-  // 2. Support architecture (module-first). The legacy fallback summary is
-  // included verbatim rather than fabricating a breadth claim.
   const architecture = asRecord(data.support_architecture);
-  const architectureSummary = architecture
-    ? asText(architecture.summary)
-    : null;
-  if (architectureSummary) {
-    parts.push(`Evidence architecture: ${architectureSummary}`);
-  }
+  const interpretation = asRecord(data.score_interpretation);
+  const sections: string[] = [];
 
-  // 3. Top module contributions (already capped at three by the backend).
-  const modules = asList(data.modules)
-    .map((entry) => asRecord(entry))
-    .filter((entry): entry is JsonObject => entry !== null);
-  const moduleSummaries = modules
-    .map((module) => asText(module.summary))
-    .filter((summary): summary is string => summary !== null)
-    .slice(0, 3);
-  if (moduleSummaries.length > 0) {
-    parts.push(`Module contributions: ${moduleSummaries.join(" ")}`);
-  }
+  // What it means: the headline, grounded in the canonical bottom line.
+  const name = hypothesis ? asText(hypothesis.name) : null;
+  const bottomLine =
+    asText(data.bottom_line) ?? (explanation ? asText(explanation.bottom_line) : null);
+  const meaning = [name ? `${name}.` : null, bottomLine ? clampText(bottomLine, 240) : null]
+    .filter((part): part is string => part !== null)
+    .join(" ");
+  if (meaning) sections.push(`What it means: ${meaning}`);
 
-  // 4. Retained pattern contributions.
-  const patterns = asList(data.patterns)
-    .map((entry) => asRecord(entry))
-    .filter((entry): entry is JsonObject => entry !== null);
-  if (patterns.length > 0) {
-    const patternLines = patterns
-      .map((pattern) => {
-        const name = asText(pattern.pattern_name) ?? asText(pattern.pattern_id);
-        if (!name) return null;
-        const state = asText(pattern.state);
-        return state ? `${name} (${state})` : name;
-      })
-      .filter((line): line is string => line !== null)
-      .slice(0, 3);
-    if (patternLines.length > 0) {
-      parts.push(`Retained patterns: ${joinNatural(patternLines)}.`);
-    }
-  } else {
-    // Legacy analyses only expose the pattern names nested in the explanation.
-    const legacyNames = asList(explanation?.top_contributing_patterns)
-      .map((entry) => asRecord(entry))
-      .filter((entry): entry is JsonObject => entry !== null)
-      .map((pattern) => asText(pattern.name))
-      .filter((name): name is string => name !== null)
-      .slice(0, 2);
-    if (legacyNames.length > 0) {
-      parts.push(`The strongest contributing patterns were ${joinNatural(legacyNames)}.`);
-    }
-  }
+  // Why it appeared: architecture first, then the ranking rationale. Both are
+  // canonical backend projections, never re-derived here.
+  const whyParts: string[] = [];
+  const architectureSummary = architecture ? asText(architecture.summary) : null;
+  if (architectureSummary) whyParts.push(clampText(architectureSummary, 240));
+  const whyRanked = explanation ? asText(explanation.why_ranked) : null;
+  if (whyRanked) whyParts.push(clampText(whyRanked, 240));
+  if (whyParts.length > 0) sections.push(`Why it appeared: ${whyParts.join(" ")}`);
 
-  // 4b. Converging patterns are a separate, priority-only family. Reported
-  // separately and never described as adding to module or pattern support.
-  const converging = asList(data.converging_patterns)
-    .map((entry) => asRecord(entry))
-    .filter((entry): entry is JsonObject => entry !== null)
-    .map((entry) => asText(entry.pattern_id))
-    .filter((name): name is string => name !== null)
-    .slice(0, 3);
-  if (converging.length > 0) {
-    parts.push(`Converging patterns adjusted priority only: ${joinNatural(converging)}.`);
-  }
-
-  // 5. One or two key scoring genes/variants, only from contributing modules.
-  // Context-only and zero-weight markers never appear here.
-  const scoringGenes: string[] = [];
-  for (const module of modules) {
-    for (const gene of asList(module.top_scoring_genes)) {
-      const name = asText(gene);
-      if (name && !scoringGenes.includes(name)) scoringGenes.push(name);
-    }
-    if (scoringGenes.length >= 2) break;
-  }
-  if (scoringGenes.length > 0) {
-    parts.push(`The key scoring drivers were ${joinNatural(scoringGenes.slice(0, 2))}.`);
-  }
-  // Keep the dual-role boundary explicit whenever patterns participated.
-  if (patterns.length > 0) {
-    parts.push(
-      "Pattern participation is separate from module scoring: a variant can participate in a retained pattern without contributing module points.",
-    );
-  }
-
-  // 6. Interpretation boundary.
+  // What could clarify it: the interpretation boundary, any material data gap,
+  // and at most two primary checks. Uncertainty is never dropped for brevity.
+  const clarifyParts: string[] = [];
   const boundary = explanation ? asText(explanation.interpretation_boundary) : null;
-  if (boundary) parts.push(boundary);
-
-  // 7. Minimal confirmation.
+  if (boundary) clarifyParts.push(clampText(boundary, 240));
+  const dataGap = interpretation ? asText(interpretation.data_gap_effect) : null;
+  if (dataGap) clarifyParts.push(clampText(dataGap, 200));
   const checks = asList(confirmation?.primary_checks)
     .map((entry) => asRecord(entry))
     .filter((entry): entry is JsonObject => entry !== null)
     .map((check) => {
-      const name = asText(check.short_name) ?? asText(check.id);
+      const label = asText(check.short_name) ?? asText(check.id);
+      if (!label) return null;
       const role = asText(check.role);
-      if (!name) return null;
-      return role ? `${name} (${role})` : name;
+      return role ? `${label} (${role})` : label;
     })
     .filter((check): check is string => check !== null)
     .slice(0, 2);
-  if (checks.length > 0) {
-    parts.push(`The smallest useful confirmation plan is ${joinNatural(checks)}.`);
-  }
+  if (checks.length > 0) clarifyParts.push(`Useful checks: ${joinNatural(checks)}.`);
+  if (clarifyParts.length > 0) sections.push(`What could clarify it: ${clarifyParts.join(" ")}`);
 
-  // 8. Strengthening/weakening evidence and an action-changing guardrail.
-  const stronger = confirmation ? asText(confirmation.stronger_support) : null;
-  if (stronger) parts.push(stronger);
-  const weakening = confirmation ? asText(confirmation.weakening_evidence) : null;
-  if (weakening) parts.push(weakening);
-
-  const guardrail = asText(asList(data.guardrails)[0]);
-  if (guardrail) parts.push(guardrail);
-
-  if (parts.length === 0) {
-    const name = hypothesis ? asText(hypothesis.name) : null;
+  if (sections.length === 0) {
     return name ? `Finding: ${name}.` : "Finding details are not available.";
   }
-  return parts.join(" ");
+  return sections.join("\n\n");
 }
 
 function evidenceContent(data: JsonObject): string {

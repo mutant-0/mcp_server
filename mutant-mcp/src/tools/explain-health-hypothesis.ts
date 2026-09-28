@@ -10,17 +10,21 @@ export const explainHealthHypothesisTool: MutantToolDefinition = {
   description:
     "Explain one ranked Mutant finding. Use when the user asks what a finding means, why it " +
     "ranked, how strong it is, what supports it, what would strengthen or weaken it, or asks " +
-    'questions such as "What is the B12 one?" or "Explain my #1 finding." Returns an ' +
-    "explanation-ready summary: the plain-English bottom line, whether the genetic support is " +
-    "broad or concentrated, which biological modules and retained patterns contributed, why it " +
-    "ranked, the boundary between genetic support and an established condition, at most two short " +
-    "primary confirmation checks, and what would strengthen or weaken the interpretation. Explain " +
-    "modules and patterns before individual genes or variants. Use get_supporting_evidence only " +
-    "when the user asks for detailed modules, patterns, variants, sources, or tests. " +
-    "For an explanation of a finding, use the structured result to cover its rank and scoring " +
-    "drivers, module and pattern contributions, provisional evidence, confirmation options, " +
-    "and what would strengthen or weaken the interpretation. Keep genetic findings distinct " +
-    "from symptoms or test results the user has not reported.",
+    'questions such as "What is the B12 one?" or "Explain my #1 finding." Returns a concise, ' +
+    "grounded explanation: what it means, why it appeared (evidence architecture and ranking), " +
+    "and what could clarify it (the interpretation boundary, any material data gap, and at most " +
+    "two primary confirmation checks). Explain the support architecture before individual genes " +
+    "or variants. Pattern-led support describes how support was calculated, not that it is " +
+    "broadly distributed; use the dominant driver, its share, and participating-variant counts " +
+    "rather than implying breadth. Use get_supporting_evidence when the user asks for detailed " +
+    "modules, patterns, variants, sources, tests, or exact scores. " +
+    "Personal history, symptoms, laboratory results, medications, and prior reactions may be " +
+    "attributed to the user only when the user or an authorized context source supplied them; " +
+    "catalog cofactors, confounders, cautions, and guardrails are general guidance and must " +
+    "never be restated as the user's history or experience. Keep genetic findings distinct " +
+    "from symptoms or test results the user has not reported, and use priority_score only for " +
+    "ordering and genetic_support only for strength within the analyzed evidence; neither is a " +
+    "disease probability.",
   scope: "analysis.read",
   inputSchema: explainHealthHypothesisInputSchema,
   outputSchema: explainHypothesisOutputSchema,

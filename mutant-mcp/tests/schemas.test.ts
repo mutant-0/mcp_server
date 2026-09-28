@@ -3,6 +3,8 @@ import {
   analysisStatusOutputSchema,
   createReportInputSchema,
   explainHealthHypothesisInputSchema,
+  explainHypothesisOutputSchema,
+  geneticConfidenceSchema,
   getAnalysisContextInputSchema,
   getAnalysisStatusInputSchema,
   getGeneticContextInputSchema,
@@ -12,7 +14,12 @@ import {
   showDnaImportInputSchema,
   supportingEvidenceOutputSchema,
 } from "../src/schemas/index.js";
-import { makeErrorResponse, makeStatusData, makeSuccessResponse } from "./helpers.js";
+import {
+  makeDetailsData,
+  makeErrorResponse,
+  makeStatusData,
+  makeSuccessResponse,
+} from "./helpers.js";
 
 const evidenceKindSchema = getSupportingEvidenceInputSchema.kind;
 const includeContextSchema = getSupportingEvidenceInputSchema.include_context;
@@ -125,6 +132,80 @@ describe("per-tool output schemas (contract 3.0.0)", () => {
         makeSuccessResponse({ kind: "patterns", items: [] }),
       ).success,
     ).toBe(true);
+  });
+});
+
+describe("genetic confidence object (contract 3.0.0)", () => {
+  it("accepts a present object, an explicit null, and an absent value", () => {
+    expect(geneticConfidenceSchema.safeParse({ score: 82.5, level: "high" }).success).toBe(true);
+    expect(
+      geneticConfidenceSchema.safeParse({ score: 0, level: "not_assessable" }).success,
+    ).toBe(true);
+    expect(geneticConfidenceSchema.safeParse({ score: null, level: null }).success).toBe(true);
+    // Null (explicitly not calculated) is distinct from absent (no object).
+    expect(geneticConfidenceSchema.safeParse(null).success).toBe(true);
+    // Absence is modeled by the optional field wrapper, not the value schema.
+    expect(geneticConfidenceSchema.optional().safeParse(undefined).success).toBe(true);
+    expect(geneticConfidenceSchema.safeParse(undefined).success).toBe(false);
+  });
+
+  it("rejects a bare number or string representation", () => {
+    expect(geneticConfidenceSchema.safeParse(80).success).toBe(false);
+    expect(geneticConfidenceSchema.safeParse("high").success).toBe(false);
+  });
+});
+
+describe("explain_health_hypothesis output envelope", () => {
+  it("validates present, zero, explicit-null, and missing confidence", () => {
+    const baseScores = {
+      priority: 90,
+      genetic_support: 72,
+      coverage: "high",
+      convergence: "strong",
+    };
+    const variants = [
+      { score: 90, level: "high" },
+      0,
+      null,
+      undefined,
+    ];
+    for (const confidence of variants) {
+      const data = makeDetailsData({
+        hypothesis: {
+          id: "HYP_A",
+          rank: 1,
+          name: "Alpha finding",
+          assessment_state: "assessed",
+          scores:
+            confidence === 0
+              ? { ...baseScores, genetic_support: 0, genetic_confidence: { score: 0, level: "not_assessable" } }
+              : { ...baseScores, genetic_confidence: confidence },
+        },
+      });
+      const parsed = explainHypothesisOutputSchema.safeParse(makeSuccessResponse(data));
+      expect(parsed.success, `confidence variant ${JSON.stringify(confidence)}`).toBe(true);
+    }
+  });
+
+  it("validates the nested coverage scopes and rejects an unmarked guardrail source", () => {
+    expect(explainHypothesisOutputSchema.safeParse(makeSuccessResponse(makeDetailsData())).success).toBe(
+      true,
+    );
+    const unmarked = makeDetailsData({ guardrails_source: "user_reported" });
+    expect(explainHypothesisOutputSchema.safeParse(makeSuccessResponse(unmarked)).success).toBe(false);
+  });
+
+  it("validates a marker_called scope with missing markers", () => {
+    const data = makeDetailsData();
+    const interpretation = data.score_interpretation as Record<string, unknown>;
+    expect(interpretation.marker_coverage).toEqual({
+      called: 12,
+      total: 14,
+      level: "partial",
+      missing_markers: ["rs1", "rs2"],
+    });
+    expect(interpretation.assessability).toBe("assessed");
+    expect(explainHypothesisOutputSchema.safeParse(makeSuccessResponse(data)).success).toBe(true);
   });
 });
 

@@ -122,7 +122,7 @@ export const analysisStatusDataSchema = z.looseObject({
 });
 
 const interpretationSchema = z.looseObject({
-  version: z.literal("2.5"),
+  version: z.literal("2.6"),
   purpose: z.string(),
   response_rules: z.array(z.string()),
   evidence_explanation_rules: z.looseObject({
@@ -137,6 +137,14 @@ const interpretationSchema = z.looseObject({
     genetic_evidence: z.string(),
     genetic_confidence: z.string(),
     coverage_confidence: z.string(),
+    marker_coverage: z
+      .string()
+      .optional()
+      .describe("Marker-call completeness scope, distinct from coverage_confidence."),
+    assessability: z
+      .string()
+      .optional()
+      .describe("Whether the hypothesis could be evaluated: assessed, partial, or not_assessable."),
     pattern_convergence: z.string(),
     module_support: z.string(),
     pattern_support: z.string(),
@@ -158,6 +166,26 @@ const interpretationSchema = z.looseObject({
     .describe("The evidence units Mutant explanations are built from, in presentation order."),
 });
 
+export const geneticConfidenceSchema = z
+  .looseObject({
+    score: z
+      .number()
+      .nullable()
+      .describe(
+        "How well the result is measured (0-100), independent of direction. Zero means nothing relevant was measured; null means the confidence object was present but the score was not calculated.",
+      ),
+    level: z
+      .string()
+      .nullable()
+      .describe(
+        "Engine confidence band for score: typically strong | moderate | limited (MCP contract maps the engine's weaker band to 'low' where applicable).",
+      ),
+  })
+  .nullable()
+  .describe(
+    "The single canonical genetic-confidence value. Absent (field undefined) means the engine exposed no confidence object; null means it was explicitly not calculated; a present object with score 0 means a result was measured and measured as zero. Never a bare number or string.",
+  );
+
 export const hypothesisSummarySchema = z.looseObject({
   id: z.string().nullable(),
   rank: z.number().int(),
@@ -175,13 +203,7 @@ export const hypothesisSummarySchema = z.looseObject({
     .describe(
       "Strength of genetic support within the analyzed evidence. Null means no value was calculated; zero is a calculated value that did not qualify.",
     ),
-  genetic_confidence: z
-    .looseObject({
-      score: z.number().nullable(),
-      level: z.string().nullable(),
-    })
-    .nullable()
-    .optional(),
+  genetic_confidence: geneticConfidenceSchema.optional(),
   genetic_evidence: z
     .string()
     .nullable()
@@ -257,14 +279,13 @@ export const explainHypothesisDataSchema = z.looseObject({
     scores: z.looseObject({
       priority: z.number().nullable(),
       genetic_support: z.number().nullable(),
-      genetic_confidence: z
-        .looseObject({
-          score: z.number().nullable(),
-          level: z.string().nullable(),
-        })
+      genetic_confidence: geneticConfidenceSchema.optional(),
+      coverage: z
+        .string()
         .nullable()
-        .optional(),
-      coverage: z.string().nullable(),
+        .describe(
+          "Engine measurement-completeness scope. The marker-call scope is score_interpretation.marker_coverage; the two are distinct.",
+        ),
       convergence: z.string().nullable(),
     }),
   }),
@@ -330,6 +351,12 @@ export const explainHypothesisDataSchema = z.looseObject({
   clinical_context: z.record(z.string(), z.unknown()).optional(),
   confirmation: z.record(z.string(), z.unknown()).optional(),
   guardrails: z.array(z.string()).optional(),
+  guardrails_source: z
+    .literal("catalog_general")
+    .optional()
+    .describe(
+      "Marks guardrails as general catalog caution, never a statement about the user's history or reactions.",
+    ),
   related_hypotheses: z.array(z.record(z.string(), z.unknown())).optional(),
   strengthens_interpretation: z.array(z.string()).optional(),
   weakens_interpretation: z.array(z.string()).optional(),

@@ -40,13 +40,16 @@ describe("tool definitions", () => {
     }
   });
 
-  it("documents the module-first explanation and the modules evidence kind", () => {
+  it("documents the concise explanation, support architecture, and personal-context boundary", () => {
     const details = TOOL_DEFINITIONS.find((tool) => tool.name === "explain_health_hypothesis");
-    expect(details?.description).toContain("broad or concentrated");
-    expect(details?.description).toContain("modules and retained patterns");
-    expect(details?.description).toContain("Explain modules and patterns before individual genes");
-    expect(details?.description).toContain("use the structured result");
-    expect(details?.description).toContain("confirmation options");
+    expect(details?.description).toContain("what it means");
+    expect(details?.description).toContain("what could clarify it");
+    expect(details?.description).toContain("support architecture");
+    expect(details?.description).toContain("not that it is broadly distributed");
+    expect(details?.description).toContain("authorized context source");
+    expect(details?.description).toContain("catalog cofactors, confounders, cautions");
+    expect(details?.description).toContain("disease probability");
+    expect(details?.description).toContain("get_supporting_evidence");
 
     const evidence = TOOL_DEFINITIONS.find((tool) => tool.name === "get_supporting_evidence");
     expect(evidence?.description).toContain('"modules"');

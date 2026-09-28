@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { BackendOperation, ToolResponse } from "../src/contract.js";
-import { SERVER_NAME, createMcpServer } from "../src/server.js";
+import { SERVER_INSTRUCTIONS, SERVER_NAME, createMcpServer } from "../src/server.js";
 import { TOOL_NAMES } from "../src/contract.js";
 import {
   ANALYSIS_SCOPE,
@@ -229,6 +229,28 @@ describe("MCP server integration", () => {
       .join("\n");
     expect(content).not.toContain(structured);
     expect(content).not.toMatch(/^\s*[{[]/);
+  });
+});
+
+describe("server instructions pin the explanation contract", () => {
+  const text = SERVER_INSTRUCTIONS;
+
+  it("forbids attributing catalog guidance to the user", () => {
+    expect(text).toContain("authorized context source");
+    expect(text).toContain("never restate them as the user's history");
+    expect(text).toContain("never send personal history to Mutant");
+  });
+
+  it("separates ranking from support and keeps coverage scopes distinct", () => {
+    expect(text).toContain("priority_score only for ordering");
+    expect(text).toContain("genetic_support only for strength");
+    expect(text).toContain("assessability");
+    expect(text).toContain("marker-call completeness");
+  });
+
+  it("states that pattern-led is not broad distribution", () => {
+    expect(text).toContain("not that it is broadly distributed");
+    expect(text).toContain("participating-variant counts");
   });
 });
 

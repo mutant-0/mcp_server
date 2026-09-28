@@ -384,12 +384,12 @@ three hypotheses, and next-question prompts. It is not a listing tool.
 ```json
 {
   "interpretation": {
-    "version": "2.5",
+    "version": "2.6",
     "purpose": "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
     "response_rules": ["… (1-6)"],
     "evidence_explanation_rules": {
       "organizing_level": "modules_then_patterns_then_variants",
-      "rules": ["… (1-9)"],
+      "rules": ["… (1-15)"],
       "module_first_instruction": "When explaining a hypothesis, do not begin with a gene or SNP. First state whether support is multi-module, single-module, pattern-led, or concentrated in one locus. Explain the contributing modules and retained patterns next. Mention individual genes and variants only after their actual scoring route is clear. If one driver dominates, disclose that concentration prominently."
     },
     "score_semantics": {
@@ -399,6 +399,8 @@ three hypotheses, and next-question prompts. It is not a listing tool.
       "genetic_evidence": "…",
       "genetic_confidence": "…",
       "coverage_confidence": "…",
+      "marker_coverage": "…",
+      "assessability": "…",
       "pattern_convergence": "…",
       "module_support": "Genetic support from the underlying biological modules.",
       "pattern_support": "Additional retained support from cross-module patterns, comparable to module_support on the same 0-100 scale."
@@ -448,13 +450,14 @@ three hypotheses, and next-question prompts. It is not a listing tool.
 }
 ```
 
-- `interpretation` is server-owned and versioned (`"2.5"`). It is global product
+- `interpretation` is server-owned and versioned (`"2.6"`). It is global product
   behavior, never per-hypothesis catalog prose and never LLM-generated.
   `response_rules` is 1-6 unique strings; `limitations` is 0-4 unique strings;
   the boundary flags are literal `true`; `score_semantics` has exactly the
   published keys (`priority_score`, `genetic_support`, `assessment`,
   `genetic_evidence`, `genetic_confidence`, `coverage_confidence`,
-  `pattern_convergence`, `module_support`, `pattern_support`);
+  `marker_coverage`, `assessability`, `pattern_convergence`, `module_support`,
+  `pattern_support`);
   `presentation_order` is the fixed order above; `evidence_model` names the
   evidence units explanations are built from.
 - `evidence_explanation_rules` is the module-first contract: `organizing_level`
@@ -581,7 +584,7 @@ scoring drivers.
   },
   "explanation": {
     "bottom_line": "…",
-    "why_ranked": "It ranked #1 because it has strong genetic support, high coverage and 2 contributing pathway patterns.",
+    "why_ranked": "It ranked #1 on priority score, which reflects strong genetic support, module support and retained pattern support; priority orders findings and is not a disease probability.",
     "interpretation_boundary": "…",
     "top_contributing_patterns": [
       {
@@ -606,7 +609,15 @@ scoring drivers.
     "pattern_support": 32.0,
     "converging_pattern_adjustment": 5.0
   },
-  "score_interpretation": { "summary": "…" },
+  "score_interpretation": {
+    "status": "qualifying_match",
+    "summary": "…",
+    "marker_coverage": { "called": 12, "total": 14, "level": "partial", "missing_markers": ["rs1", "rs2"] },
+    "measurement_coverage": "high",
+    "marker_call_incomplete": true,
+    "assessability": "assessed",
+    "data_gap_effect": "The qualifying result stands; the uncalled markers limit completeness but do not change its direction."
+  },
   "assessment": { "…": "the canonical engine assessment" },
   "support_architecture": {
     "classification": "locus_concentrated",
@@ -663,7 +674,8 @@ scoring drivers.
   "clinical_context": {
     "common_cofactors": ["…"],
     "common_confusers": ["…"],
-    "subtypes": [{ "name": "…", "distinction": "…" }]
+    "subtypes": [{ "name": "…", "distinction": "…" }],
+    "source": "catalog_general"
   },
   "confirmation": {
     "primary_checks": [{ "id": "…", "short_name": "…", "role": "…" }],
@@ -674,14 +686,20 @@ scoring drivers.
   "strengthens_interpretation": ["…"],
   "weakens_interpretation": ["…"],
   "guardrails": ["…"],
+  "guardrails_source": "catalog_general",
   "related_hypotheses": [{ "id": "RC_B", "name": "…", "relationship": "related" }],
   "suggested_prompts": [ /* added by the Lambda, max 5 */ ]
 }
 ```
 
-- `explanation.why_ranked` is **always** assembled from the live rank, scores,
-  and contributing pattern count; it is never stored prose and can never drift
-  from the payload.
+- `explanation.why_ranked` is **always** assembled from the live rank and the
+  actual ranking inputs (priority score components: confidence-adjusted genetic
+  support, converging-pattern adjustment, phenotype adjustment, plus the
+  retained/provisional pattern count). Marker-call coverage is **not** a ranking
+  input and is never given as a reason. It is never stored prose and can never
+  drift from the payload. `priority_score` orders findings; `genetic_support`
+  describes strength within the analyzed evidence; neither is a disease
+  probability.
 - The contributing blocks are named `modules`, `patterns`,
   `provisional_evidence`, and `converging_patterns` (2.0.0 used
   `module_contributions`, `pattern_contributions`, `clinical_context`, and
@@ -698,20 +716,36 @@ scoring drivers.
   0-100 genetic-support scale. It is read from the engine's retained
   `scoring_trace` when present, and falls back to the stored totals for legacy
   analyses. `score_interpretation` projects the assessment onto the
-  score-breakdown vocabulary; `assessment` is the canonical engine assessment and
-  is authoritative over surface wording.
+  score-breakdown vocabulary and carries the three coverage/usability scopes
+  separately: `marker_coverage` (marker-call completeness), the linked-storm
+  pattern-evaluability state, and `assessability` (`assessed` | `partial` |
+  `not_assessable`), plus `measurement_coverage` (the engine measurement scope);
+  `assessment` is the canonical engine assessment and is authoritative over
+  surface wording. A qualifying match with missing markers keeps
+  `assessability: "assessed"` and reports `marker_call_incomplete: true` with a
+  `data_gap_effect` sentence; a missing marker is never equated with an unusable
+  assessment, and `hypothesis.scores.coverage` is the engine measurement scope,
+  not the marker-call scope.
 - `support_architecture`, `modules` (max 3 by retained support), and `patterns`
   (max 3 by retained support) come from the retained `scoring_trace`. They are
-  never reconstructed by the adapter. See
+  never reconstructed by the adapter. `evidence_shape.summary` is a pure
+  projection of `support_architecture.summary`. See
   [Module-aware explanations](#module-aware-explanations).
 - `converging_pattern_adjustment` is a separate priority-only family and is
   never summed into `module_support` or `pattern_support`.
-- `clinical_context` is bounded (5 / 5 / 4). `subtypes[].distinction` comes from
-  the catalog `signature` (falling back to lab/clinical corroboration).
-- `confirmation.primary_checks` lists at most two tests in priority order.
+- `clinical_context` is bounded (5 / 5 / 4) and always carries
+  `source: "catalog_general"`. `subtypes[].distinction` comes from the catalog
+  `signature` (falling back to lab/clinical corroboration). Catalog context is
+  general guidance, never a fact about the user.
+- `confirmation.primary_checks` lists at most two tests in priority order,
+  deduplicated by id and by measured analyte (a standalone marker already
+  embedded in a composite panel is not offered twice).
   `stronger_support` / `partial_support` / `weakening_evidence` prefer curated
-  `presentation` copy, then the tests catalog, and are omitted when absent.
-- `guardrails` is deduped and capped at four. `related_hypotheses` appears only
+  `presentation` copy, then the tests catalog (the catalog's `interpretation.weakened`
+  key is read), and are omitted when absent.
+- `guardrails` is deduped and capped at four and `guardrails_source` is
+  `"catalog_general"`: a guardrail is general caution, never a statement about
+  the user's history or prior reactions. `related_hypotheses` appears only
   when the catalog declares related drivers.
 - Removed in v3: the flat `support_architecture`-duplicating top-level keys, and
   the `pattern_contributions` / `module_contributions` names. Those families are
@@ -1238,6 +1272,29 @@ Hypothesis explanations are pathway-level, not single-SNP. The engine emits a
 retained `scoring_trace` per hypothesis; the MCP layer only projects it and
 never estimates contributions from raw catalog weights.
 
+### Canonical value map
+
+Each disputed concept has exactly one authoritative source. Prose is derived
+from these values; it never re-derives or overrides them.
+
+| Concept | Authoritative value | Scope |
+|---|---|---|
+| Status, gaps, usability | `assessment.status` + `assessment.insufficient_data` / `data_gaps` (`core.assessment.ensure_assessment`) | One assessment per hypothesis row; rebuilt for rows stamped before assessment `1.1` |
+| Marker-call completeness | `assessment.marker_coverage` (`called` / `total` / `level`) and `marker_call_incomplete` | How many scoped markers were called |
+| Hypothesis assessability | `assessment.assessability` (`assessed` / `partial` / `not_assessable`) | Whether a result could be evaluated at all |
+| Engine measurement coverage | `component_scores.coverage_confidence`, projected as `hypothesis.scores.coverage` and `score_interpretation.measurement_coverage` | How completely the engine measured the result (distinct from marker-call completeness) |
+| Support shape | retained `scoring_trace.support_architecture` (`classification`, counts, `dominant_driver`, `summary`) | `evidence_shape` is a pure projection: `evidence_shape.summary === support_architecture.summary` |
+| Ranking | `priority_breakdown` / `scoring_trace.component_scores`, projected by `score_breakdown` and `ranking_drivers` | Ranking inputs are confidence-adjusted genetics + converging-pattern adjustment + phenotype adjustment; `coverage_confidence` is **not** a ranking input |
+| Confidence | one object `{ score, level }` (`genetic_confidence`) | Never a bare number or string |
+| General catalog context | `clinical_context` (`source: "catalog_general"`), `guardrails` (`guardrails_source: "catalog_general"`), catalog `symptom_context` | General guidance, never user-reported facts |
+
+`pattern_led` describes **how** retained support was calculated, not that it is
+broadly distributed. Its summary reports the dominant driver, its
+`contribution_fraction`, and the dominant pattern's participating-variant count;
+a single-marker dominant pattern is never rendered as broad marker support and
+is only described as cross-module when the dominant pattern's `module_ids` span
+more than one module.
+
 ### Module-first rule
 
 `get_analysis_context` returns `evidence_explanation_rules`
@@ -1479,7 +1536,7 @@ The contract is covered by:
   `next_action`, and `can_query_analysis == active_analysis.usable`.
 - `report-generator/mcp/tests/test_mcp_handlers.py` — the 3.0.0 status model,
   `resolve_analysis_snapshot` and version-mismatch rejection, the context
-  interpretation-contract shape (version `2.5` incl. `evidence_explanation_rules`
+  interpretation-contract shape (version `2.6` incl. `evidence_explanation_rules`
   and `evidence_model`), access-summary counts and Free/Full upgrade behavior,
   locked-hypothesis non-leakage, `EVIDENCE_NOT_AVAILABLE`, `kind: "modules"` with
   and without `include_context`, dual module/pattern roles on `kind: "variants"`,

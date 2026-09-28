@@ -53,7 +53,7 @@ const MINIMAL_ARGS: Record<ToolName, Record<string, unknown>> = {
 /** The `get_analysis_context` payload: the interpretation contract plus previews. */
 function interpretation(): Record<string, unknown> {
   return {
-    version: "2.5",
+    version: "2.6",
     purpose:
       "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
     response_rules: [
@@ -77,6 +77,8 @@ function interpretation(): Record<string, unknown> {
       genetic_evidence: "The weak/moderate/strong evidence category.",
       genetic_confidence: "How well the genetic result is measured.",
       coverage_confidence: "How completely the relevant markers were assessed.",
+      marker_coverage: "Marker-call completeness scope, distinct from coverage_confidence.",
+      assessability: "Whether the hypothesis could be evaluated.",
       pattern_convergence: "How strongly independent patterns agree.",
       module_support: "Genetic support from the underlying biological modules.",
       pattern_support:
@@ -280,7 +282,40 @@ function dataFor(operation: BackendOperation): Record<string, unknown> {
           stronger_support: "A high ferritin would strengthen this.",
           weakening_evidence: "A normal ferritin would weaken this.",
         },
+        score_interpretation: {
+          status: "qualifying_match",
+          summary: "A qualifying genetic result was detected.",
+          marker_coverage: {
+            called: 12,
+            total: 14,
+            level: "partial",
+            missing_markers: ["rs1", "rs2"],
+          },
+          measurement_coverage: "high",
+          marker_call_incomplete: true,
+          assessability: "assessed",
+          data_gap_effect:
+            "The qualifying result stands; the uncalled markers limit completeness but do not change its direction.",
+        },
+        assessment: {
+          status: "qualifying_match",
+          assessability: "assessed",
+          marker_call_incomplete: true,
+          marker_coverage: {
+            called: 12,
+            total: 14,
+            level: "partial",
+            missing_markers: ["rs1", "rs2"],
+          },
+        },
+        clinical_context: {
+          common_cofactors: [],
+          common_confusers: [],
+          subtypes: [],
+          source: "catalog_general",
+        },
         guardrails: ["Discuss results with a clinician."],
+        guardrails_source: "catalog_general",
       };
     case "get_supporting_evidence":
       return {
@@ -526,7 +561,7 @@ describe("contract v3.0 acceptance", () => {
     const contract = (envelopeOf(result).data as { interpretation: Record<string, unknown> })
       .interpretation;
 
-    expect(contract.version).toBe("2.5");
+    expect(contract.version).toBe("2.6");
     const rules = contract.evidence_explanation_rules as {
       organizing_level: string;
       rules: string[];
@@ -539,6 +574,8 @@ describe("contract v3.0 acceptance", () => {
     expect(semantics.module_support).toBeTruthy();
     expect(semantics.pattern_support).toBeTruthy();
     expect(semantics.assessment).toBeTruthy();
+    expect(semantics.marker_coverage).toBeTruthy();
+    expect(semantics.assessability).toBeTruthy();
 
     const model = contract.evidence_model as {
       primary_units: string[];
@@ -561,7 +598,7 @@ describe("contract v3.0 acceptance", () => {
     expect(text).not.toContain("evidence_explanation_rules");
   });
 
-  it("explains a finding module-first in deterministic content order", async () => {
+  it("explains a finding in the concise What/Why/Clarify content order", async () => {
     const { client } = await connect();
     const result = await client.callTool({
       name: "explain_health_hypothesis",
@@ -569,25 +606,65 @@ describe("contract v3.0 acceptance", () => {
     });
     const text = textOf(result);
 
-    const architecture = text.indexOf("Evidence architecture:");
-    const modules = text.indexOf("Module contributions:");
-    const patterns = text.indexOf("Retained patterns:");
-    const drivers = text.indexOf("key scoring drivers");
-    expect(architecture).toBeGreaterThan(-1);
-    expect(modules).toBeGreaterThan(architecture);
-    expect(patterns).toBeGreaterThan(modules);
-    expect(drivers).toBeGreaterThan(patterns);
+    const meaning = text.indexOf("What it means:");
+    const why = text.indexOf("Why it appeared:");
+    const clarify = text.indexOf("What could clarify it:");
+    expect(meaning).toBeGreaterThan(-1);
+    expect(why).toBeGreaterThan(meaning);
+    expect(clarify).toBeGreaterThan(why);
 
-    // Module and pattern summary values are surfaced from the retained trace.
-    expect(text).toContain("Histamine contributed 40 support points");
-    expect(text).toContain("Pattern A");
-    expect(text).toContain("HNMT");
-    // Converging patterns are reported as a separate priority-only family.
-    expect(text).toContain("Converging patterns adjusted priority only");
-    // Dual module/pattern roles are stated explicitly rather than blurred.
-    expect(text).toContain("Pattern participation is separate from module scoring");
-    // The trace is never dumped as JSON into the model-facing text.
+    // The architecture summary and ranking rationale carry "why it appeared".
+    expect(text).toContain("Support is concentrated in a single locus.");
+    expect(text).toContain("It ranked first on priority score and pattern convergence.");
+
+    // The default answer is concise: the module list, retained-pattern list,
+    // key drivers, converging-pattern sentence, and guardrail list stay in
+    // structuredContent and are reachable through get_supporting_evidence.
+    expect(text).not.toContain("Module contributions:");
+    expect(text).not.toContain("Retained patterns:");
+    expect(text).not.toContain("key scoring drivers");
+    expect(text).not.toContain("Converging patterns adjusted priority only");
+    expect(text).not.toContain("Pattern participation is separate from module scoring");
+
+    // Bounded default length (~150-220 words), never a JSON dump.
+    expect(text.split(/\s+/).length).toBeLessThanOrEqual(260);
     expect(text).not.toMatch(/^\s*[{[]/);
+  });
+
+  it("derives content and structured fields from one canonical assessment", async () => {
+    const { client } = await connect();
+    const result = await client.callTool({
+      name: "explain_health_hypothesis",
+      arguments: { hypothesis_id: "HYP_A" },
+    });
+    const data = envelopeOf(result).data as Record<string, any>;
+    expect(data.score_interpretation.marker_coverage.total).toBe(
+      data.assessment.marker_coverage.total,
+    );
+    expect(data.score_interpretation.assessability).toBe(data.assessment.assessability);
+    expect(data.score_interpretation.marker_call_incomplete).toBe(
+      data.assessment.marker_call_incomplete,
+    );
+    const text = textOf(result);
+    expect(text).toContain(data.score_interpretation.data_gap_effect);
+    expect(text).not.toContain("marker_coverage");
+    expect(text).not.toMatch(/^\s*[{[]/);
+  });
+
+  it("keeps detailed test guidance reachable after trimming default content", async () => {
+    const { client } = await connect();
+    const explanation = textOf(
+      await client.callTool({
+        name: "explain_health_hypothesis",
+        arguments: { hypothesis_id: "HYP_A" },
+      }),
+    );
+    expect(explanation).not.toContain("assay");
+    const evidence = await client.callTool({
+      name: "get_supporting_evidence",
+      arguments: { hypothesis_id: "HYP_A", kind: "tests" },
+    });
+    expect(textOf(evidence)).toBeTruthy();
   });
 
   it("renders the modules evidence kind without dumping the trace", async () => {

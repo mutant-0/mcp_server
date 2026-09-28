@@ -156,10 +156,10 @@ export function makeStatusData(overrides: Record<string, unknown> = {}): Record<
   };
 }
 
-/** The 2.5 interpretation contract, matching `report-generator/mcp/interpretation.py`. */
+/** The 2.6 interpretation contract, matching `report-generator/mcp/interpretation.py`. */
 export function makeInterpretation(): Record<string, unknown> {
   return {
-    version: "2.5",
+    version: "2.6",
     purpose:
       "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
     response_rules: [
@@ -183,6 +183,8 @@ export function makeInterpretation(): Record<string, unknown> {
       genetic_evidence: "The weak/moderate/strong evidence category.",
       genetic_confidence: "How well the genetic result is measured.",
       coverage_confidence: "How completely the relevant markers were assessed.",
+      marker_coverage: "Marker-call completeness scope, distinct from coverage_confidence.",
+      assessability: "Whether the hypothesis could be evaluated: assessed, partial, or not_assessable.",
       pattern_convergence: "How strongly independent patterns agree.",
       module_support: "Support contributed by score-eligible variants through modules.",
       pattern_support: "Additional retained support from a defined combination of variants.",
@@ -275,9 +277,25 @@ export function makeDetailsData(overrides: Record<string, unknown> = {}): Record
     bottom_line: "Alpha finding is a moderate signal.",
     explanation: {
       bottom_line: "Alpha finding is a moderate signal.",
-      why_ranked: "It ranked first on priority score and pattern convergence.",
+      why_ranked:
+        "It ranked #1 on priority score, which reflects strong genetic support, module support and retained pattern support; priority orders findings and is not a disease probability.",
       interpretation_boundary: "This is not a diagnosis.",
       top_contributing_patterns: [],
+    },
+    score_interpretation: {
+      status: "qualifying_match",
+      summary: "A qualifying genetic result was detected.",
+      marker_coverage: {
+        called: 12,
+        total: 14,
+        level: "partial",
+        missing_markers: ["rs1", "rs2"],
+      },
+      measurement_coverage: "high",
+      marker_call_incomplete: true,
+      assessability: "assessed",
+      data_gap_effect:
+        "The qualifying result stands; the uncalled markers limit completeness but do not change its direction.",
     },
     evidence_shape: {
       support_distribution: "concentrated",
@@ -323,6 +341,15 @@ export function makeDetailsData(overrides: Record<string, unknown> = {}): Record
     ],
     provisional_evidence: [],
     converging_patterns: [],
+    clinical_context: {
+      common_cofactors: [],
+      common_confusers: [],
+      subtypes: [],
+      source: "catalog_general",
+    },
+    confirmation: { primary_checks: [] },
+    guardrails: [],
+    guardrails_source: "catalog_general",
     ...overrides,
   };
 }

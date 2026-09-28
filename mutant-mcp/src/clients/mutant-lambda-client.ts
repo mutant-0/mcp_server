@@ -328,7 +328,7 @@ function mockContext(): Record<string, unknown> {
   const hypotheses = mockHypotheses();
   return {
     interpretation: {
-      version: "2.5",
+      version: "2.6",
       purpose:
         "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
       response_rules: [
@@ -351,6 +351,10 @@ function mockContext(): Record<string, unknown> {
         genetic_confidence:
           "How well the genetic result is measured, independent of its direction.",
         coverage_confidence: "How completely the relevant markers were assessed.",
+        marker_coverage:
+          "Marker-call completeness scope (called/total/level/missing), distinct from coverage_confidence.",
+        assessability:
+          "Whether the hypothesis could be evaluated: assessed, partial, or not_assessable.",
         pattern_convergence: "How strongly independent patterns agree.",
         module_support:
           "Support contributed by score-eligible variants aggregated through biological modules and hypothesis-specific module weights.",
@@ -607,7 +611,13 @@ export class MockMutantBackendClient implements MutantBackendClient {
             rank: 1,
             name: "Lipid metabolism",
             assessment_state: "assessed",
-            scores: { priority: 72, genetic_support: 74, coverage: "high", convergence: "moderate" },
+            scores: {
+              priority: 72,
+              genetic_support: 74,
+              genetic_confidence: { score: 74, level: "strong" },
+              coverage: "high",
+              convergence: "moderate",
+            },
           },
           bottom_line: "Model support for how your variants influence lipid handling.",
           evidence_shape: {
@@ -623,7 +633,9 @@ export class MockMutantBackendClient implements MutantBackendClient {
           explanation: {
             bottom_line: "Model support for how your variants influence lipid handling.",
             why_ranked:
-              "It ranked #1 because it has moderate genetic support, high coverage and moderate convergence.",
+              "It ranked #1 on priority score, which reflects moderate genetic support, module support and retained pattern support; priority orders findings and is not a disease probability.",
+            interpretation_boundary:
+              "This reflects inherited variation, not a current lipid measurement.",
             top_contributing_patterns: [],
           },
           score_breakdown: {
@@ -632,6 +644,16 @@ export class MockMutantBackendClient implements MutantBackendClient {
             module_support: 62,
             pattern_support: 12,
             converging_pattern_adjustment: 0,
+          },
+          score_interpretation: {
+            status: "qualifying_match",
+            summary: "A qualifying genetic result was detected.",
+            marker_coverage: { called: 12, total: 14, level: "partial", missing_markers: ["rs1", "rs2"] },
+            measurement_coverage: "high",
+            marker_call_incomplete: true,
+            assessability: "assessed",
+            data_gap_effect:
+              "The qualifying result stands; the uncalled markers limit completeness but do not change its direction.",
           },
           support_architecture: {
             classification: "multi_module",
@@ -678,9 +700,15 @@ export class MockMutantBackendClient implements MutantBackendClient {
           ],
           provisional_evidence: [],
           converging_patterns: [],
-          clinical_context: { common_cofactors: [], common_confusers: [], subtypes: [] },
+          clinical_context: {
+            common_cofactors: [],
+            common_confusers: [],
+            subtypes: [],
+            source: "catalog_general",
+          },
           confirmation: { primary_checks: [] },
           guardrails: [],
+          guardrails_source: "catalog_general",
         },
         error: null,
       };
