@@ -8,6 +8,7 @@ import {
 import { TOOL_DEFINITIONS, toolMeta } from "../src/tools/index.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "../src/tools/types.js";
 import { dnaImportUiMeta, DNA_IMPORT_UI_URI } from "../src/ui/dna-import/resource.js";
+import { ANALYSIS_FOLLOWUPS_UI_URI } from "../src/ui/analysis-followups/resource.js";
 import { ANALYSIS_SCOPE, DNA_SCOPE, makeConfig } from "./helpers.js";
 
 /**
@@ -101,22 +102,28 @@ describe("tool definitions", () => {
     }
   });
 
-  it("attaches the Apps SDK UI descriptor to the two display tools only", () => {
+  it("attaches the Apps SDK UI descriptor to the three display tools only", () => {
     const config = makeConfig();
+    const displayUris: Record<string, string> = {
+      show_dna_import: DNA_IMPORT_UI_URI,
+      show_analysis_overview: DNA_IMPORT_UI_URI,
+      show_analysis_followups: ANALYSIS_FOLLOWUPS_UI_URI,
+    };
     for (const tool of TOOL_DEFINITIONS) {
       const meta = toolMeta(tool, config) as Record<string, unknown>;
-      if (tool.name !== "show_dna_import" && tool.name !== "show_analysis_overview") {
+      const expectedUri = displayUris[tool.name];
+      if (!expectedUri) {
         expect(meta["openai/outputTemplate"]).toBeUndefined();
         expect(meta["ui/resourceUri"]).toBeUndefined();
         continue;
       }
       expect(meta.ui).toEqual({
-        resourceUri: DNA_IMPORT_UI_URI,
+        resourceUri: expectedUri,
         visibility: ["model", "app"],
       });
       // Legacy aliases keep the component mounting on older hosts.
-      expect(meta["ui/resourceUri"]).toBe(DNA_IMPORT_UI_URI);
-      expect(meta["openai/outputTemplate"]).toBe(DNA_IMPORT_UI_URI);
+      expect(meta["ui/resourceUri"]).toBe(expectedUri);
+      expect(meta["openai/outputTemplate"]).toBe(expectedUri);
     }
   });
 

@@ -37,6 +37,14 @@ const ENTRY = path.join(PROJECT_ROOT, "src", "ui", "dna-import", "main.tsx");
 const WORKER_ENTRY = path.join(PROJECT_ROOT, "src", "ui", "dna-import", "workerEntry.js");
 const OUTPUT_DIR = path.join(PROJECT_ROOT, "src", "ui", "dna-import", "generated");
 const OUTPUT_FILE = path.join(OUTPUT_DIR, "html.ts");
+/**
+ * The compact follow-up card is a second, independent document. It gets its own
+ * entry and its own generated module so the large overview/import bundle is never
+ * re-served just to render two buttons.
+ */
+const FOLLOWUPS_ENTRY = path.join(PROJECT_ROOT, "src", "ui", "analysis-followups", "main.tsx");
+const FOLLOWUPS_OUTPUT_DIR = path.join(PROJECT_ROOT, "src", "ui", "analysis-followups", "generated");
+const FOLLOWUPS_OUTPUT_FILE = path.join(FOLLOWUPS_OUTPUT_DIR, "html.ts");
 
 /** Name of the esbuild `define` that carries the worker script into the component. */
 const WORKER_SOURCE_DEFINE = "__DNA_IMPORT_WORKER_SOURCE__";
@@ -72,14 +80,14 @@ async function bundle(entryPoint, { outfile, define = {} } = {}) {
   return js;
 }
 
-function renderHtml(js) {
+function renderHtml(js, title = "Mutant DNA Import") {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="color-scheme" content="light dark" />
-<title>Mutant DNA Import</title>
+<title>${title}</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; }
   /*
@@ -155,6 +163,35 @@ export const DNA_IMPORT_WORKER_BYTES = ${workerBytes};
   console.log(
     `build:ui wrote src/ui/dna-import/generated/html.ts (${htmlBytes} bytes of HTML, ` +
       `${workerBytes} bytes of embedded worker)`,
+  );
+
+  // The follow-up card: a second self-contained document under its own URI. No
+  // worker, no embedded asset - just the component, so it stays small.
+  const followupsJs = await bundle(FOLLOWUPS_ENTRY, {
+    outfile: path.join(FOLLOWUPS_OUTPUT_DIR, "bundle.js"),
+  });
+  const followupsHtml = renderHtml(followupsJs, "Mutant follow-up");
+  const followupsBytes = Buffer.byteLength(followupsHtml, "utf8");
+
+  const followupsModule = `// GENERATED FILE - DO NOT EDIT.
+// Built from src/ui/analysis-followups/main.tsx by scripts/build-ui.mjs.
+// Run \`npm run build:ui\` after changing it.
+//
+// A separate single-document bundle from the overview/import component: the
+// follow-up card is navigation-only, so it is kept small and served under its own
+// stable resource URI. It declares no CSP resource domains either.
+
+/** Self-contained HTML document for the ${"ui://mutant/analysis-followups/v1.html"} resource. */
+export const ANALYSIS_FOLLOWUPS_HTML = ${JSON.stringify(followupsHtml)};
+
+/** Byte size of the rendered document, for logging and size assertions. */
+export const ANALYSIS_FOLLOWUPS_HTML_BYTES = ${followupsBytes};
+`;
+
+  await mkdir(FOLLOWUPS_OUTPUT_DIR, { recursive: true });
+  await writeFile(FOLLOWUPS_OUTPUT_FILE, followupsModule, "utf8");
+  console.log(
+    `build:ui wrote src/ui/analysis-followups/generated/html.ts (${followupsBytes} bytes of HTML)`,
   );
 }
 

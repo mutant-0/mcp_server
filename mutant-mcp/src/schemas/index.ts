@@ -9,6 +9,7 @@ import {
   explainHypothesisDataSchema,
   geneticContextDataSchema,
   hypothesisListDataSchema,
+  showAnalysisFollowupsDataSchema,
   showAnalysisOverviewDataSchema,
   snpCatalogDataSchema,
   supportingEvidenceDataSchema,
@@ -85,6 +86,42 @@ export const listHealthHypothesesInputSchema = {
 export const explainHealthHypothesisInputSchema = {
   hypothesis_id: hypothesisIdSchema,
   analysis_version: analysisVersionSchema,
+};
+
+/**
+ * Required version pin for the follow-up card. The card is rebuilt only for the
+ * revision the answer described, so an absent pin is rejected at the transport
+ * rather than defaulting to whatever is current.
+ */
+const requiredAnalysisVersionSchema = z
+  .string()
+  .min(1)
+  .max(160)
+  .describe(
+    "The exact analysis revision the preceding answer was generated from. Pass displayed_analysis_version; the card rejects a mismatch rather than switching revisions.",
+  );
+
+export const showAnalysisFollowupsInputSchema = {
+  intent: z
+    .enum(["explanation", "comparison"])
+    .describe(
+      "What the preceding answer did: 'explanation' for one finding, 'comparison' for several.",
+    ),
+  analysis_version: requiredAnalysisVersionSchema,
+  hypothesis_ids: z
+    .array(hypothesisIdSchema)
+    .min(1)
+    .max(3)
+    .describe(
+      "The hypothesis ids the answer covered, in display order (at most three), taken from the preceding data call's structuredContent.",
+    ),
+  source: z
+    .string()
+    .min(1)
+    .max(32)
+    .regex(/^[a-z0-9_]+$/)
+    .describe("Optional non-personal diagnostic slug, for example 'explanation'.")
+    .optional(),
 };
 
 export const getSupportingEvidenceInputSchema = {
@@ -335,6 +372,7 @@ export const explainHypothesisOutputSchema = envelopeOf(explainHypothesisDataSch
 export const supportingEvidenceOutputSchema = envelopeOf(supportingEvidenceDataSchema);
 export const geneticContextOutputSchema = envelopeOf(geneticContextDataSchema);
 export const showAnalysisOverviewOutputSchema = envelopeOf(showAnalysisOverviewDataSchema);
+export const showAnalysisFollowupsOutputSchema = envelopeOf(showAnalysisFollowupsDataSchema);
 export const dnaImportOutputSchema = envelopeOf(dnaImportDataSchema);
 export const snpCatalogOutputSchema = envelopeOf(snpCatalogDataSchema);
 export const createReportOutputSchema = envelopeOf(createReportDataSchema);

@@ -833,6 +833,51 @@ describe("DNA import component", () => {
     expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
   });
 
+  it("shows hints from the bound overview snapshot without a second list read", async () => {
+    const bridge = renderWith({
+      poll_analysis_status: statusResponse("ready"),
+      get_analysis_context: makeSuccessResponse(
+        makeContextData({
+          suggested_prompts: [
+            {
+              id: "explain-first",
+              label: "Explain #1",
+              prompt: "Explain my #1 finding in plain English.",
+              intent: "explain",
+              hypothesis_id: "HYP_A",
+            },
+          ],
+        }),
+      ),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    // The host mounts the card from `show_analysis_overview`, so the tool result
+    // already carries the ranked items and the revision they are bound to.
+    bridge.sendToolResult(
+      makeSuccessResponse(
+        {
+          ui_rendered: true,
+          mode: "overview",
+          displayed_analysis_version: "analysis_1",
+          displayed_hypotheses: [
+            { id: "HYP_A", rank: 1, name: "Alpha finding" },
+            { id: "HYP_B", rank: 2, name: "Beta finding" },
+          ],
+        },
+        "analysis_1",
+      ),
+      { mutant: { mode: "overview" } },
+    );
+
+    await screen.findByText(/Alpha finding/i);
+    // The card must still show its hints, and the authoritative snapshot list
+    // must not be fetched a second time.
+    await screen.findByRole("button", { name: "Explain #1" });
+    expect(bridge.callsTo("get_analysis_context")).toHaveLength(1);
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(0);
+  });
+
   it("surfaces an unmatched analysis error instead of the transient outage copy", async () => {
     renderWith(
       {

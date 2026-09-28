@@ -13,6 +13,7 @@ import { listHealthHypothesesTool } from "./list-health-hypotheses.js";
 import { pollAnalysisStatusTool } from "./poll-analysis-status.js";
 import { respond } from "./respond.js";
 import { enforceScope } from "./scope-guard.js";
+import { showAnalysisFollowupsTool } from "./show-analysis-followups.js";
 import { showAnalysisOverviewTool } from "./show-analysis-overview.js";
 import { showDnaImportTool } from "./show-dna-import.js";
 import type { MutantToolDefinition, ToolRuntime } from "./types.js";
@@ -21,6 +22,7 @@ export const TOOL_DEFINITIONS: MutantToolDefinition[] = [
   getAnalysisStatusTool,
   pollAnalysisStatusTool,
   showAnalysisOverviewTool,
+  showAnalysisFollowupsTool,
   getAnalysisContextTool,
   listHealthHypothesesTool,
   explainHealthHypothesisTool,

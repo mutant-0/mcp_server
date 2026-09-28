@@ -196,7 +196,7 @@ describe("HTTP handler (dev mode)", () => {
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as { result: { tools: Array<{ name: string }> } };
-    expect(body.result.tools).toHaveLength(11);
+    expect(body.result.tools).toHaveLength(12);
   });
 
   it("answers CORS preflight for an allowed origin", async () => {

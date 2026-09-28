@@ -12,8 +12,9 @@ export const getAnalysisContextTool: MutantToolDefinition = {
     "Return the interpretation contract and starting context for a ready Mutant analysis: " +
     "how scores and evidence should be explained, important boundaries and limitations, access " +
     "scope, a compact preview of the highest-ranked hypotheses, and useful next questions. Use " +
-    "ready. Use for a specific analysis question after status reports ready. For an initial " +
-    "overview, call show_analysis_overview so the card displays findings and hints. Use " +
+    "this for a specific analysis question after status reports ready. For an initial or broad " +
+    "overview, call show_analysis_overview so the card displays findings and hints, and do not " +
+    "use this tool to reproduce that ranked list in prose. Use " +
     "list_health_hypotheses for subsequent browsing, searching, sorting, pagination, " +
     'or comparisons. Tool selection: "What can Mutant tell me?" and "What does my DNA say about ' +
     'my health?" call get_analysis_status, then show_analysis_overview; "Show or compare my top ' +

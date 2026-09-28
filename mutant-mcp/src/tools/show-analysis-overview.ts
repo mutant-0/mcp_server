@@ -22,8 +22,12 @@ export const showAnalysisOverviewTool: MutantToolDefinition = {
   title: "Show Analysis Overview",
   description:
     "Display the Mutant analysis card with accessible findings and suggested questions. " +
-    "When a user opens Mutant or asks for a general overview and get_analysis_status reports " +
-    "a ready analysis, call this tool in the same turn and let the card present the results. " +
+    'Call this for any broad opening question ("What are my top hypotheses?", "What did Mutant ' +
+    'find?", "Show my results", or a general overview) and when a user opens Mutant: when ' +
+    "get_analysis_status reports experience_state READY (or a usable refresh) with " +
+    "can_show_overview true, call this tool in the same turn and let the card present the " +
+    "results. The card is the display route for the ranked findings; do not answer the same " +
+    "question with list_health_hypotheses and do not restate the card's list in prose. " +
     "The card is bound to the analysis revision returned here; pass displayed_analysis_version " +
     "on follow-up analysis calls. For a specific question, use the analysis tools directly " +
     "instead of reopening the card.",
@@ -40,13 +44,14 @@ export const showAnalysisOverviewTool: MutantToolDefinition = {
       runtime.user,
       runtime.requestId,
     );
-    const uiMeta = { ...dnaImportUiMeta(), mutant: { mode: "overview" } };
     if (!response.ok) {
       // An unready analysis is an expected application state: forward the
-      // structured error envelope rather than throwing.
+      // structured error envelope rather than throwing. No UI descriptor is
+      // attached, so a processing/locked/failed result can never mount the
+      // overview card: the processing experience belongs to show_dna_import and
+      // poll_analysis_status.
       return respond(response, runtime, {
         operation: "show_analysis_overview",
-        meta: uiMeta,
       });
     }
 

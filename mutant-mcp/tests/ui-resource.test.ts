@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { createMcpServer } from "../src/server.js";
+import { ANALYSIS_FOLLOWUPS_UI_URI } from "../src/ui/analysis-followups/resource.js";
 import { DNA_IMPORT_UI_URI } from "../src/ui/dna-import/resource.js";
 import { makeConfig, makeUser, StubBackendClient } from "./helpers.js";
 
@@ -125,6 +126,75 @@ describe("DNA import UI resource", () => {
     // resource is static and identical for every authenticated account.
     const client = await connect();
     const { contents } = await client.readResource({ uri: DNA_IMPORT_UI_URI });
+    expect(contents).toHaveLength(1);
+  });
+});
+
+describe("analysis follow-up UI resource", () => {
+  it("is listed with the app mime type under its own stable URI", async () => {
+    // The follow-up card is a separate document from the overview/import
+    // component, so the host can cache and mount it independently.
+    expect(ANALYSIS_FOLLOWUPS_UI_URI).toBe("ui://mutant/analysis-followups/v1.html");
+    expect(ANALYSIS_FOLLOWUPS_UI_URI).not.toBe(DNA_IMPORT_UI_URI);
+
+    const client = await connect();
+    const { resources } = await client.listResources();
+    const resource = resources.find((entry) => entry.uri === ANALYSIS_FOLLOWUPS_UI_URI);
+    expect(resource).toBeDefined();
+    expect(resource?.mimeType).toBe(APP_MIME_TYPE);
+  });
+
+  it("reads back a self-contained HTML document that only uses the host bridge", async () => {
+    const client = await connect();
+    const { contents } = await client.readResource({ uri: ANALYSIS_FOLLOWUPS_UI_URI });
+    expect(contents).toHaveLength(1);
+
+    const content = contents[0] as { mimeType?: string; text?: string };
+    expect(content.mimeType).toBe(APP_MIME_TYPE);
+    const html = content.text ?? "";
+    expect(html).toContain("<!DOCTYPE html>");
+    expect(html).toContain("ui/initialize");
+    expect(html).toContain("tools/call");
+    expect(html).toContain("postMessage");
+    // The two context labels and the Full route are the card's whole vocabulary.
+    expect(html).toContain("Explore this finding");
+    expect(html).toContain("Keep exploring");
+    expect(html).toContain("Explore all findings with Full");
+    // Navigation hint instead of a purchase prompt for Full accounts.
+    expect(html).toContain("Search any ranked finding by topic");
+  });
+
+  it("declares no CSP domains, because the card only uses the host bridge", async () => {
+    const client = await connect();
+    const { contents } = await client.readResource({ uri: ANALYSIS_FOLLOWUPS_UI_URI });
+    const meta = (contents[0] as { _meta?: { ui?: { csp?: Record<string, unknown> } } })._meta;
+    expect(meta?.ui?.csp).toEqual({});
+  });
+
+  it("carries no portal auth, storage, or direct network access", async () => {
+    const client = await connect();
+    const { contents } = await client.readResource({ uri: ANALYSIS_FOLLOWUPS_UI_URI });
+    const html = (contents[0] as { text?: string }).text ?? "";
+
+    for (const forbidden of [
+      "localStorage",
+      "sessionStorage",
+      "document.cookie",
+      "Authorization",
+      "Bearer",
+      "dev-api.mutantbiotech",
+      "XMLHttpRequest",
+      "fetch(",
+    ]) {
+      expect(html, `card must not reference ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it("never reaches the backend to render the document", async () => {
+    // The stub client throws on any invoke; a successful read proves the
+    // resource is static and identical for every authenticated account.
+    const client = await connect();
+    const { contents } = await client.readResource({ uri: ANALYSIS_FOLLOWUPS_UI_URI });
     expect(contents).toHaveLength(1);
   });
 });

@@ -26,14 +26,26 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type DragEvent as ReactDragEvent,
   type ReactNode,
 } from "react";
 import { useApp, useDocumentTheme, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
 import type { App } from "@modelcontextprotocol/ext-apps";
 import { APP_ERROR_CODES, appErrorCode, type AppErrorCode, type ToolResponse } from "../../contract";
+import { DARK_PALETTE, LIGHT_PALETTE, paletteVars } from "../shared/theme";
+import {
+  FOLLOW_UP_FAILED_MESSAGE,
+  FOLLOW_UP_UNAVAILABLE_MESSAGE,
+  deliverFollowUp,
+  logBridgeError,
+  type FollowUpOutcome,
+} from "../shared/host";
 import { parseDnaFile } from "./parseFile";
+
+// Kept as a re-export: the prompt handoff is shared with the follow-up card, but
+// existing imports and tests read it from the overview component.
+export { deliverFollowUp };
+export type { FollowUpOutcome };
 
 /** Client-side ceiling mirroring the server's MAX_SNP_ENTRIES transport guard. */
 const MAX_SNP_ENTRIES = 20000;
@@ -248,12 +260,6 @@ function formatElapsed(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-/** Bridge-level failures are diagnostic; user-facing failures come from envelopes. */
-function logBridgeError(err: unknown): void {
-  if (typeof console === "undefined" || typeof console.debug !== "function") return;
-  console.debug("[dna-import] host bridge error", err);
-}
-
 /**
  * Classify a recovery state the component derived itself. These codes
  * (`analysis_failed`, `analysis_timeout`) are never shown to the user: they
@@ -264,72 +270,6 @@ function logAnalysisState(code: AppErrorCode, detail?: string): void {
   if (typeof console === "undefined" || typeof console.debug !== "function") return;
   console.debug(`[dna-import] ${code}${detail ? `: ${detail}` : ""}`);
 }
-
-/**
- * The ChatGPT Apps SDK host API, injected as `window.openai` in the widget
- * iframe. Only `sendFollowUpMessage` is used here: it posts a real user turn to
- * the conversation, unlike the MCP Apps bridge which some hosts do not wire up.
- */
-interface ChatGptHostApi {
-  sendFollowUpMessage?: (args: {
-    prompt: string;
-    scrollToBottom?: boolean;
-  }) => void | Promise<void>;
-}
-
-/** Read `window.openai` without assuming the host injected it. */
-function chatGptHost(): ChatGptHostApi | null {
-  if (typeof window === "undefined") return null;
-  const host = (window as Window & { openai?: ChatGptHostApi }).openai;
-  return host && typeof host === "object" ? host : null;
-}
-
-/** What happened when the component tried to hand a prompt to the host chat. */
-type FollowUpOutcome = "sent" | "failed" | "unavailable";
-
-/**
- * Post a follow-up user turn into the host conversation.
- *
- * ChatGPT injects `window.openai.sendFollowUpMessage`, which is the API that
- * actually advances a chatgpt.com conversation from inside a widget, so it wins
- * when the host provides it. Every other host exposes the equivalent MCP Apps
- * `ui/message` request through `App.sendMessage`.
- *
- * The prompt is only ever handed to the host. Nothing here renders it in the
- * widget: a missing or rejected API is reported back to the caller instead.
- */
-export async function deliverFollowUp(app: App | null, prompt: string): Promise<FollowUpOutcome> {
-  const host = chatGptHost();
-  if (host && typeof host.sendFollowUpMessage === "function") {
-    try {
-      await host.sendFollowUpMessage({ prompt, scrollToBottom: true });
-      return "sent";
-    } catch (err) {
-      logBridgeError(err);
-      return "failed";
-    }
-  }
-
-  if (app && typeof app.sendMessage === "function") {
-    try {
-      const result = await app.sendMessage({
-        role: "user",
-        content: [{ type: "text", text: prompt }],
-      });
-      return result && result.isError === true ? "failed" : "sent";
-    } catch (err) {
-      logBridgeError(err);
-      return "failed";
-    }
-  }
-
-  return "unavailable";
-}
-
-/** User-visible copy for a handoff the host could not perform. Never a prompt. */
-const FOLLOW_UP_UNAVAILABLE_MESSAGE =
-  "ChatGPT can't send a follow-up message from this panel. Reopen the panel and try again.";
-const FOLLOW_UP_FAILED_MESSAGE = "ChatGPT couldn't send that follow-up message. Please try again.";
 
 /**
  * Read the envelope out of a bridge tool result. The structured envelope is
@@ -578,49 +518,11 @@ function promptsFrom(data: unknown): PromptChip[] {
 }
 
 /**
- * Theme-dependent colors. Everything else the component paints comes from host
- * CSS variables applied by `useHostStyles`, with a light-mode fallback. These few
- * literals are exposed as custom properties on the shell so the shared style
- * objects below can stay constant.
+ * Theme-dependent colors shared with the compact follow-up card. Everything else
+ * the component paints comes from host CSS variables applied by `useHostStyles`,
+ * with a light-mode fallback. These few literals are exposed as custom properties
+ * on the shell so the shared style objects below can stay constant.
  */
-interface Palette {
-  accent: string;
-  accentText: string;
-  errorBackground: string;
-  errorBorder: string;
-  errorText: string;
-  dropActive: string;
-}
-
-const LIGHT_PALETTE: Palette = {
-  accent: "#1f7a3f",
-  accentText: "#ffffff",
-  errorBackground: "#fdecea",
-  errorBorder: "#f5c6cb",
-  errorText: "#7f1d1d",
-  dropActive: "#f0fff4",
-};
-
-const DARK_PALETTE: Palette = {
-  accent: "#4ea86e",
-  accentText: "#0b1a10",
-  errorBackground: "#3a1d1d",
-  errorBorder: "#5c2b2b",
-  errorText: "#ffb4ab",
-  dropActive: "#16301f",
-};
-
-function paletteVars(palette: Palette): CSSProperties {
-  return {
-    "--mutant-accent": palette.accent,
-    "--mutant-accent-text": palette.accentText,
-    "--mutant-error-bg": palette.errorBackground,
-    "--mutant-error-border": palette.errorBorder,
-    "--mutant-error-text": palette.errorText,
-    "--mutant-drop-active": palette.dropActive,
-  } as CSSProperties;
-}
-
 const styles = {
   card: {
     fontFamily:
@@ -963,6 +865,11 @@ export function DnaImportApp({
    * calls so the backend answers the same revision the user is looking at.
    */
   const displayedVersionRef = useRef<string | null>(null);
+  /**
+   * The state-aware chips load once per analysis. The overview route and the
+   * ranked-list fallback both want them, but each must not fetch them twice.
+   */
+  const promptsLoadedRef = useRef(false);
 
   const setFindingsState = useCallback((next: FindingsState) => {
     findingsRef.current = next;
@@ -1108,6 +1015,7 @@ export function DnaImportApp({
     setUploadError(null);
     setProgress(0);
     setPoll(INITIAL_POLL);
+    promptsLoadedRef.current = false;
     setFindingsState({ status: "idle" });
     setStage("waiting_for_file");
   }, [setFindingsState]);
@@ -1264,6 +1172,7 @@ export function DnaImportApp({
         // `scopeBlocked` survives a submit: it describes the grant, not the
         // attempt, so a dna.import-only connection stays on the ChatGPT hint.
         setPoll((previous) => ({ ...INITIAL_POLL, scopeBlocked: previous.scopeBlocked }));
+        promptsLoadedRef.current = false;
         setFindingsState({ status: "idle" });
         setAnalysis((previous) => ({
           ...(previous ?? {
@@ -1439,7 +1348,8 @@ export function DnaImportApp({
   }, [app, openFilePicker, parsed, submit]);
 
   const loadPromptChips = useCallback(async () => {
-    if (!app) return;
+    if (!app || promptsLoadedRef.current) return;
+    promptsLoadedRef.current = true;
     try {
       const result = await app.callServerTool({ name: "get_analysis_context", arguments: {} });
       const envelope = envelopeOf(result);
@@ -1493,8 +1403,14 @@ export function DnaImportApp({
 
   // The overview route opens directly on its findings and follow-up hints.
   useEffect(() => {
-    if (stage === "analysis_ready" && importMode === "overview") void loadFindings();
-  }, [stage, importMode, loadFindings]);
+    if (stage !== "analysis_ready" || importMode !== "overview") return;
+    // The card always shows context-aware hints, whether the host pushed the
+    // bound snapshot (findings already loaded) or not.
+    void loadPromptChips();
+    // Only fetch the ranked list when the bound snapshot did not already
+    // supply it: a second read would duplicate the card's authoritative list.
+    if (findingsRef.current.status === "idle") void loadFindings();
+  }, [stage, importMode, loadFindings, loadPromptChips]);
 
   /**
    * Hand control back to ChatGPT only when the user asks for interpretation.

@@ -23,9 +23,11 @@ export const getAnalysisStatusTool: MutantToolDefinition = {
     "experience_state and capabilities rather than inferring readiness yourself.\n\n" +
     'If the result has experience_state="NO_DNA", do not answer with import instructions: call ' +
     "show_dna_import in the same turn so the DNA import UI is rendered.\n\n" +
-    'If experience_state="READY" and the user is opening Mutant or asking for an overview, ' +
-    "call show_analysis_overview in the same turn. Its card shows findings and hints; do not " +
-    "write a duplicate prose summary.\n\n" +
+    'If experience_state="READY" and the user is opening Mutant or asking a broad opening ' +
+    'question ("What are my top hypotheses?", "What did Mutant find?", "Show my results", or a ' +
+    "general overview), call show_analysis_overview in the same turn. Its card shows the ranked " +
+    "findings and hints; do not answer a broad opening question with list_health_hypotheses and " +
+    "do not write a duplicate prose list of the same findings.\n\n" +
     'When experience_state is "READY_REFRESH_AVAILABLE" or "READY_REFRESH_PROCESSING", this ' +
     "tool result mounts the Apps SDK card with a refresh action. Let the card present the " +
     "update option instead of asking which finding to explore in prose. The current results " +

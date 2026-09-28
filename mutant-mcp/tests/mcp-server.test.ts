@@ -31,11 +31,11 @@ async function connectServer(
 }
 
 describe("MCP server integration", () => {
-  it("lists the eleven contract tools with schemas", async () => {
+  it("lists the twelve contract tools with schemas", async () => {
     const { client } = await connectServer();
     const result = await client.listTools();
     expect(result.tools.map((tool) => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
-    expect(result.tools).toHaveLength(11);
+    expect(result.tools).toHaveLength(12);
     for (const tool of result.tools) {
       expect(tool.inputSchema).toBeDefined();
       expect(tool.outputSchema).toBeDefined();
@@ -84,6 +84,24 @@ describe("MCP server integration", () => {
     ]);
   });
 
+  it("never mounts the overview card for a failed snapshot resolution", async () => {
+    const { client } = await connectServer(() =>
+      makeErrorResponse("ANALYSIS_NOT_READY", "not servable yet", {
+        reason: "analysis_payload_pending",
+      }),
+    );
+    const result = await client.callTool({ name: "show_analysis_overview", arguments: {} });
+    expect(result.isError).toBe(true);
+    const meta = result._meta as
+      | { ui?: unknown; mutant?: unknown; "openai/outputTemplate"?: unknown }
+      | undefined;
+    // An unready analysis is a structured error, never a card: the overview
+    // component must not mount from a failed snapshot resolution.
+    expect(meta?.ui).toBeUndefined();
+    expect(meta?.mutant).toBeUndefined();
+    expect(meta?.["openai/outputTemplate"]).toBeUndefined();
+  });
+
   it("advertises the resources capability for the Apps SDK component", async () => {
     const { client } = await connectServer();
     expect(client.getServerCapabilities()?.resources).toBeDefined();
@@ -127,14 +145,36 @@ describe("MCP server integration", () => {
     );
     const context = await client.callTool({ name: "get_analysis_context", arguments: {} });
     const status = await client.callTool({ name: "get_analysis_status", arguments: {} });
+    // Every upgrade link carries the ChatGPT source tag so the destination can
+    // see that the card prompted it.
     expect((context.structuredContent as ToolResponse).data?.upgrade).toEqual({
       label: "Unlock Full Analysis",
-      url: "https://mutantgenomics.com/upgrade",
+      url: "https://mutantgenomics.com/upgrade?source=chatgpt",
     });
     expect((status.structuredContent as ToolResponse).data?.upgrade).toEqual({
       label: "Unlock Full Analysis",
-      url: "https://mutantgenomics.com/upgrade",
+      url: "https://mutantgenomics.com/upgrade?source=chatgpt",
     });
+  });
+
+  it("points a PLAN_REQUIRED recovery link at the tagged public portal URL", async () => {
+    const { client } = await connectServer(() =>
+      makeErrorResponse("PLAN_REQUIRED", "This finding needs Mutant Full.", {
+        required_plan: "mutant_full",
+        upgrade_url: "http://localhost:3000/cart",
+      }),
+    );
+    const result = await client.callTool({
+      name: "explain_health_hypothesis",
+      arguments: { hypothesis_id: "HYP_D" },
+    });
+    expect(result.isError).toBe(true);
+    const envelope = result.structuredContent as ToolResponse;
+    expect(envelope.error?.code).toBe("PLAN_REQUIRED");
+    // The recovery link never leaks an internal origin and stays attributable.
+    expect(envelope.error?.upgrade_url).toBe(
+      "https://mutantgenomics.com/upgrade?source=chatgpt",
+    );
   });
 
   it("mounts the refresh card from a ready status with an available update", async () => {

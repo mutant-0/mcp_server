@@ -4,6 +4,7 @@ import type { MutantBackendClient } from "./clients/mutant-lambda-client.js";
 import type { AppConfig } from "./config.js";
 import type { AppLogger } from "./logger.js";
 import { registerTools } from "./tools/index.js";
+import { registerAnalysisFollowupsUi } from "./ui/analysis-followups/resource.js";
 import { registerDnaImportUi } from "./ui/dna-import/resource.js";
 
 export const SERVER_NAME = "mutant-mcp";
@@ -11,9 +12,10 @@ export const SERVER_VERSION = "1.0.0";
 
 export const SERVER_INSTRUCTIONS = [
   "Mutant Genomics MCP server for the connected account's current saved analysis.",
-  "Routing: call get_analysis_status first when readiness is unknown. Read its experience_state and capabilities instead of inferring readiness. When experience_state is NO_DNA, call show_dna_import in the same turn. When experience_state is READY_REFRESH_AVAILABLE or READY_REFRESH_PROCESSING, its result already opens the Apps SDK card with the refresh option; let the card present it and do not write a prose recap or open a second card. When capabilities.can_query_analysis is true and the user opens Mutant or asks for a general overview, call show_analysis_overview in the same turn and let its card show accessible findings and hints. Do not narrate status after rendering the card.",
+  "Routing: call get_analysis_status first when readiness is unknown. Read its experience_state and capabilities instead of inferring readiness. When experience_state is NO_DNA, call show_dna_import in the same turn. When experience_state is READY_REFRESH_AVAILABLE or READY_REFRESH_PROCESSING, its result already opens the Apps SDK card with the refresh option; let the card present it and do not write a prose recap or open a second card. For any broad opening question (for example \"What are my top hypotheses?\", \"What did Mutant find?\", \"Show my results\", or a general overview), call get_analysis_status, then when capabilities.can_show_overview is true call show_analysis_overview in the same turn and let its card show the accessible findings and hints. A broad opening question is never answered with list_health_hypotheses and never with a prose list of the same findings. Do not narrate status after rendering the card, and do not restate the ranked list the card already shows.",
   "While no usable analysis exists (experience_state PROCESSING_INITIAL or REFRESH_PROCESSING_NO_USABLE_ANALYSIS), do not call analysis, overview, hypothesis, evidence, or genetic-context tools, do not describe or speculate about future capabilities, genes, modules, rsIDs, variants, hypotheses, scores, or patterns, and never promise what will become available. The DNA import component owns that state and polls its own app-only poll_analysis_status tool, so do not poll get_analysis_status, do not tell the user to keep asking for updates, and do not add unsolicited processing narration. If the user explicitly asks, answer briefly using only the current status payload.",
-  "For a specific analysis question, use get_analysis_context for the interpretation contract, boundaries, access scope, and compact top-three preview, then use list_health_hypotheses for browsing or comparisons and explain_health_hypothesis for one finding in depth. Do not render the overview card again for each specific question. Pass the displayed analysis_version from a card or prompt suggestion back on follow-up calls so the same revision is answered.",
+  "After the overview card has rendered, a specific analysis question uses get_analysis_context for the interpretation contract, boundaries, and access scope, list_health_hypotheses for browsing, searching, or comparisons, and explain_health_hypothesis for one finding in depth. Do not render the overview card again for a specific question, do not emit a second competing list of the same findings, and do not re-answer the broad overview question in prose. Pass the displayed analysis_version from a card or prompt suggestion back on follow-up calls so the same revision is answered.",
+  "After an explanation or comparison, when the host supports Apps SDK UI, call show_analysis_followups once per answer with that same analysis_version and the hypothesis ids the answer covered (at most three). Keep the answer itself in ChatGPT, do not repeat the card's labels or restate the findings, and do not call it for a broad opening question or during processing. If the host cannot render UI or the call is rejected as stale or out of scope, the answer still stands.",
   "Never ask the user for an analysis ID; the current analysis is resolved from the connection.",
   "Never ask the user to paste DNA data, genotypes, or file contents into the conversation, and never repeat genotypes back to them.",
   "Use priority_score only for ordering and genetic_support only for strength within the analyzed evidence; neither is a disease probability or a diagnosis. Do not present catalog clinical correlation as evidence from the user's own records.",
@@ -52,6 +54,7 @@ export function createMcpServer(
   );
   registerTools(server, ctx, config, client, requestId, logger ?? silentLogger());
   registerDnaImportUi(server, config);
+  registerAnalysisFollowupsUi(server, config);
   return server;
 }
 

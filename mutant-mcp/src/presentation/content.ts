@@ -347,6 +347,8 @@ export function buildContent(operation: ToolName | undefined, response: ToolResp
       return "DNA import component displayed.";
     case "show_analysis_overview":
       return "Analysis overview card displayed.";
+    case "show_analysis_followups":
+      return "Follow-up card displayed.";
     case "get_snp_catalog":
       return "SNP catalog returned for the DNA import component.";
     case "create_report":

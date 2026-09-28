@@ -26,6 +26,9 @@ What changed from 2.0.0:
   immutable revision (`resolve_analysis_snapshot`), and analytical calls accept
   an optional `analysis_version` pin that is rejected with
   `ANALYSIS_VERSION_CHANGED` on a mismatch.
+- A compact follow-up card (`show_analysis_followups` over the internal
+  `resolve_analysis_followups` operation) that renders contextual next steps after
+  an explanation or comparison, bound to the same revision and authorized ids.
 
 ## Transport and authentication
 
@@ -45,7 +48,7 @@ authorization happens per tool** (see `src/tools/scope-guard.ts`):
 
 | Scope | Granted tools |
 |---|---|
-| `<resource>/analysis.read` | the seven analysis tools |
+| `<resource>/analysis.read` | the nine analysis tools |
 | `<resource>/dna.import` | `show_dna_import`, `get_snp_catalog`, `create_report` |
 
 Both are advertised in protected-resource metadata, authorization-server
@@ -87,7 +90,7 @@ error, or `ok: false` with data).
     "message": "This request is outside your Free top-three analysis.",
     "retryable": false,
     "required_plan": "mutant_full",
-    "upgrade_url": "https://mutantgenomics.com/upgrade",
+    "upgrade_url": "https://mutantgenomics.com/upgrade?source=chatgpt",
     "next_action": {
       "tool": "get_analysis_context",
       "reason": "Continue with the accessible top three."
@@ -128,7 +131,8 @@ paths. No next-action hint, call to action, or future-capability claim appears.
 
 `_meta` carries only the auth challenge (`mcp/www_authenticate`), the Apps SDK
 UI descriptor, the security schemes, and widget hydration state (`mutant.mode`,
-and `mutant.displayed_analysis_version` for the overview card). No tool data,
+and `mutant.displayed_analysis_version` for the overview card; the follow-up card
+adds `mutant.intent`). No tool data,
 genotypes, or account state is placed in `_meta`.
 When `experience_state` is `READY_REFRESH_AVAILABLE` or
 `READY_REFRESH_PROCESSING`, the `get_analysis_status` result also carries the
@@ -235,7 +239,8 @@ Each tool maps to a distinct user goal. The routing contract is:
 |---|---|
 | `get_analysis_status` | Establish connection, DNA readiness, the canonical `experience_state`, entitlement, capabilities, and the single next action. Model-facing. |
 | `poll_analysis_status` | App-only (`app` visibility) status read used by the DNA import component while it owns the processing experience. Same payload as `get_analysis_status`, minus polling hints and suggested prompts. |
-| `show_analysis_overview` | Resolve one immutable analysis snapshot and open the ready-analysis Apps SDK card bound to it. |
+| `show_analysis_overview` | Resolve one immutable analysis snapshot and open the ready-analysis Apps SDK card bound to it. Model-facing; the deliberate render tool for broad opening questions. |
+| `show_analysis_followups` | Verify and open the compact Apps SDK follow-up card after an explanation or comparison, bound to the same revision and hypothesis ids. Model-facing; the only render tool for the follow-up card. |
 | `get_analysis_context` | Supply the interpretation contract, coverage, access scope, a compact top-hypothesis preview, and useful next questions for specific analysis questions. |
 | `list_health_hypotheses` | Browse, search, sort, paginate, and compare accessible hypotheses. |
 | `explain_health_hypothesis` | Explain one hypothesis in depth. |
@@ -244,13 +249,31 @@ Each tool maps to a distinct user goal. The routing contract is:
 
 Call `get_analysis_status` first. Read its `experience_state` and `capabilities`
 instead of inferring readiness. When `experience_state` is `NO_DNA`, call
-`show_dna_import` in the same turn. When `capabilities.can_query_analysis` is
-true and the user opens Mutant or asks for a general overview, call
-`show_analysis_overview` in the same turn and let the card present results. For a
+`show_dna_import` in the same turn. For any broad opening question ("What are my
+top hypotheses?", "What did Mutant find?", "Show my results", or a general
+overview), when `capabilities.can_show_overview` is true, call
+`show_analysis_overview` in the same turn and let the card present the ranked
+findings and hints. A broad opening question is **never** answered with
+`list_health_hypotheses` and never with a prose list of the same findings. For a
 specific question, call `get_analysis_context` first, then use
 `list_health_hypotheses` for subsequent browsing, searching, sorting,
 pagination, and comparison; use `explain_health_hypothesis` or
-`get_supporting_evidence` for a single finding.
+`get_supporting_evidence` for a single finding. After an explanation or a
+comparison, when the host supports Apps SDK UI, call `show_analysis_followups`
+once with the same `analysis_version` and the ids the answer covered; the answer
+itself stays in the conversation and is never restated by the card.
+
+```mermaid
+flowchart TD
+  Q[Broad opening question] --> S[get_analysis_status]
+  S -->|can_show_overview| O[show_analysis_overview]
+  O --> Card[Overview card: ranked items + hints]
+  Q2[Explain #1] --> E[explain_health_hypothesis]
+  E --> F[show_analysis_followups]
+  Q3[Compare my top three] --> L[list_health_hypotheses]
+  L --> F
+  F --> FCard[Follow-up card: up to 2 actions + optional Full]
+```
 
 Both `list_health_hypotheses` and `explain_health_hypothesis` (plus
 `get_supporting_evidence` and `get_genetic_context`) accept an optional
@@ -293,7 +316,7 @@ Input: `{}`. A successful call even with no analysis.
     "arguments": { "mode": "regenerate" }
   },
   "suggested_prompts": [ /* added by the Lambda, max 5 */ ],
-  "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/upgrade" }
+  "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/upgrade?source=chatgpt" }
 }
 ```
 
@@ -445,7 +468,7 @@ three hypotheses, and next-question prompts. It is not a listing tool.
     "scope_message": "Your top three ranked hypotheses are fully unlocked. Mutant Full can search 9 additional ranked hypotheses."
   },
   "preview": [ /* up to three HypothesisSummary, rank order */ ],
-  "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/upgrade" },
+  "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/upgrade?source=chatgpt" },
   "suggested_prompts": [ /* added by the Lambda, max 5 */ ]
 }
 ```
@@ -941,6 +964,52 @@ and passes `displayed_analysis_version` (also exposed as
 `_meta.mutant.displayed_analysis_version`) on follow-up calls, so `#3` cannot
 silently mean a different finding than the one the model described.
 
+### `resolve_analysis_followups` (internal operation)
+
+`show_analysis_followups` calls the internal backend operation
+`resolve_analysis_followups` to verify and bind the compact follow-up card. It
+accepts:
+
+| Argument | Rule |
+|---|---|
+| `intent` | Required. `explanation` or `comparison`. |
+| `analysis_version` | Required snapshot pin. A mismatch returns `ANALYSIS_VERSION_CHANGED` — never a silent switch. |
+| `hypothesis_ids` | Required, 1-3 ids, order preserved. Each is validated by `require_accessible_hypothesis`: a locked id on Free returns `PLAN_REQUIRED` (indistinguishable from an unknown id); an unknown Full id returns `HYPOTHESIS_NOT_FOUND`. |
+| `source` | Optional, `^[a-z0-9_]{1,32}$`. Non-personal diagnostic slug, never echoed to the user. |
+
+It returns the bound revision, the resolved `{id, rank, name}` set, the `intent`,
+the `plan`, **at most two** server-selected actions, and `upgrade` only when a
+Free account has locked hypotheses:
+
+```json
+{
+  "ui_rendered": true,
+  "mode": "followups",
+  "intent": "explanation",
+  "plan": "mutant_free",
+  "displayed_analysis_version": "rev42-v3.0.0",
+  "displayed_hypotheses": [{ "id": "RC_A", "rank": 1, "name": "Alpha" }],
+  "actions": [
+    {
+      "id": "why-ranked",
+      "label": "Why this rank?",
+      "prompt": "Why did my \"Alpha\" finding rank where it did?",
+      "intent": "explain",
+      "hypothesis_id": "RC_A",
+      "action": { "analysis_version": "rev42-v3.0.0", "hypothesis_id": "RC_A", "intent": "explain" }
+    }
+  ],
+  "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/upgrade?source=chatgpt" }
+}
+```
+
+The card is navigation only: it never carries the generated answer, hypothesis
+prose, evidence rows, genotypes, or the user's health history. The comparison
+intent offers a "Compare with my history" action whose prompt explicitly asks the
+user what they wish to share before comparing. `resolve_analysis_followups` is
+internal-only: it is accepted by `parse_request` but is **not** a model-facing
+tool.
+
 ### `analysis_version` pin
 
 `list_health_hypotheses`, `explain_health_hypothesis`, `get_supporting_evidence`,
@@ -975,7 +1044,23 @@ the shared Apps SDK card. Its result is
 displayed_hypotheses }` plus the UI descriptor and widget-only
 `mutant.mode: "overview"`. The card renders that bound snapshot and loads
 accessible findings and hints from it; the model should let the card present
-these results rather than repeating the context preview in prose.
+these results rather than repeating the context preview in prose. On failure
+(processing, locked, failed) the result forwards the structured error envelope
+with **no** UI descriptor, so an unready analysis can never mount the card.
+
+### `show_analysis_followups`
+
+Input:
+`{ intent: "explanation" | "comparison", analysis_version, hypothesis_ids (1-3), source? }`.
+Scope `analysis.read`. Calls `resolve_analysis_followups` and mounts the compact
+follow-up card. Its result is `{ ui_rendered: true, mode: "followups", intent,
+plan, displayed_analysis_version, displayed_hypotheses, actions, upgrade? }` plus
+the UI descriptor and widget-only `mutant.mode: "followups"`. The model-facing
+`content` is a single line (`Follow-up card displayed.`) that never repeats the
+answer. On any verification failure (stale version, locked or unknown id,
+unready analysis, backend error) it forwards the structured error envelope with
+no UI descriptor, so a rejected render can never mount a card bound to the wrong
+finding.
 
 ### `show_dna_import`
 
@@ -1125,10 +1210,30 @@ Two 3.0.0 behaviors on the completion view:
 
 Because `_meta.ui.csp` cannot declare `worker-src`, parsing prefers a Web Worker
 started from a `blob:` URL and falls back to the same parser on the main thread if
-the host's composed `script-src` blocks it. The document is therefore built in two
-esbuild passes (`scripts/build-ui.mjs`): the worker as its own IIFE, inlined into
-the component as a string. No CSP domain is added for either path, and the
-document stays self-contained at roughly 650 KB (of which ~14 KB is the worker).
+the host's composed `script-src` blocks it. The overview document is therefore
+built in two esbuild passes (`scripts/build-ui.mjs`): the worker as its own IIFE,
+inlined into the component as a string. No CSP domain is added for either path,
+and the document stays self-contained at roughly 650 KB (of which ~14 KB is the
+worker).
+
+### UI resource `ui://mutant/analysis-followups/v1.html`
+
+A **separate** document from the overview/import component, so the compact card
+can be hosted and cached independently of the large bundle. Like the other
+resource its URI is stable and unversioned, it is served as a single
+self-contained `text/html;profile=mcp-app` document identical for every
+authenticated account, and its `_meta.ui.csp` is empty (the card reaches the
+server only through the host bridge, and the upgrade destination goes through
+`App.openLink`). `scripts/build-ui.mjs` bundles it as a third entry into
+`src/ui/analysis-followups/generated/html.ts`.
+
+The card reads the tool result from the host, renders a context label
+(`Explore this finding` for an explanation, `Keep exploring` for a comparison),
+at most two action buttons bound to the server-selected prompts and ids, and —
+Free only — a quiet `Explore all findings with Full` link. A Full account instead
+sees a search-all discovery hint. It never renders the generated answer, the
+hypothesis prose, or any health context, and it renders nothing at all when the
+result is missing or an error.
 
 ## Prompt suggestions
 
@@ -1536,7 +1641,10 @@ The contract is covered by:
   between calls → `ANALYSIS_VERSION_CHANGED`), `capabilities`,
   `next_action`, and `can_query_analysis == active_analysis.usable`.
 - `report-generator/mcp/tests/test_mcp_handlers.py` — the 3.0.0 status model,
-  `resolve_analysis_snapshot` and version-mismatch rejection, the context
+  `resolve_analysis_snapshot` and version-mismatch rejection,
+  `resolve_analysis_followups` (bound actions, stale pin, locked/unknown id,
+  Free/Full upgrade visibility, argument validation, and that the card carries no
+  evidence or history), the context
   interpretation-contract shape (version `2.6` incl. `evidence_explanation_rules`
   and `evidence_model`), access-summary counts and Free/Full upgrade behavior,
   locked-hypothesis non-leakage, `EVIDENCE_NOT_AVAILABLE`, `kind: "modules"` with
@@ -1556,15 +1664,37 @@ The contract is covered by:
   from the interpretation contract without echoing it, that context prompts
   follow the access summary, that suggestions are capped at five natural-language
   prompts with structured actions, that `show_analysis_overview` returns a bound
-  `displayed_analysis_version`, and that `_meta` stays widget-only.
+  `displayed_analysis_version`, that `show_analysis_followups` returns a bound
+  card with at most two pinned actions, and that `_meta` stays widget-only.
 - `mutant-mcp/tests/schemas.test.ts` — per-tool output schemas, the object
   `next_action`, the processing payload with no `next_action`/`suggested_prompts`,
   and the `analysis_version` input.
-- `mutant-mcp/tests/tools.test.ts` — eleven tools, version, and input schemas
-  (including `show_dna_import.mode`, the `modules` evidence kind,
-  `include_context`), the `app`-only visibility of `poll_analysis_status`, and
+- `mutant-mcp/tests/tools.test.ts` — twelve tools, version, and input schemas
+  (including `show_dna_import.mode`, `show_analysis_followups`'s required
+  `analysis_version` and bounded `hypothesis_ids`, the `modules` evidence kind,
+  `include_context`), the `app`-only visibility of `poll_analysis_status`, that
+  the Apps SDK UI descriptor is attached to exactly the three display tools, and
   that the `get_analysis_status` description carries the no-usable-analysis
   prohibitions (including the forbidden future-capability example).
+- `mutant-mcp/tests/routing-evaluations.test.ts` — runnable routing fixtures for
+  broad opening questions and specific requests: broad prompts route
+  `get_analysis_status` → `show_analysis_overview` and mount exactly one bound
+  overview card, specific prompts never mount the overview and (after an
+  explanation or comparison) mount one follow-up card, a stale follow-up pin is a
+  structured status with no card, and a processing state mounts nothing.
+- `mutant-mcp/tests/followups.test.ts` — follow-up card integration: one card per
+  answer with every action pinned to the answer's revision and ids, a
+  single-line model-facing text, `ANALYSIS_VERSION_CHANGED` / `PLAN_REQUIRED`
+  statuses instead of silent switches, Free vs Full upgrade visibility, and a
+  failed render that leaves the answer intact.
+- `mutant-mcp/tests/analysis-followups-ui.test.tsx` — the compact card renders at
+  most two actions, sends the server-selected prompt on click, opens the tagged
+  upgrade route, never repeats the answer, renders nothing on an error result,
+  and stays single-column at a narrow viewport.
+- `mutant-mcp/tests/ui-resource.test.ts` — both UI resource URIs (mime type,
+  stable unversioned pointer, self-contained document, empty CSP, no portal auth
+  or direct network access), including that the follow-up document is separate
+  from the overview/import document.
 - `mutant-mcp/tests/dna-import.test.ts` — status pass-through (no Lambda
   routing shim), prompt injection, `poll_analysis_status` authorization, and that
   the two target states omit `suggested_prompts` and (on the component path)

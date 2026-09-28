@@ -1,3 +1,4 @@
+import { withPublicUpgradeUrl } from "../presentation/upgrade.js";
 import { geneticContextOutputSchema, getGeneticContextInputSchema } from "../schemas/index.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
@@ -17,7 +18,10 @@ export const getGeneticContextTool: MutantToolDefinition = {
   annotations: readOnlyAnnotations,
   handler: async (args, runtime) =>
     respond(
-      await runtime.client.invoke("get_genetic_context", args, runtime.user, runtime.requestId),
+      withPublicUpgradeUrl(
+        await runtime.client.invoke("get_genetic_context", args, runtime.user, runtime.requestId),
+        runtime.config,
+      ),
       runtime,
       { operation: "get_genetic_context" },
     ),

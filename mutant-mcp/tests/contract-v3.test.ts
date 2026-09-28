@@ -36,6 +36,11 @@ const MINIMAL_ARGS: Record<ToolName, Record<string, unknown>> = {
   get_analysis_status: {},
   poll_analysis_status: {},
   show_analysis_overview: {},
+  show_analysis_followups: {
+    intent: "explanation",
+    analysis_version: "rev42-v3.0.0",
+    hypothesis_ids: ["HYP_A"],
+  },
   get_analysis_context: {},
   list_health_hypotheses: {},
   explain_health_hypothesis: { hypothesis_id: "HYP_A" },
@@ -166,6 +171,30 @@ function dataFor(operation: BackendOperation): Record<string, unknown> {
         displayed_hypotheses: [
           { id: "HYP_A", rank: 1, name: "Alpha finding" },
           { id: "HYP_B", rank: 2, name: "Beta finding" },
+        ],
+      };
+    case "resolve_analysis_followups":
+    case "show_analysis_followups":
+      return {
+        ui_rendered: true,
+        mode: "followups",
+        intent: "explanation",
+        plan: "mutant_free",
+        displayed_analysis_version: "rev42-v3.0.0",
+        displayed_hypotheses: [{ id: "HYP_A", rank: 1, name: "Alpha finding" }],
+        actions: [
+          {
+            id: "why-ranked",
+            label: "Why this rank?",
+            prompt: "Why did my finding rank where it did?",
+            intent: "explain",
+            hypothesis_id: "HYP_A",
+            action: {
+              analysis_version: "rev42-v3.0.0",
+              hypothesis_id: "HYP_A",
+              intent: "explain",
+            },
+          },
         ],
       };
     case "get_analysis_status":

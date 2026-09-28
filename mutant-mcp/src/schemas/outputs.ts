@@ -498,3 +498,32 @@ export const showAnalysisOverviewDataSchema = z.looseObject({
     }),
   ),
 });
+
+/**
+ * The `show_analysis_followups` payload. The card is navigation only: a context
+ * label, at most two actions bound to the displayed hypothesis ids and revision,
+ * and - Free only - an upgrade offer. It never carries the generated answer, the
+ * user's health history, or any evidence rows.
+ */
+export const showAnalysisFollowupsDataSchema = z.looseObject({
+  ui_rendered: z.literal(true),
+  mode: z.literal("followups"),
+  intent: z.enum(["explanation", "comparison"]),
+  plan: z
+    .enum(["mutant_free", "mutant_full"])
+    .describe("Decides between the quiet Full route and the search-all hint."),
+  displayed_analysis_version: z
+    .string()
+    .nullable()
+    .describe("The exact analysis revision this card is bound to."),
+  displayed_hypotheses: z.array(
+    z.looseObject({
+      id: z.string().nullable(),
+      rank: z.number().int(),
+      name: z.string(),
+    }),
+  ),
+  actions: z.array(promptSuggestionSchema),
+  upgrade: upgradeOfferSchema.optional(),
+  source: z.string().optional(),
+});

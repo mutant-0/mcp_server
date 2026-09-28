@@ -240,6 +240,47 @@ export function makeContextData(overrides: Record<string, unknown> = {}): Record
   };
 }
 
+/** A minimal valid `show_analysis_followups` payload. */
+export function makeFollowupsData(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    ui_rendered: true,
+    mode: "followups",
+    intent: "explanation",
+    plan: "mutant_free",
+    displayed_analysis_version: "rev42-v3.0.0",
+    displayed_hypotheses: [{ id: "HYP_A", rank: 1, name: "Alpha finding" }],
+    actions: [
+      {
+        id: "why-ranked",
+        label: "Why this rank?",
+        prompt: "Why did my \"Alpha finding\" finding rank where it did?",
+        intent: "explain",
+        hypothesis_id: "HYP_A",
+        action: {
+          analysis_version: "rev42-v3.0.0",
+          hypothesis_id: "HYP_A",
+          intent: "explain",
+        },
+      },
+      {
+        id: "what-changes-it",
+        label: "What could change it?",
+        prompt: "What would strengthen or weaken my \"Alpha finding\" finding?",
+        intent: "evidence",
+        hypothesis_id: "HYP_A",
+        action: {
+          analysis_version: "rev42-v3.0.0",
+          hypothesis_id: "HYP_A",
+          intent: "evidence",
+        },
+      },
+    ],
+    ...overrides,
+  };
+}
+
 /** A minimal valid `HypothesisSummary`. */
 export function makeHypothesisSummary(
   overrides: Record<string, unknown> = {},
@@ -385,6 +426,9 @@ export function defaultBackendData(operation: BackendOperation): Record<string, 
       return { ui_rendered: true, mode: "initial" };
     case "create_report":
       return { analysis_id: "analysis_test", status: "processing" };
+    case "resolve_analysis_followups":
+    case "show_analysis_followups":
+      return makeFollowupsData();
   }
 }
 

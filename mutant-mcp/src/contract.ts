@@ -34,6 +34,7 @@ export const ANALYSIS_TOOL_NAMES = [
   "get_analysis_status",
   "poll_analysis_status",
   "show_analysis_overview",
+  "show_analysis_followups",
   "get_analysis_context",
   "list_health_hypotheses",
   "explain_health_hypothesis",
@@ -65,7 +66,18 @@ export type ToolName = (typeof TOOL_NAMES)[number];
  */
 export const RESOLVE_SNAPSHOT_OPERATION = "resolve_analysis_snapshot";
 
-export type BackendOperation = ToolName | typeof RESOLVE_SNAPSHOT_OPERATION;
+/**
+ * Internal-only backend operation used by `show_analysis_followups` to verify
+ * and bind the compact follow-up card. It is never advertised as a model-facing
+ * tool: the render tool calls it so the card's actions are only built from
+ * hypothesis ids the account may see, pinned to the revision the answer used.
+ */
+export const RESOLVE_FOLLOWUPS_OPERATION = "resolve_analysis_followups";
+
+export type BackendOperation =
+  | ToolName
+  | typeof RESOLVE_SNAPSHOT_OPERATION
+  | typeof RESOLVE_FOLLOWUPS_OPERATION;
 
 export function isDnaImportTool(name: string): name is DnaImportToolName {
   return (DNA_IMPORT_TOOL_NAMES as readonly string[]).includes(name);
@@ -315,6 +327,29 @@ export interface ShowAnalysisOverviewData {
     rank: number;
     name: string;
   }>;
+}
+
+/**
+ * The `show_analysis_followups` payload. Navigation only: the card supplies
+ * prompts and pinned ids, never a copy of the generated answer or the user's
+ * health history.
+ */
+export interface ShowAnalysisFollowupsData {
+  ui_rendered: true;
+  mode: "followups";
+  intent: "explanation" | "comparison";
+  plan: "mutant_free" | "mutant_full";
+  displayed_analysis_version: string | null;
+  displayed_hypotheses: Array<{
+    id: string | null;
+    rank: number;
+    name: string;
+  }>;
+  /** At most two server-selected actions, each bound to the revision and id. */
+  actions: PromptSuggestion[];
+  upgrade?: UpgradeOffer;
+  /** Non-personal diagnostic slug; never shown to the user. */
+  source?: string;
 }
 
 /** The `show_dna_import` payload. */
