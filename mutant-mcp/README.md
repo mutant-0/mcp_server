@@ -263,7 +263,7 @@ origin to fetch sibling assets from.
 | `MUTANT_OAUTH_SCOPE_DNA_IMPORT` | Scope required by `show_dna_import`, `get_snp_catalog`, and `create_report`. Empty (default) derives `<MUTANT_MCP_RESOURCE_URI>/dna.import`. |
 | `MUTANT_MCP_RESOURCE_URI` | Canonical RFC 9728 resource id (used in PRM + challenges, and as the scope's resource-server identifier). |
 | `MUTANT_CORS_ORIGINS` | Comma-separated browser origin allowlist. |
-| `MUTANT_UPGRADE_URL` | Upgrade URL returned to Free accounts (default `/cart`). |
+| `MUTANT_UPGRADE_URL` | Upgrade URL returned to Free accounts (default `/upgrade`). |
 | `MUTANT_ONBOARDING_URL` | Onboarding URL. |
 | `MUTANT_REQUEST_TIMEOUT_MS` | Backend invocation deadline (default `20000`). |
 | `MUTANT_MAX_RESPONSE_BYTES` | Serialized response cap (default `512000`). |

@@ -87,7 +87,7 @@ error, or `ok: false` with data).
     "message": "This request is outside your Free top-three analysis.",
     "retryable": false,
     "required_plan": "mutant_full",
-    "upgrade_url": "https://mutantgenomics.com/cart",
+    "upgrade_url": "https://mutantgenomics.com/upgrade",
     "next_action": {
       "tool": "get_analysis_context",
       "reason": "Continue with the accessible top three."
@@ -293,7 +293,7 @@ Input: `{}`. A successful call even with no analysis.
     "arguments": { "mode": "regenerate" }
   },
   "suggested_prompts": [ /* added by the Lambda, max 5 */ ],
-  "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/cart" }
+  "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/upgrade" }
 }
 ```
 
@@ -445,7 +445,7 @@ three hypotheses, and next-question prompts. It is not a listing tool.
     "scope_message": "Your top three ranked hypotheses are fully unlocked. Mutant Full can search 9 additional ranked hypotheses."
   },
   "preview": [ /* up to three HypothesisSummary, rank order */ ],
-  "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/cart" },
+  "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/upgrade" },
   "suggested_prompts": [ /* added by the Lambda, max 5 */ ]
 }
 ```

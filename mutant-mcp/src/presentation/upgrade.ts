@@ -1,7 +1,7 @@
 import type { AppConfig } from "../config.js";
 import type { ToolResponse } from "../contract.js";
 
-const DEFAULT_UPGRADE_URL = "https://mutantgenomics.com/cart";
+const DEFAULT_UPGRADE_URL = "https://mutantgenomics.com/upgrade";
 
 /** Use the MCP deployment's public checkout URL instead of a backend-local URL. */
 export function withPublicUpgradeUrl(response: ToolResponse, config: AppConfig): ToolResponse {

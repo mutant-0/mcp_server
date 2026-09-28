@@ -855,7 +855,7 @@ describe("DNA import component", () => {
       poll_analysis_status: statusResponse("ready"),
       get_analysis_context: makeSuccessResponse(
         makeContextData({
-          upgrade: { label: "Unlock Full Analysis", url: "https://mutantgenomics.com/cart" },
+          upgrade: { label: "Unlock Full Analysis", url: "https://mutantgenomics.com/upgrade" },
           suggested_prompts: [
             {
               id: "compare-medical-records",
@@ -879,10 +879,10 @@ describe("DNA import component", () => {
     await screen.findByRole("button", { name: "Compare with my records" });
     expect(screen.getByRole("button", { name: "Compare all with Full" })).toBeDefined();
     const upgradeLink = screen.getByRole("link", { name: "Upgrade to Mutant Full" });
-    expect(upgradeLink.getAttribute("href")).toBe("https://mutantgenomics.com/cart");
+    expect(upgradeLink.getAttribute("href")).toBe("https://mutantgenomics.com/upgrade");
     expect(upgradeLink.getAttribute("target")).toBe("_blank");
     fireEvent.click(upgradeLink);
-    await waitFor(() => expect(bridge.openLinks).toEqual(["https://mutantgenomics.com/cart"]));
+    await waitFor(() => expect(bridge.openLinks).toEqual(["https://mutantgenomics.com/upgrade"]));
   });
 
   it("does not offer an upgrade to a Full account", async () => {

@@ -129,11 +129,11 @@ describe("MCP server integration", () => {
     const status = await client.callTool({ name: "get_analysis_status", arguments: {} });
     expect((context.structuredContent as ToolResponse).data?.upgrade).toEqual({
       label: "Unlock Full Analysis",
-      url: "https://mutantgenomics.com/cart",
+      url: "https://mutantgenomics.com/upgrade",
     });
     expect((status.structuredContent as ToolResponse).data?.upgrade).toEqual({
       label: "Unlock Full Analysis",
-      url: "https://mutantgenomics.com/cart",
+      url: "https://mutantgenomics.com/upgrade",
     });
   });
 

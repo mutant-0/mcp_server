@@ -89,7 +89,7 @@ MCP Lambda (`mutant-mcp`):
 | `MUTANT_OAUTH_SCOPE_DNA_IMPORT` | leave **empty** to derive `<MUTANT_MCP_RESOURCE_URI>/dna.import`; set only to override |
 | `MUTANT_MCP_RESOURCE_URI` | e.g. `https://dev-api.mutantbiotech.com/mcp` |
 | `MUTANT_CORS_ORIGINS` | `https://chatgpt.com,https://chat.openai.com` |
-| `MUTANT_UPGRADE_URL` | `https://mutantgenomics.com/cart` |
+| `MUTANT_UPGRADE_URL` | `https://mutantgenomics.com/upgrade` |
 | `MUTANT_SNP_CATALOG_MAX_BYTES` | optional, default `2000000` (per-tool cap for `get_snp_catalog`) |
 | `MUTANT_MAX_REQUEST_BYTES` | optional, default `5242880` (cap for `create_report` payloads) |
 
@@ -98,7 +98,7 @@ report-generator Lambda:
 | Variable | Value |
 |---|---|
 | `MCP_CURSOR_SECRET` | long random value (per environment) |
-| `MUTANT_UPGRADE_URL` | `https://mutantgenomics.com/cart` |
+| `MUTANT_UPGRADE_URL` | `https://mutantgenomics.com/upgrade` |
 
 `ENTITLEMENTS_TABLE` and its IAM already exist. The MCP role intentionally has
 **no** `UserEntitlements` read permission: entitlement is resolved in the backend.

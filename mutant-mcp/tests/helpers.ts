@@ -25,7 +25,7 @@ export function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     MUTANT_OAUTH_SCOPE_DNA_IMPORT: "",
     MUTANT_MCP_RESOURCE_URI: "https://mcp.mutantgenomics.com/mcp",
     MUTANT_CORS_ORIGINS: "https://chatgpt.com",
-    MUTANT_UPGRADE_URL: "https://mutantgenomics.com/cart",
+    MUTANT_UPGRADE_URL: "https://mutantgenomics.com/upgrade",
     MUTANT_ONBOARDING_URL: "https://mutantgenomics.com/onboarding",
     MUTANT_REQUEST_TIMEOUT_MS: 5000,
     MUTANT_MAX_RESPONSE_BYTES: 512000,

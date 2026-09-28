@@ -24,7 +24,7 @@ const EnvSchema = z.object({
     .string()
     .trim()
     .default("https://chatgpt.com,https://chat.openai.com"),
-  MUTANT_UPGRADE_URL: z.string().trim().default("https://mutantgenomics.com/cart"),
+  MUTANT_UPGRADE_URL: z.string().trim().default("https://mutantgenomics.com/upgrade"),
   MUTANT_ONBOARDING_URL: z.string().trim().default("https://mutantgenomics.com/onboarding"),
   MUTANT_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
   MUTANT_MAX_RESPONSE_BYTES: z.coerce.number().int().positive().default(512000),

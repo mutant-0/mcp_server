@@ -89,7 +89,7 @@ export class MutantMcpStack extends Stack {
         MUTANT_CORS_ORIGINS:
           props.corsOrigins ?? "https://chatgpt.com,https://chat.openai.com",
         MUTANT_DEV_MODE: props.devMode ? "true" : "false",
-        MUTANT_UPGRADE_URL: props.upgradeUrl ?? "https://mutantgenomics.com/cart",
+        MUTANT_UPGRADE_URL: props.upgradeUrl ?? "https://mutantgenomics.com/upgrade",
         MUTANT_ONBOARDING_URL: props.onboardingUrl ?? "https://mutantgenomics.com/onboarding",
         MUTANT_REQUEST_TIMEOUT_MS: String(props.requestTimeoutMs ?? 20000),
         MUTANT_MAX_RESPONSE_BYTES: String(props.maxResponseBytes ?? 512000),
