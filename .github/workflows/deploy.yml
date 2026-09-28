@@ -81,6 +81,15 @@ jobs:
           role-session-name: github-actions-mutant-mcp
           aws-region: us-west-2
 
+      # The Dockerfile builds FROM public.ecr.aws images. Anonymous pulls share a
+      # global ECR Public quota and fail with 429 `toomanyrequests: Data limit
+      # exceeded`; authenticating with this role's credentials raises the limit.
+      # `ecr-public` is served only from us-east-1.
+      - name: Login to ECR Public
+        run: |
+          aws ecr-public get-login-password --region us-east-1 \
+            | docker login --username AWS --password-stdin public.ecr.aws
+
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
