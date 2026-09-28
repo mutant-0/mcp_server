@@ -179,10 +179,18 @@ Derivation rules:
 | `READY` | Usable results, nothing to refresh. |
 | `READY_REFRESH_AVAILABLE` | Usable results, and a newer platform/scoring revision is available. |
 | `READY_REFRESH_PROCESSING` | Usable results while a replacement run is in flight. |
-| `REFRESH_PROCESSING_NO_USABLE_ANALYSIS` | A platform refresh is in flight and no usable results exist yet. |
-| `PROCESSING_FAILED` | No usable results and nothing in flight (terminal failure); regeneration is required. |
+| `REFRESH_PROCESSING_NO_USABLE_ANALYSIS` | A replacement run is genuinely in flight and no usable results exist yet. |
+| `PROCESSING_FAILED` | No usable results and nothing in flight (terminal failure or an unservable payload with no writer); regeneration is required. |
 
 Add a state only when it changes ChatGPT behavior.
+
+A processing state requires a run that is actually in flight (`snapshot.status` or
+`snapshot.refresh_status` is `processing`). The `regenerate` freshness flag alone
+means a newer revision exists — not that anything is writing the payload — so it
+never creates a processing state. A transiently unservable payload on a completed
+report therefore yields `PROCESSING_FAILED` with the regeneration action, because
+polling could never clear it. `pending_analysis.retry_after_seconds` gives a
+genuinely in-flight run a bounded cadence.
 
 ### `capabilities`
 
@@ -209,11 +217,15 @@ question, or browse, so pinning one action would over-constrain the model.
 | DNA on file, no report row | `show_dna_import` (`arguments: {mode: "initial"}`). |
 | `READY*` | omitted. |
 
-The backend always emits the polling `next_action` for the two no-usable-analysis
-processing states. The Lambda strips it only on the component-owned
-`poll_analysis_status` path, where the card polls on its own and the hint would
-only invite the model to poll or narrate. The model-facing
-`get_analysis_status` keeps it for the non-UI path.
+The backend always emits the polling `next_action` for a processing state only
+when a run is genuinely in flight. The Lambda strips it only on the
+component-owned `poll_analysis_status` path, where the card polls on its own and
+the hint would only invite the model to poll or narrate. The model-facing
+`get_analysis_status` keeps it for the non-UI path, paired with
+`pending_analysis.retry_after_seconds` so the caller has a cadence rather than a
+hot loop. When no usable analysis exists and no run is in flight, there is no
+polling hint at all: the state is `PROCESSING_FAILED` and the only action is the
+regeneration via `show_dna_import` `{mode: "regenerate"}`.
 
 ## Tools
 
@@ -309,9 +321,10 @@ Input: `{}`. A successful call even with no analysis.
 
 The status endpoint reports readiness from what the read tools can actually
 serve, not merely from report completion. A completed run whose saved causes
-payload is missing, stale, or from a different scoring engine is reported as
-`READY_REFRESH_PROCESSING` / `PROCESSING_FAILED` (via `pending_analysis`) — it is
-never advertised as `READY` while `get_analysis_context` would refuse it.
+payload is missing, stale, or from a different scoring engine is never
+advertised as `READY` while `get_analysis_context` would refuse it: it is
+`REFRESH_PROCESSING_NO_USABLE_ANALYSIS` only while a run is actually writing the
+replacement, and `PROCESSING_FAILED` (regeneration required) otherwise.
 
 While `experience_state` is a processing state, the DNA import component polls
 its own app-only `poll_analysis_status` tool (about every 7 seconds, up to 10
@@ -333,13 +346,16 @@ alone; silence is preferred over describing unavailable capabilities.
 - `READY_REFRESH_PROCESSING` means a replacement run is in flight while the prior
   results stay queryable. No refresh action is offered while a run is in flight.
 - `REFRESH_PROCESSING_NO_USABLE_ANALYSIS` is the same run with no usable prior
-  results; the only action is to poll status.
+  results but a run actually writing a replacement; the only action is to poll
+  status, with `retry_after_seconds` as the cadence. A `regenerate` flag with no
+  run in flight is not this state.
 - A refresh requires DNA resubmission: the platform cannot rescore a stored raw
   file the account no longer holds.
 - A permanent miss (`analysis_engine_changed`, `analysis_payload_empty`) makes
   the active analysis unusable and yields `PROCESSING_FAILED` with a regeneration
-  action; a transient miss (a regeneration still writing) clears on its own and
-  yields a processing state.
+  action; a transient miss clears on its own only while a run is writing the
+  replacement. With no writer it also yields `PROCESSING_FAILED`, because waiting
+  cannot clear it.
 
 ### `poll_analysis_status`
 
