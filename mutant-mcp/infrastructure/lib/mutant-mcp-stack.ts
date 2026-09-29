@@ -6,7 +6,7 @@ import { CfnDomainName, ApiMapping, HttpApi, type IDomainNameRef } from "aws-cdk
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Architecture, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
-import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
+import { LogGroup, RetentionDays, type ILogGroup } from "aws-cdk-lib/aws-logs";
 import type { Construct } from "constructs";
 
 /** Mapping key that serves OAuth discovery at the custom domain's root. */
@@ -51,6 +51,14 @@ export interface MutantMcpStackProps extends StackProps {
   onboardingUrl?: string;
   logLevel?: string;
   reservedConcurrency?: number;
+  /**
+   * Adopt an already-existing `/aws/lambda/<functionName>` log group instead of
+   * creating it. Required once the Lambda service has auto-created the group
+   * (first deploy without an explicit `logGroup`), which otherwise fails with
+   * "Resource of type 'AWS::Logs::LogGroup' ... already exists".
+   * Retention is not applied to an adopted group.
+   */
+  adoptLogGroup?: boolean;
 }
 
 export class MutantMcpStack extends Stack {
@@ -67,10 +75,13 @@ export class MutantMcpStack extends Stack {
     // auto-named (e.g. `mutant-mcp-dev-McpLogGroup7D3BF67E-…`) and the function
     // logs there instead of the conventional `/aws/lambda/<function>` group,
     // which makes operational lookups and dashboards miss the logs.
-    const logGroup = new LogGroup(this, "McpLogGroup", {
-      logGroupName: `/aws/lambda/${props.functionName ?? "mutant-mcp"}`,
-      retention: RetentionDays.ONE_MONTH,
-    });
+    const logGroupName = `/aws/lambda/${props.functionName ?? "mutant-mcp"}`;
+    const logGroup: ILogGroup = props.adoptLogGroup
+      ? LogGroup.fromLogGroupName(this, "McpLogGroup", logGroupName)
+      : new LogGroup(this, "McpLogGroup", {
+          logGroupName,
+          retention: RetentionDays.ONE_MONTH,
+        });
 
     const fn = new DockerImageFunction(this, "McpFunction", {
       code: DockerImageCode.fromImageAsset(projectRoot()),

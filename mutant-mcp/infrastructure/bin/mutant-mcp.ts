@@ -38,6 +38,7 @@ new MutantMcpStack(app, "MutantMcpStack", {
     : undefined,
   planInfoUrl: process.env.MUTANT_PLAN_INFO_URL || undefined,
   devMode: process.env.MUTANT_DEV_MODE === "true",
+  adoptLogGroup: process.env.MUTANT_ADOPT_LOG_GROUP === "true",
 });
 
 app.synth();
