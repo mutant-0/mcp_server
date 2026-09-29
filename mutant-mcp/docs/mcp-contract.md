@@ -732,7 +732,11 @@ scoring drivers.
 - `explanation.bottom_line` and `interpretation_boundary` prefer curated
   `presentation` copy, then the catalog, and are omitted when no source exists.
 - `explanation.top_contributing_patterns` lists at most three matched or
-  provisional patterns, strongest impact first.
+  provisional patterns, strongest impact first. Each row also carries the
+  explicit pattern fields (`required_group_coverage`, `marker_call_coverage`,
+  `contributing_marker_ids`, `missing_marker_ids`, `match_rule`,
+  `match_rule_summary`, `match_explanation`) so the one-of-N rule and the two
+  coverage scopes are stated where the model reads them.
 - `ranking_drivers` lists the non-null score components behind the priority
   score, in score order, each carrying its published `semantics` sentence.
 - `score_breakdown` carries the retained component scores on the comparable
@@ -795,10 +799,28 @@ explicit `source_state: "not_provided"` signal.
     "pattern_type": "context_gate",
     "contribution_status": "contributes",
     "impact_points": 12.5,
-    "coverage": 0.8,
+    "coverage": 1,
     "requires_clinical_confirmation": false,
     "summary": "…",
-    "marker_ids": ["rs4680"]
+    "marker_ids": ["rs17249754", "rs2681472", "rs11105378"],
+    "required_group_coverage": { "with_data": 1, "total": 1 },
+    "core_groups_matched": 1,
+    "core_groups_required": 1,
+    "match_rule": {
+      "logic": "any_of",
+      "gene": "ATP2B1",
+      "alternatives": 3,
+      "core_groups_total": 1,
+      "core_groups_matched": 1,
+      "core_groups_required": 1
+    },
+    "match_rule_summary": "Any one of three ATP2B1 proxy markers satisfies this core group.",
+    "marker_call_coverage": { "called": 1, "total": 3 },
+    "listed_marker_ids": ["rs17249754", "rs2681472", "rs11105378"],
+    "contributing_marker_ids": ["rs2681472"],
+    "called_non_risk_marker_ids": [],
+    "missing_marker_ids": ["rs17249754", "rs11105378"],
+    "match_explanation": "This pattern matched because one called ATP2B1 proxy satisfied a one-of-three core group. 1 of 3 listed markers contributed to this pattern and 2 were not called. Required-group coverage is 100% (1 of 1 groups had data); marker-call completeness is 33% (1 of 3 markers called)."
   }
   ```
 
@@ -806,6 +828,29 @@ explicit `source_state: "not_provided"` signal.
   the resolved contribution. `marker_ids` are references only (no nested variant
   records) and cover the full pattern. With `pattern_id`, only that pattern is
   returned.
+
+  Two independent coverage scopes are reported explicitly and must not be
+  conflated:
+
+  - **Required-group coverage** — `required_group_coverage`
+    (`with_data`/`total`), `core_groups_matched`, `core_groups_required`, and
+    the legacy numeric alias `coverage` — is the engine's required-logic scope.
+    A satisfied one-of-N OR group makes it 1/1 even when only one alternative
+    marker was called.
+  - **Marker-call completeness** — `marker_call_coverage` (`called`/`total`),
+    `listed_marker_ids`, `contributing_marker_ids`,
+    `called_non_risk_marker_ids`, `missing_marker_ids` — is derived from each
+    contribution's canonical `status` (`contributing` / `no_risk` = called,
+    `not_found` = missing). It is **never** computed from `overall_marker_match`
+    or `match_percentage`, which count qualifying matches rather than calls.
+    Called non-risk markers are distinct from contributors, and a missing marker
+    is never treated as a non-risk genotype.
+
+  `match_rule` describes how the requirement groups combine (`any_of` for a
+  single core group satisfied by any one alternative, otherwise counts only),
+  and `match_explanation` is the deterministic, genetics-only sentence stating
+  that rule and its limitation. `marker_call_coverage` applies to `patterns[]`
+  rows for both matched and evaluated-negative patterns.
 
 - `variants` → deduped `VariantEvidence`, one row per rsID with all pattern
   memberships nested. A variant's module-scoring role and its pattern
@@ -1389,6 +1434,10 @@ from these values; it never re-derives or overrides them.
 | Marker-call completeness | `assessment.marker_coverage` (`called` / `total` / `level`) and `marker_call_incomplete` | How many scoped markers were called |
 | Hypothesis assessability | `assessment.assessability` (`assessed` / `partial` / `not_assessable`) | Whether a result could be evaluated at all |
 | Engine measurement coverage | `component_scores.coverage_confidence`, projected as `hypothesis.scores.coverage` and `score_interpretation.measurement_coverage` | How completely the engine measured the result (distinct from marker-call completeness) |
+| Pattern required-group coverage | Storm `required_coverage` + `pattern.match_breakdown.core_logic`/`supporting_logic`, projected as `required_group_coverage` / `core_groups_matched` / `core_groups_required` (legacy alias `coverage`) | Groups with data out of all declared groups; a satisfied one-of-N OR group is 1/1 regardless of how many alternatives were called |
+| Pattern marker-call completeness | `pattern.contributions[].status`, projected as `marker_call_coverage` / `listed_marker_ids` / `contributing_marker_ids` / `called_non_risk_marker_ids` / `missing_marker_ids` | Per-pattern raw calls: `contributing` and `no_risk` are called, `not_found` is missing; never derived from `overall_marker_match` |
+| Pattern participant counts | `patterns[].participating_gene_count` / `participating_variant_count` (from `scoring_trace.pattern_contributions`) | One pattern only; a one-of-three match may contribute a single variant |
+| Hypothesis participant counts | `support_architecture.pattern_participating_gene_count` / `pattern_participating_variant_count` | Aggregate unique participants across **all retained patterns**; when a pattern is the dominant driver its own counts are repeated under `dominant_driver.participating_*_count` |
 | Support shape | retained `scoring_trace.support_architecture` (`classification`, counts, `dominant_driver`, `summary`) | `evidence_shape` is a pure projection: `evidence_shape.summary === support_architecture.summary` |
 | Ranking | `priority_breakdown` / `scoring_trace.component_scores`, projected by `score_breakdown` and `ranking_drivers` | Ranking inputs are confidence-adjusted genetics + converging-pattern adjustment + phenotype adjustment; `coverage_confidence` is **not** a ranking input |
 | Confidence | one object `{ score, level }` (`genetic_confidence`) | Never a bare number or string |

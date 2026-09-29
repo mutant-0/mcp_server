@@ -354,8 +354,32 @@ function dataFor(operation: BackendOperation): Record<string, unknown> {
             id: "PAT_A",
             name: "Pattern A",
             state: "matched",
+            pattern_type: "storm",
             contribution_status: "contributes",
             impact_points: 5.5,
+            coverage: 1,
+            requires_clinical_confirmation: false,
+            summary: "An ATP2B1 one-of-three proxy pattern.",
+            marker_ids: ["rs17249754", "rs2681472", "rs11105378"],
+            required_group_coverage: { with_data: 1, total: 1 },
+            core_groups_matched: 1,
+            core_groups_required: 1,
+            match_rule: {
+              logic: "any_of",
+              gene: "ATP2B1",
+              alternatives: 3,
+              core_groups_total: 1,
+              core_groups_matched: 1,
+              core_groups_required: 1,
+            },
+            match_rule_summary: "Any one of three ATP2B1 proxy markers satisfies this core group.",
+            marker_call_coverage: { called: 1, total: 3 },
+            listed_marker_ids: ["rs17249754", "rs2681472", "rs11105378"],
+            contributing_marker_ids: ["rs2681472"],
+            called_non_risk_marker_ids: [],
+            missing_marker_ids: ["rs17249754", "rs11105378"],
+            match_explanation:
+              "This pattern matched because one called ATP2B1 proxy satisfied a one-of-three core group. 1 of 3 listed markers contributed to this pattern and 2 were not called. Required-group coverage is 100% (1 of 1 groups had data); marker-call completeness is 33% (1 of 3 markers called).",
           },
         ],
       };
@@ -645,6 +669,35 @@ describe("contract v3.0 acceptance", () => {
     const text = textOf(result);
     expect(text).not.toContain("modules_then_patterns_then_variants");
     expect(text).not.toContain("evidence_explanation_rules");
+  });
+
+  it("carries the ATP2B1 one-of-three rule and both coverage scopes", async () => {
+    const { client } = await connect();
+    const result = await client.callTool({
+      name: "get_supporting_evidence",
+      arguments: { hypothesis_id: "HYP_A", kind: "patterns" },
+    });
+    const items = (envelopeOf(result).data as { items: Array<Record<string, unknown>> }).items;
+    const item = items[0]!;
+    // One qualifying proxy satisfies the core group: 1/1 groups.
+    expect(item.required_group_coverage).toEqual({ with_data: 1, total: 1 });
+    expect(item.core_groups_matched).toBe(1);
+    expect(item.core_groups_required).toBe(1);
+    // Raw calls stayed 1/3 and are not derived from the match rate.
+    expect(item.marker_call_coverage).toEqual({ called: 1, total: 3 });
+    expect(item.contributing_marker_ids).toEqual(["rs2681472"]);
+    expect(item.called_non_risk_marker_ids).toEqual([]);
+    expect(item.missing_marker_ids).toEqual(["rs17249754", "rs11105378"]);
+    const rule = item.match_rule as { logic: string; alternatives: number; gene: string };
+    expect(rule.logic).toBe("any_of");
+    expect(rule.alternatives).toBe(3);
+    expect(rule.gene).toBe("ATP2B1");
+    expect(String(item.match_explanation)).toContain("one-of-three core group");
+    expect(String(item.match_explanation)).toContain("Required-group coverage is 100%");
+    expect(String(item.match_explanation)).toContain("marker-call completeness is 33%");
+    // The legacy numeric alias remains the required-group ratio, not call coverage.
+    expect(item.coverage).toBe(1);
+    expect(item.marker_ids).toEqual(item.listed_marker_ids);
   });
 
   it("explains a finding in the concise What/Why/Clarify content order", async () => {

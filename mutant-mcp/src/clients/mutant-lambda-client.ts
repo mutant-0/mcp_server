@@ -636,7 +636,32 @@ export class MockMutantBackendClient implements MutantBackendClient {
               "It ranked #1 on priority score, which reflects moderate genetic support, module support and retained pattern support; priority orders findings and is not a disease probability.",
             interpretation_boundary:
               "This reflects inherited variation, not a current lipid measurement.",
-            top_contributing_patterns: [],
+            top_contributing_patterns: [
+              {
+                id: "PAT_MOCK",
+                name: "Lipid handling convergence",
+                state: "matched",
+                coverage: 1,
+                summary: "An illustrative retained pattern.",
+                required_group_coverage: { with_data: 1, total: 1 },
+                core_groups_matched: 1,
+                core_groups_required: 1,
+                match_rule: {
+                  logic: "any_of",
+                  gene: "APOE",
+                  alternatives: 2,
+                  core_groups_total: 1,
+                  core_groups_matched: 1,
+                  core_groups_required: 1,
+                },
+                match_rule_summary: "Any one of two APOE proxy markers satisfies this core group.",
+                marker_call_coverage: { called: 1, total: 2 },
+                contributing_marker_ids: ["rs429358"],
+                missing_marker_ids: ["rs7412"],
+                match_explanation:
+                  "This pattern matched because one called APOE proxy satisfied a one-of-two core group. 1 of 2 listed markers contributed to this pattern and 1 was not called. Required-group coverage is 100% (1 of 1 groups had data); marker-call completeness is 50% (1 of 2 markers called).",
+              },
+            ],
           },
           score_breakdown: {
             priority_score: 72,
@@ -716,11 +741,46 @@ export class MockMutantBackendClient implements MutantBackendClient {
 
     if (operation === "get_supporting_evidence") {
       const kind = typeof args.kind === "string" ? args.kind : "patterns";
+      const patternItems =
+        kind === "patterns"
+          ? [
+              {
+                id: "PAT_MOCK",
+                name: "Lipid handling convergence",
+                state: "matched",
+                pattern_type: "storm",
+                contribution_status: "contributes",
+                impact_points: 12,
+                coverage: 1,
+                summary: "An illustrative retained pattern.",
+                marker_ids: ["rs429358", "rs7412"],
+                required_group_coverage: { with_data: 1, total: 1 },
+                core_groups_matched: 1,
+                core_groups_required: 1,
+                match_rule: {
+                  logic: "any_of",
+                  gene: "APOE",
+                  alternatives: 2,
+                  core_groups_total: 1,
+                  core_groups_matched: 1,
+                  core_groups_required: 1,
+                },
+                match_rule_summary: "Any one of two APOE proxy markers satisfies this core group.",
+                marker_call_coverage: { called: 1, total: 2 },
+                listed_marker_ids: ["rs429358", "rs7412"],
+                contributing_marker_ids: ["rs429358"],
+                called_non_risk_marker_ids: [],
+                missing_marker_ids: ["rs7412"],
+                match_explanation:
+                  "This pattern matched because one called APOE proxy satisfied a one-of-two core group. 1 of 2 listed markers contributed to this pattern and 1 was not called. Required-group coverage is 100% (1 of 1 groups had data); marker-call completeness is 50% (1 of 2 markers called).",
+              },
+            ]
+          : [];
       return {
         contract_version: CONTRACT_VERSION,
         analysis_version: "mock",
         ok: true,
-        data: { kind, items: [], next_cursor: null },
+        data: { kind, items: patternItems, next_cursor: null },
         error: null,
       };
     }

@@ -133,6 +133,62 @@ describe("per-tool output schemas (contract 3.0.0)", () => {
       ).success,
     ).toBe(true);
   });
+
+  it("accepts the explicit pattern coverage and rule fields", () => {
+    const envelope = makeSuccessResponse({
+      kind: "patterns",
+      items: [
+        {
+          id: "atp_dependent_calcium_clearance_fragility_storm",
+          name: "ATP-Dependent Calcium Clearance Fragility Storm",
+          state: "matched",
+          pattern_type: "storm",
+          contribution_status: "contributes",
+          impact_points: 5.5,
+          coverage: 1,
+          summary: "One-of-three proxy pattern.",
+          marker_ids: ["rs17249754", "rs2681472", "rs11105378"],
+          required_group_coverage: { with_data: 1, total: 1 },
+          core_groups_matched: 1,
+          core_groups_required: 1,
+          match_rule: {
+            logic: "any_of",
+            gene: "ATP2B1",
+            alternatives: 3,
+            core_groups_total: 1,
+            core_groups_matched: 1,
+            core_groups_required: 1,
+          },
+          match_rule_summary: "Any one of three ATP2B1 proxy markers satisfies this core group.",
+          marker_call_coverage: { called: 1, total: 3 },
+          listed_marker_ids: ["rs17249754", "rs2681472", "rs11105378"],
+          contributing_marker_ids: ["rs2681472"],
+          called_non_risk_marker_ids: [],
+          missing_marker_ids: ["rs17249754", "rs11105378"],
+          match_explanation: "This pattern matched because one called ATP2B1 proxy satisfied a one-of-three core group.",
+        },
+      ],
+    });
+    const parsed = supportingEvidenceOutputSchema.safeParse(envelope);
+    expect(parsed.success).toBe(true);
+  });
+
+  it("rejects a malformed marker-call coverage object", () => {
+    const envelope = makeSuccessResponse({
+      kind: "patterns",
+      items: [
+        {
+          id: "PAT_A",
+          name: "Pattern A",
+          state: "matched",
+          contribution_status: "contributes",
+          // called/total must be integers, not prose.
+          marker_call_coverage: { called: "one", total: 3 },
+        },
+      ],
+    });
+    expect(supportingEvidenceOutputSchema.safeParse(envelope).success).toBe(false);
+  });
 });
 
 describe("genetic confidence object (contract 3.0.0)", () => {

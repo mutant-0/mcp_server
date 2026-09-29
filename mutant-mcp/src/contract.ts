@@ -465,13 +465,31 @@ export interface SupportArchitecture {
   contributing_module_count?: number;
   module_scoring_gene_count?: number;
   module_scoring_variant_count?: number;
+  /**
+   * Aggregate count of unique genes participating in any retained pattern.
+   * This scopes the whole hypothesis: each `PatternContribution.participating_gene_count`
+   * counts only that one pattern, so the two must not be read as the same value.
+   */
   pattern_participating_gene_count?: number;
+  /**
+   * Aggregate count of unique variants participating in any retained pattern.
+   * This scopes the whole hypothesis; `patterns[].participating_variant_count`
+   * counts only that pattern. The ATP2B1-style one-of-three match is the usual
+   * case where a pattern contributes a single variant to this aggregate.
+   */
   pattern_participating_variant_count?: number;
   dominant_driver?: {
     type: "module" | "pattern" | "gene" | "variant" | null;
     id: string | null;
     name: string | null;
     contribution_fraction?: number;
+    /**
+     * The dominant pattern's own participant counts, present only when the
+     * dominant driver is a pattern. Distinct from the hypothesis-level
+     * `pattern_participating_*_count` aggregate.
+     */
+    participating_gene_count?: number;
+    participating_variant_count?: number;
   };
   summary: string;
 }
@@ -702,10 +720,45 @@ export interface PatternEvidence {
   pattern_type?: string | null;
   contribution_status: "contributes" | "context_only" | "excluded" | string;
   impact_points?: number | null;
+  /**
+   * Legacy numeric alias of the engine's required-group coverage ratio
+   * (groups with data / total groups), NOT marker-call completeness. Prefer
+   * `required_group_coverage` for the explicit counts and `marker_call_coverage`
+   * for how many listed markers were actually called.
+   */
   coverage?: number | null;
   requires_clinical_confirmation?: boolean | null;
   summary?: string | null;
+  /** Legacy alias of `listed_marker_ids`; every marker the pattern defines. */
   marker_ids?: string[];
+  /** Required-logic scope: groups with any tested data out of all groups. */
+  required_group_coverage?: { with_data: number; total: number } | null;
+  core_groups_matched?: number | null;
+  core_groups_required?: number | null;
+  /**
+   * How the pattern's requirement groups combine. `any_of` is a single core
+   * group whose listed alternatives are satisfied by any one qualifying call;
+   * `core_groups` is any other composition, reported as counts only.
+   */
+  match_rule?: {
+    logic: "any_of" | "core_groups";
+    gene?: string;
+    alternatives?: number;
+    core_groups_total?: number;
+    core_groups_matched?: number;
+    core_groups_required?: number;
+  } | null;
+  match_rule_summary?: string | null;
+  /** Raw call scope over the pattern's listed markers (contributing + no_risk). */
+  marker_call_coverage?: { called: number; total: number } | null;
+  listed_marker_ids?: string[];
+  contributing_marker_ids?: string[];
+  /** Called markers whose genotype was non-risk; not contributors. */
+  called_non_risk_marker_ids?: string[];
+  /** Listed markers with no stored call. Never treated as non-risk genotypes. */
+  missing_marker_ids?: string[];
+  /** Genetics-only sentence stating the one-of-N rule and its limitation. */
+  match_explanation?: string | null;
 }
 
 /** One pattern a marker participates in. */

@@ -251,8 +251,16 @@ const patternContributionSchema = z.looseObject({
   state: z.string().nullable(),
   retained_support: z.number().nullable(),
   module_ids: z.array(z.string()),
-  participating_gene_count: z.number().int(),
-  participating_variant_count: z.number().int(),
+  participating_gene_count: z
+    .number()
+    .int()
+    .describe("Genes participating in this pattern only; not the hypothesis-level aggregate."),
+  participating_variant_count: z
+    .number()
+    .int()
+    .describe(
+      "Variants participating in this pattern only. A one-of-three OR group may contribute a single variant here, while support_architecture.pattern_participating_variant_count aggregates across retained patterns.",
+    ),
   summary: z.string().nullable(),
 });
 
@@ -331,9 +339,26 @@ export const explainHypothesisDataSchema = z.looseObject({
     contributing_module_count: z.number().int().optional(),
     module_scoring_gene_count: z.number().int().optional(),
     module_scoring_variant_count: z.number().int().optional(),
-    pattern_participating_gene_count: z.number().int().optional(),
-    pattern_participating_variant_count: z.number().int().optional(),
-    dominant_driver: z.record(z.string(), z.unknown()).optional(),
+    pattern_participating_gene_count: z
+      .number()
+      .int()
+      .optional()
+      .describe(
+        "Aggregate count of unique genes participating in any retained pattern. Each patterns[] row counts only that pattern, so the two scopes differ.",
+      ),
+    pattern_participating_variant_count: z
+      .number()
+      .int()
+      .optional()
+      .describe(
+        "Aggregate count of unique variants participating in any retained pattern. A one-of-three match contributes one variant here, while patterns[].participating_variant_count also counts only that pattern.",
+      ),
+    dominant_driver: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe(
+        "The dominant driver. When it is a pattern it also carries that pattern's own participating_gene_count and participating_variant_count, distinct from the hypothesis-level pattern_participating_*_count aggregate.",
+      ),
     summary: z.string().nullable(),
   }),
   modules: z.array(moduleContributionSchema),
@@ -399,10 +424,60 @@ const patternEvidenceSchema = z.looseObject({
   pattern_type: z.string().nullable().optional(),
   contribution_status: z.string(),
   impact_points: z.number().nullable().optional(),
-  coverage: z.number().nullable().optional(),
+  coverage: z
+    .number()
+    .nullable()
+    .optional()
+    .describe(
+      "Legacy numeric alias of required-group coverage (groups with data / total groups), not marker-call completeness. Use required_group_coverage and marker_call_coverage for the explicit scopes.",
+    ),
   requires_clinical_confirmation: z.boolean().nullable().optional(),
   summary: z.string().nullable().optional(),
-  marker_ids: z.array(z.string()).optional(),
+  marker_ids: z
+    .array(z.string())
+    .optional()
+    .describe("Legacy alias of listed_marker_ids: every marker the pattern defines, including uncalled ones."),
+  required_group_coverage: z
+    .looseObject({ with_data: z.number().int(), total: z.number().int() })
+    .nullable()
+    .optional()
+    .describe("Required-logic scope: how many declared core/support groups had any tested data."),
+  core_groups_matched: z.number().int().nullable().optional(),
+  core_groups_required: z.number().int().nullable().optional(),
+  match_rule: z
+    .record(z.string(), z.unknown())
+    .nullable()
+    .optional()
+    .describe(
+      "How the pattern's requirement groups combine. logic 'any_of' is a single core group satisfied by any one qualifying alternative; 'core_groups' is any other composition reported as counts only.",
+    ),
+  match_rule_summary: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("One plain-language sentence for the pattern's requirement rule."),
+  marker_call_coverage: z
+    .looseObject({ called: z.number().int(), total: z.number().int() })
+    .nullable()
+    .optional()
+    .describe(
+      "Raw call scope over the pattern's listed markers: contributing and called non-risk count as called; a not_found marker is missing.",
+    ),
+  listed_marker_ids: z.array(z.string()).optional(),
+  contributing_marker_ids: z.array(z.string()).optional(),
+  called_non_risk_marker_ids: z
+    .array(z.string())
+    .optional()
+    .describe("Called markers whose genotype was non-risk, kept distinct from contributors."),
+  missing_marker_ids: z
+    .array(z.string())
+    .optional()
+    .describe("Listed markers with no stored call; never treated as a non-risk genotype."),
+  match_explanation: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("Genetics-only sentence stating the one-of-N rule and the two coverage scopes; never claims full marker coverage or convergence."),
 });
 
 const moduleEvidenceSchema = z.looseObject({

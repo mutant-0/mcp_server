@@ -70,6 +70,8 @@ const SINGLE_VARIANT_DETAILS = makeDetailsData({
       id: "PAT_A",
       name: "MTHFR C677T",
       contribution_fraction: 0.9,
+      participating_gene_count: 1,
+      participating_variant_count: 1,
     },
     summary:
       "Support is pattern-led: MTHFR C677T supplies 90% of retained genetic support from 1 participating variant.",

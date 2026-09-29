@@ -249,7 +249,13 @@ function evidenceContent(data: JsonObject): string {
       const suffix = [state, impact !== null ? `${impact} impact points` : null]
         .filter((part): part is string => part !== null)
         .join(", ");
+      // The requirement rule and call/group scopes are stated explicitly so a
+      // one-of-N match is never rendered as full marker coverage.
+      const rule = pattern ? asText(pattern.match_rule_summary) : null;
+      const explanation = pattern ? asText(pattern.match_explanation) : null;
+      const detail = explanation ?? rule;
       parts.push(suffix ? `${name} (${suffix})` : name);
+      if (detail) parts.push(`  ${detail}`);
     }
   } else if (kind === "variants") {
     const ids = items
