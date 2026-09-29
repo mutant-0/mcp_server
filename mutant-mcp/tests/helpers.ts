@@ -265,15 +265,16 @@ export function makeFollowupsData(
         },
       },
       {
-        id: "what-changes-it",
-        label: "What could change it?",
-        prompt: "What would strengthen or weaken my \"Alpha finding\" finding?",
-        intent: "evidence",
+        id: "compare-with-history",
+        label: "Compare with my history",
+        prompt:
+          "Which of my top three Mutant findings seems most relevant to the health history I've shared? If I have not shared any health history, ask me what I want to share before comparing.",
+        intent: "comparison",
         hypothesis_id: "HYP_A",
         action: {
           analysis_version: "rev42-v3.0.0",
           hypothesis_id: "HYP_A",
-          intent: "evidence",
+          intent: "comparison",
         },
       },
     ],

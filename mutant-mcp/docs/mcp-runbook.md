@@ -203,6 +203,69 @@ live in process memory, so restarting the dev server clears them.
    surface locked hypotheses; `active_analysis.analysis_version` changes after a
    reprocess.
 
+### Entry copy and starter prompts
+
+A new conversation must make the highest-value use case obvious before anyone
+types. The released surface today is this developer-mode custom connector, so the
+name and description entered in ChatGPT Plugins are the only pre-message copy the
+host has: a developer-mode connection has no starter-prompt field.
+
+Source of truth (recorded here because no plugin package exists in either repo —
+there is no `plugin.json`, `.codex-plugin/plugin.json`, `.mcp.json`, or
+`.app.json` elsewhere, and the deploy workflow only builds the MCP Lambda):
+
+| Surface | What supplies it |
+|---|---|
+| Display name | ChatGPT Plugins → connector name |
+| Description | ChatGPT Plugins → connector description |
+| Starter prompts | `extensions.com.openai.interface.defaultPrompt` in `mutant-mcp/plugin.json`, rendered only by the packaged-plugin path |
+| Server identity | `SERVER_NAME` in `src/server.ts`; PRM `resource_name` (`Mutant Genomics Analysis`) |
+
+Enter this copy when creating or editing the connector:
+
+- **Display name:** `Mutant Genomics`
+- **Description:** `Compare your DNA findings with health history you share, explore results, or add DNA data. Ask which Mutant findings best fit the health history or records you share in this ChatGPT conversation. You can also explore findings or add DNA data. Mutant does not automatically access your medical records; genetic findings are hypotheses, not diagnoses.`
+- **Try asking:** `Which of my Mutant findings best fits the health history or records I've shared here?` — this is what makes at least one first question discoverable before any message on a surface with no starter-prompt field.
+
+Character limits (OpenAI plugin submission reference): display name ≤ 30; short
+description ≤ 240 for package validation and ≤ 30 for the final directory
+subtitle; long description ≤ 4,000; `defaultPrompt` ≤ 3 entries of ≤ 128
+characters each. `Mutant Genomics` fits. The caller-visible short description is
+kept in full in `plugin.json` (package cap); the final directory submission needs
+a ≤ 30-character subtitle (for example `Compare DNA to health history`).
+
+`mutant-mcp/plugin.json` carries the packaged-plugin interface copy and the three
+starter prompts with comparison first. It only takes effect once the Mutant plugin
+is packaged and submitted; packaging and submission are not part of this repo's
+deploy workflow. If the real listing lives outside these repositories, apply the
+same `interface` block there. If a host does not render `defaultPrompt` on a given
+entry surface, the connector description above still states exactly what to type.
+
+### Entry-flow verification (fresh, installed conversation)
+
+After deploying a metadata change, refresh the developer-mode connection
+(ChatGPT Plugins → Refresh) or install the updated package, then start a new
+conversation and confirm on each supported surface:
+
+- **Nothing typed:** at least one supported first question is discoverable (the
+  connector description, or the starter prompts on the packaged-plugin path). No
+  Apps SDK card is expected yet.
+- **Each starter prompt, for `NO_DNA`, `READY` Free, `READY` Full, and a
+  processing fixture:** the first tool call is `get_analysis_status`, then the
+  state-appropriate path. A broad ready prompt mounts exactly one overview card
+  and does not end with only "use the card above". The comparison prompt compares
+  only against history actually shared and asks when none was; it never sends the
+  history prose as a `list_health_hypotheses` query. Processing text promises no
+  future genes, variants, hypotheses, or scores. No blank "Worked for …" final
+  answer after a nonempty starter prompt.
+- **Enter on an empty composer:** record what happens. If a blank "Worked for …"
+  turn occurs with **no** Mutant tool call, that is a ChatGPT host/composer edge
+  case, not an MCP failure — report it as such.
+- Record the observed model-selected tool calls for the three prompts in
+  `mutant-mcp/tests/golden-prompt-routing-traces.json` (set `provenance` to
+  `observed`), then run
+  `GOLDEN_TRACES_REQUIRED=1 npm test -- tests/golden-prompt-routing.test.ts`.
+
 ### DNA import checks
 
 - `dna_status` is `missing` before an import and `available` after one completes.

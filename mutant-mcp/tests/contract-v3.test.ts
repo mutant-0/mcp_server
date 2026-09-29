@@ -565,6 +565,9 @@ describe("contract v3.0 acceptance", () => {
     };
     const prompts = data.suggested_prompts ?? [];
     const ids = prompts.map((prompt) => prompt.id);
+    // Comparison with shared history leads the ready card; Explain and Compare
+    // top 3 stay available as secondary actions.
+    expect(ids[0]).toBe("compare-medical-records");
     expect(ids).toContain("explain-first");
     expect(ids).toContain("compare-top-three");
     expect(ids).toContain("compare-medical-records");

@@ -154,6 +154,16 @@ describe("tool definitions", () => {
     expect(description).not.toContain("polls this tool");
   });
 
+  it("policy-describes the three entry prompts and the catalog-search rule", () => {
+    const status = TOOL_DEFINITIONS.find((tool) => tool.name === "get_analysis_status");
+    const description = status?.description ?? "";
+    expect(description).toContain("Show my current Mutant findings.");
+    expect(description).toContain("Help me add my DNA data to Mutant.");
+    expect(description).toContain("Call this tool first for all three");
+    expect(description).toContain("Pass only catalog-topic keywords to list_health_hypotheses");
+    expect(description).toContain("never the user's health-history prose");
+  });
+
   it("echoes the UI descriptor on the show_dna_import result metadata", () => {
     expect(dnaImportUiMeta()).toEqual({
       ui: { resourceUri: DNA_IMPORT_UI_URI, visibility: ["model", "app"] },

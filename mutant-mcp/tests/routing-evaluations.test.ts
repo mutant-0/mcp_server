@@ -23,6 +23,7 @@ import {
   StubBackendClient,
   makeConfig,
   makeErrorResponse,
+  makeStatusData,
   makeSuccessResponse,
   makeToolResponse,
   makeUser,
@@ -329,5 +330,275 @@ describe("routing evaluations", () => {
     expect(call?.meta.ui).toBeUndefined();
     expect(call?.meta.mutant).toBeUndefined();
     expect(call?.meta["openai/outputTemplate"]).toBeUndefined();
+  });
+});
+
+// --- pre-message entry ("starter") prompt routing -----------------------------
+//
+// The three prompts a person can send before the first Apps SDK card exists.
+// Each must begin with `get_analysis_status` (readiness is unknown) and then take
+// the state-appropriate path. These assertions cover the *server* behavior for
+// that path; the observed-traces evaluation in golden-prompt-routing.test.ts is
+// what proves ChatGPT actually selected those tools.
+describe("starter prompt routing", () => {
+  const COMPARE_PROMPT =
+    "Which of my Mutant findings best fits the health history or records I've shared here?";
+  const FINDINGS_PROMPT = "Show my current Mutant findings.";
+  const ADD_DNA_PROMPT = "Help me add my DNA data to Mutant.";
+
+  const READY_FREE = makeStatusData({
+    entitlement: {
+      plan: "mutant_free",
+      hypothesis_scope: "top_three",
+      genetic_context_scope: "accessible_hypotheses",
+    },
+    capabilities: {
+      can_query_analysis: true,
+      can_show_overview: true,
+      can_refresh_analysis: false,
+      can_search_hypotheses: false,
+      can_explore_genetic_context: true,
+    },
+  });
+
+  const NO_DNA_STATUS = makeStatusData({
+    dna_status: "missing",
+    experience_state: "NO_DNA",
+    active_analysis: { status: "none", usable: false },
+    entitlement: { plan: "mutant_free", hypothesis_scope: "top_three" },
+    capabilities: {
+      can_query_analysis: false,
+      can_show_overview: false,
+      can_refresh_analysis: false,
+      can_search_hypotheses: false,
+      can_explore_genetic_context: false,
+    },
+    next_action: { tool: "show_dna_import", arguments: { mode: "initial" } },
+  });
+
+  const PROCESSING_STATUS = makeStatusData({
+    dna_status: "available",
+    experience_state: "PROCESSING_INITIAL",
+    active_analysis: { status: "none", usable: false },
+    pending_analysis: { status: "processing", reason: "initial_analysis" },
+    entitlement: { plan: "mutant_free", hypothesis_scope: "top_three" },
+    capabilities: {
+      can_query_analysis: false,
+      can_show_overview: false,
+      can_refresh_analysis: false,
+      can_search_hypotheses: false,
+      can_explore_genetic_context: false,
+    },
+    next_action: { tool: "get_analysis_status" },
+  });
+
+  const IMPORT_CALL = {
+    name: "show_dna_import",
+    arguments: { mode: "initial" as const },
+  };
+  const OVERVIEW_CALL = { name: "show_analysis_overview" };
+
+  const FOLLOWUP_CALL = {
+    name: "show_analysis_followups",
+    arguments: {
+      intent: "comparison",
+      analysis_version: "rev42-v3.0.0",
+      hypothesis_ids: ["HYP_A"],
+    },
+  };
+
+  /** A real-world history prose the user might have typed in the chat. */
+  const SHARED_HISTORY =
+    "I have had fatigue and brain fog for months and my B12 was low in March 2024.";
+
+  interface StarterScenario {
+    prompt: string;
+    state: "NO_DNA" | "READY_FREE" | "READY_FULL" | "PROCESSING";
+    status: Record<string, unknown>;
+    tools: Array<{ name: string; arguments?: Record<string, unknown> }>;
+    expectOverview: boolean;
+    expectImport: boolean;
+  }
+
+  const STARTER_SCENARIOS: StarterScenario[] = [
+    // Comparison prompt.
+    {
+      prompt: COMPARE_PROMPT,
+      state: "NO_DNA",
+      status: NO_DNA_STATUS,
+      tools: [{ name: "get_analysis_status" }, IMPORT_CALL],
+      expectOverview: false,
+      expectImport: true,
+    },
+    {
+      prompt: COMPARE_PROMPT,
+      state: "READY_FREE",
+      status: READY_FREE,
+      tools: [
+        { name: "get_analysis_status" },
+        { name: "get_analysis_context" },
+        { name: "list_health_hypotheses", arguments: { limit: 3 } },
+        FOLLOWUP_CALL,
+      ],
+      expectOverview: false,
+      expectImport: false,
+    },
+    {
+      prompt: COMPARE_PROMPT,
+      state: "READY_FULL",
+      status: makeStatusData(),
+      tools: [
+        { name: "get_analysis_status" },
+        { name: "get_analysis_context" },
+        { name: "list_health_hypotheses", arguments: { limit: 10 } },
+        FOLLOWUP_CALL,
+      ],
+      expectOverview: false,
+      expectImport: false,
+    },
+    {
+      prompt: COMPARE_PROMPT,
+      state: "PROCESSING",
+      status: PROCESSING_STATUS,
+      tools: [{ name: "get_analysis_status" }],
+      expectOverview: false,
+      expectImport: false,
+    },
+    // Broad findings prompt.
+    {
+      prompt: FINDINGS_PROMPT,
+      state: "NO_DNA",
+      status: NO_DNA_STATUS,
+      tools: [{ name: "get_analysis_status" }, IMPORT_CALL],
+      expectOverview: false,
+      expectImport: true,
+    },
+    {
+      prompt: FINDINGS_PROMPT,
+      state: "READY_FREE",
+      status: READY_FREE,
+      tools: [{ name: "get_analysis_status" }, OVERVIEW_CALL],
+      expectOverview: true,
+      expectImport: false,
+    },
+    {
+      prompt: FINDINGS_PROMPT,
+      state: "READY_FULL",
+      status: makeStatusData(),
+      tools: [{ name: "get_analysis_status" }, OVERVIEW_CALL],
+      expectOverview: true,
+      expectImport: false,
+    },
+    {
+      prompt: FINDINGS_PROMPT,
+      state: "PROCESSING",
+      status: PROCESSING_STATUS,
+      tools: [{ name: "get_analysis_status" }],
+      expectOverview: false,
+      expectImport: false,
+    },
+    // Add-DNA prompt.
+    {
+      prompt: ADD_DNA_PROMPT,
+      state: "NO_DNA",
+      status: NO_DNA_STATUS,
+      tools: [{ name: "get_analysis_status" }, IMPORT_CALL],
+      expectOverview: false,
+      expectImport: true,
+    },
+    {
+      prompt: ADD_DNA_PROMPT,
+      state: "READY_FREE",
+      status: READY_FREE,
+      tools: [{ name: "get_analysis_status" }, IMPORT_CALL],
+      expectOverview: false,
+      expectImport: true,
+    },
+    {
+      prompt: ADD_DNA_PROMPT,
+      state: "READY_FULL",
+      status: makeStatusData(),
+      tools: [{ name: "get_analysis_status" }, IMPORT_CALL],
+      expectOverview: false,
+      expectImport: true,
+    },
+    {
+      prompt: ADD_DNA_PROMPT,
+      state: "PROCESSING",
+      status: PROCESSING_STATUS,
+      tools: [{ name: "get_analysis_status" }],
+      expectOverview: false,
+      expectImport: false,
+    },
+  ];
+
+  for (const scenario of STARTER_SCENARIOS) {
+    it(`"${scenario.prompt}" (${scenario.state}) starts at status and takes the state path`, async () => {
+      const calls = await runScenario(scenario.tools, (operation) =>
+        operation === "get_analysis_status"
+          ? makeSuccessResponse(scenario.status)
+          : makeToolResponse(operation),
+      );
+
+      // Readiness is unknown before the first message, so status is always first.
+      expect(calls[0]?.name).toBe("get_analysis_status");
+
+      const overviews = calls.filter((call) => call.name === "show_analysis_overview");
+      if (scenario.expectOverview) {
+        expect(overviews).toHaveLength(1);
+        expect(overviews[0]?.meta.ui?.resourceUri).toBe(DNA_IMPORT_UI_URI);
+        expect(overviews[0]?.meta.mutant?.mode).toBe("overview");
+      } else {
+        expect(overviews).toHaveLength(0);
+      }
+
+      const imports = calls.filter((call) => call.name === "show_dna_import");
+      if (scenario.expectImport) {
+        expect(imports).toHaveLength(1);
+        expect(imports[0]?.isError).toBe(false);
+        expect(imports[0]?.meta.ui?.resourceUri).toBe(DNA_IMPORT_UI_URI);
+      } else {
+        expect(imports).toHaveLength(0);
+      }
+
+      // The processing experience promises nothing and mounts nothing.
+      if (scenario.state === "PROCESSING") {
+        expect(calls.map((call) => call.name)).toEqual(["get_analysis_status"]);
+        for (const call of calls) {
+          expect(carriesUi(call)).toBe(false);
+        }
+        expect(scenario.tools.some((tool) => tool.name === "list_health_hypotheses")).toBe(false);
+      }
+
+      // Health-history prose is never forwarded to a catalog search.
+      for (const call of calls) {
+        const query = call.arguments.query;
+        if (query === undefined) continue;
+        expect(typeof query).toBe("string");
+        expect(query).not.toContain(SHARED_HISTORY);
+        expect(String(query).length).toBeLessThanOrEqual(64);
+        expect(String(query)).not.toMatch(/\s{3,}/);
+      }
+    });
+  }
+
+  it("keeps history prose out of the catalog search for a shared-history comparison", async () => {
+    // The model receives the history as chat context (performed_by: chatgpt,
+    // sent_to_mutant: false). Only catalog-topic keywords may reach the backend.
+    const calls = await runScenario(
+      [
+        { name: "get_analysis_status" },
+        { name: "get_analysis_context" },
+        { name: "list_health_hypotheses", arguments: { query: "b12" } },
+        FOLLOWUP_CALL,
+      ],
+      (operation) =>
+        operation === "get_analysis_status"
+          ? makeSuccessResponse(READY_FREE)
+          : makeToolResponse(operation),
+    );
+    const search = callTo(calls, "list_health_hypotheses");
+    expect(search?.arguments.query).toBe("b12");
+    expect(JSON.stringify(calls.map((call) => call.arguments))).not.toContain(SHARED_HISTORY);
   });
 });

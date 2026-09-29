@@ -930,12 +930,55 @@ describe("DNA import component", () => {
     await screen.findByRole("button", { name: "Explain #1" });
     expect(screen.getByRole("button", { name: "Compare top 3" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Compare with my history" })).toBeDefined();
+    // Comparison leads the card and spells out the data boundary.
+    expect(
+      screen.getByText(/Uses only health history or records you share in this chat\./),
+    ).toBeDefined();
     expect(screen.queryByRole("button", { name: "Compare all with Full" })).toBeNull();
     const upgradeLink = screen.getByRole("link", { name: "Upgrade to Mutant Full" });
     expect(upgradeLink.getAttribute("href")).toBe("https://mutantgenomics.com/upgrade");
     expect(upgradeLink.getAttribute("target")).toBe("_blank");
     fireEvent.click(upgradeLink);
     await waitFor(() => expect(bridge.openLinks).toEqual(["https://mutantgenomics.com/upgrade"]));
+  });
+
+  it("sends the server-selected comparison prompt once, even on a double click", async () => {
+    const bridge = renderWith({
+      poll_analysis_status: statusResponse("ready"),
+      get_analysis_context: makeSuccessResponse(
+        makeContextData({
+          suggested_prompts: [
+            {
+              id: "compare-medical-records",
+              label: "Compare with my history",
+              prompt: "Which of my findings best fits the history I shared here?",
+              intent: "comparison",
+              action: { analysis_version: "analysis_1", intent: "comparison" },
+            },
+            {
+              id: "explain-first",
+              label: "Explain #1",
+              prompt: "Explain my #1 finding in plain English.",
+              intent: "explain",
+            },
+          ],
+        }),
+      ),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+
+    const compare = await screen.findByRole("button", { name: "Compare with my history" });
+    fireEvent.click(compare);
+    fireEvent.click(compare);
+
+    // The guard makes one click one server-selected prompt; the card never
+    // builds a second, hard-coded comparison request.
+    await waitFor(() => expect(bridge.messages).toHaveLength(1));
+    expect(JSON.stringify(bridge.messages[0])).toContain(
+      "Which of my findings best fits the history I shared here?",
+    );
   });
 
   it("does not offer an upgrade to a Full account", async () => {

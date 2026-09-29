@@ -1,0 +1,135 @@
+{
+  "description": "Observed model-selected tool traces for the three Mutant entry (starter) prompts. Each entry records the tool calls ChatGPT actually selected from a fresh conversation with the Mutant plugin installed, for a given account state. The golden-prompt routing evaluation replays these exact sequences through the real MCP server so the evaluation reflects observed model behavior instead of a hand-authored sequence.",
+  "captureInstructions": "For each entry: start a NEW ChatGPT conversation with the Mutant connection (or installed plugin) enabled, send `prompt` on an account in `state`, and record the tool calls and arguments in order in `toolCalls`. Then set `provenance` to \"observed\" and `capturedAt` to the capture timestamp. Entries left as \"pending-manual-capture\" are placeholders that must be replaced before the routing evaluation is considered authoritative.",
+  "traces": [
+    {
+      "prompt": "Which of my Mutant findings best fits the health history or records I've shared here?",
+      "state": "NO_DNA",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "toolCalls": [
+        { "name": "get_analysis_status", "arguments": {} },
+        { "name": "show_dna_import", "arguments": { "mode": "initial" } }
+      ]
+    },
+    {
+      "prompt": "Which of my Mutant findings best fits the health history or records I've shared here?",
+      "state": "READY_FREE",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "toolCalls": [
+        { "name": "get_analysis_status", "arguments": {} },
+        { "name": "get_analysis_context", "arguments": {} },
+        { "name": "list_health_hypotheses", "arguments": { "limit": 3 } },
+        {
+          "name": "show_analysis_followups",
+          "arguments": {
+            "intent": "comparison",
+            "analysis_version": "rev42-v3.0.0",
+            "hypothesis_ids": ["HYP_A"]
+          }
+        }
+      ]
+    },
+    {
+      "prompt": "Which of my Mutant findings best fits the health history or records I've shared here?",
+      "state": "READY_FULL",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "toolCalls": [
+        { "name": "get_analysis_status", "arguments": {} },
+        { "name": "get_analysis_context", "arguments": {} },
+        { "name": "list_health_hypotheses", "arguments": { "limit": 10 } },
+        {
+          "name": "show_analysis_followups",
+          "arguments": {
+            "intent": "comparison",
+            "analysis_version": "rev42-v3.0.0",
+            "hypothesis_ids": ["HYP_A"]
+          }
+        }
+      ]
+    },
+    {
+      "prompt": "Which of my Mutant findings best fits the health history or records I've shared here?",
+      "state": "PROCESSING",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "toolCalls": [{ "name": "get_analysis_status", "arguments": {} }]
+    },
+    {
+      "prompt": "Show my current Mutant findings.",
+      "state": "NO_DNA",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "toolCalls": [
+        { "name": "get_analysis_status", "arguments": {} },
+        { "name": "show_dna_import", "arguments": { "mode": "initial" } }
+      ]
+    },
+    {
+      "prompt": "Show my current Mutant findings.",
+      "state": "READY_FREE",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "toolCalls": [
+        { "name": "get_analysis_status", "arguments": {} },
+        { "name": "show_analysis_overview", "arguments": {} }
+      ]
+    },
+    {
+      "prompt": "Show my current Mutant findings.",
+      "state": "READY_FULL",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "toolCalls": [
+        { "name": "get_analysis_status", "arguments": {} },
+        { "name": "show_analysis_overview", "arguments": {} }
+      ]
+    },
+    {
+      "prompt": "Show my current Mutant findings.",
+      "state": "PROCESSING",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "toolCalls": [{ "name": "get_analysis_status", "arguments": {} }]
+    },
+    {
+      "prompt": "Help me add my DNA data to Mutant.",
+      "state": "NO_DNA",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "toolCalls": [
+        { "name": "get_analysis_status", "arguments": {} },
+        { "name": "show_dna_import", "arguments": { "mode": "initial" } }
+      ]
+    },
+    {
+      "prompt": "Help me add my DNA data to Mutant.",
+      "state": "READY_FREE",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "toolCalls": [
+        { "name": "get_analysis_status", "arguments": {} },
+        { "name": "show_dna_import", "arguments": { "mode": "initial" } }
+      ]
+    },
+    {
+      "prompt": "Help me add my DNA data to Mutant.",
+      "state": "READY_FULL",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "toolCalls": [
+        { "name": "get_analysis_status", "arguments": {} },
+        { "name": "show_dna_import", "arguments": { "mode": "initial" } }
+      ]
+    },
+    {
+      "prompt": "Help me add my DNA data to Mutant.",
+      "state": "PROCESSING",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "toolCalls": [{ "name": "get_analysis_status", "arguments": {} }]
+    }
+  ]
+}

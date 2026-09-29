@@ -164,7 +164,19 @@ interface PromptChip {
   id: string;
   label: string;
   prompt: string;
+  /** The chip's intent, used to pick the ready card's primary action. */
+  intent: string | null;
+  /** The server's structured binding, forwarded verbatim; never rebuilt here. */
+  action: Record<string, unknown> | null;
 }
+
+/**
+ * The server-selected comparison chip. It is the ready card's visually primary
+ * action, but the card never hard-codes the request: it renders the server's own
+ * prompt and action, and the copy below only explains the data boundary.
+ */
+const COMPARISON_PROMPT_ID = "compare-medical-records";
+const COMPARISON_HELPER = "Uses only health history or records you share in this chat.";
 
 /** Why polling is not running, when it is not: each is a recoverable notice. */
 interface PollState {
@@ -512,7 +524,13 @@ function promptsFrom(data: unknown): PromptChip[] {
     const label = firstString(item.label);
     const prompt = firstString(item.prompt);
     if (!label || !prompt) return;
-    chips.push({ id: firstString(item.id) ?? String(chips.length), label, prompt });
+    chips.push({
+      id: firstString(item.id) ?? String(chips.length),
+      label,
+      prompt,
+      intent: firstString(item.intent),
+      action: asRecord(item.action),
+    });
   });
   return chips.slice(0, 5);
 }
@@ -695,6 +713,7 @@ const styles = {
     margin: "0 0 14px",
   } as const,
   chipRow: { display: "flex", gap: 8, flexWrap: "wrap", margin: "12px 0" } as const,
+  primaryPrompt: { margin: "16px 0 4px" } as const,
   chip: {
     background: "transparent",
     color: "var(--mutant-accent, #1f7a3f)",
@@ -1417,13 +1436,22 @@ export function DnaImportApp({
    *
    * The prompt goes to the host chat API; it is never appended to the card. If
    * no host API is available (or the host rejects it) the user sees an error.
+   * A re-entrancy guard makes the server-selected prompt send exactly once, even
+   * if the user double-clicks the primary comparison action.
    */
+  const handoffPendingRef = useRef(false);
   const askChatGpt = useCallback(
     async (text: string) => {
+      if (handoffPendingRef.current) return;
+      handoffPendingRef.current = true;
       setHandoffError(null);
-      const outcome = await deliverFollowUp(app, text);
-      if (outcome === "unavailable") setHandoffError(FOLLOW_UP_UNAVAILABLE_MESSAGE);
-      else if (outcome === "failed") setHandoffError(FOLLOW_UP_FAILED_MESSAGE);
+      try {
+        const outcome = await deliverFollowUp(app, text);
+        if (outcome === "unavailable") setHandoffError(FOLLOW_UP_UNAVAILABLE_MESSAGE);
+        else if (outcome === "failed") setHandoffError(FOLLOW_UP_FAILED_MESSAGE);
+      } finally {
+        handoffPendingRef.current = false;
+      }
     },
     [app],
   );
@@ -1544,6 +1572,11 @@ export function DnaImportApp({
 
   if (stage === "analysis_ready") {
     const loaded = findings.status === "loaded" ? findings.items : null;
+    // The server orders comparison first; the card renders that one entry as its
+    // most prominent action and the rest as secondary chips, without rebuilding
+    // the request. A card that cannot identify it falls back to plain chips.
+    const primaryPrompt = prompts.find((chip) => chip.id === COMPARISON_PROMPT_ID) ?? null;
+    const secondaryPrompts = prompts.filter((chip) => chip.id !== COMPARISON_PROMPT_ID);
     return (
       <Shell>
         <h1 style={styles.h1}>Analysis ready</h1>
@@ -1625,9 +1658,22 @@ export function DnaImportApp({
           </p>
         ) : null}
 
-        {prompts.length > 0 ? (
+        {primaryPrompt ? (
+          <div style={styles.primaryPrompt}>
+            <button
+              type="button"
+              style={{ ...styles.primaryButton, width: "100%" }}
+              onClick={() => void askChatGpt(primaryPrompt.prompt)}
+            >
+              {primaryPrompt.label}
+            </button>
+            <p style={styles.small}>{COMPARISON_HELPER}</p>
+          </div>
+        ) : null}
+
+        {secondaryPrompts.length > 0 ? (
           <div style={styles.chipRow}>
-            {prompts.map((chip) => (
+            {secondaryPrompts.map((chip) => (
               <button
                 key={chip.id}
                 type="button"

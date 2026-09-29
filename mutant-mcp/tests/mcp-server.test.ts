@@ -247,6 +247,24 @@ describe("MCP server integration", () => {
     expect(client).toBeDefined();
   });
 
+  it("routes the three entry prompts safely from a fresh conversation", () => {
+    // These are the pre-message starter prompts; every one of them must begin at
+    // status and follow the reported state, and comparison must never forward the
+    // user's history prose as a catalog search query.
+    expect(SERVER_INSTRUCTIONS).toContain(
+      "Which of my Mutant findings best fits the health history or records I've shared here?",
+    );
+    expect(SERVER_INSTRUCTIONS).toContain("Show my current Mutant findings.");
+    expect(SERVER_INSTRUCTIONS).toContain("Help me add my DNA data to Mutant.");
+    expect(SERVER_INSTRUCTIONS).toContain("Call get_analysis_status first for every one of them");
+    expect(SERVER_INSTRUCTIONS).toContain(
+      "Never pass the user's health-history prose as the list_health_hypotheses query argument",
+    );
+    expect(SERVER_INSTRUCTIONS).toContain(
+      "no promised future results and no extra polling instructions",
+    );
+  });
+
   it("passes the modules evidence kind and include_context to the backend", async () => {
     const { client, backendClient } = await connectServer();
     await client.callTool({

@@ -148,7 +148,19 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
   const firstPreview = asRecord(previews[0]);
   const firstId = firstPreview ? asText(firstPreview.id) : null;
 
+  // Comparison with the history shared in the chat is the primary opening
+  // action, so it leads the list; the ready card renders the first entry as its
+  // prominent action and the rest as secondary. Explain and compare-top-three
+  // stay available, and Full keeps its separate broader comparison option.
   const out: PromptSuggestion[] = [
+    {
+      id: "compare-medical-records",
+      label: "Compare with my history",
+      prompt:
+        "Which of my top three Mutant findings seems most relevant to the health history I've shared? What supports or argues against each? If I have not shared any health history in this conversation, ask me what I want to share before comparing; do not imply access to records I have not provided, and do not assume symptoms or test results I have not given you.",
+      intent: "comparison",
+      action: action("comparison", analysisVersion),
+    },
     {
       id: "explain-first",
       label: "Explain #1",
@@ -162,14 +174,6 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
       prompt: "Compare my top three findings and explain how they differ.",
       intent: "comparison",
       action: action("comparison", analysisVersion, firstId),
-    },
-    {
-      id: "compare-medical-records",
-      label: "Compare with my history",
-      prompt:
-        "Which of my top three Mutant findings seems most relevant to the health history I've shared? What supports or argues against each? If I have not shared any health history in this conversation, ask me what I want to share before comparing; do not imply access to records I have not provided, and do not assume symptoms or test results I have not given you.",
-      intent: "comparison",
-      action: action("comparison", analysisVersion),
     },
   ];
 

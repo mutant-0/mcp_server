@@ -15,6 +15,26 @@ hypothesis/evidence retrieval, projection, filtering, pagination, and cursor
 validation. The MCP Lambda never reads entitlements and never accepts an
 analysis id, account, or plan from tool arguments.
 
+### Entry experience
+
+Three prompts can open a fresh conversation, with comparing findings against
+shared health history first, then viewing findings, then adding DNA:
+
+- `Which of my Mutant findings best fits the health history or records I've shared here?`
+- `Show my current Mutant findings.`
+- `Help me add my DNA data to Mutant.`
+
+They are published as `extensions.com.openai.interface.defaultPrompt` in
+[`plugin.json`](plugin.json), which only takes effect through the
+packaged-plugin path. The live developer-mode connector has no starter-prompt
+field, so its connector description carries the same first question; see
+[`docs/mcp-runbook.md`](docs/mcp-runbook.md) for the exact copy, the character
+limits, and the source of truth. Every entry prompt calls `get_analysis_status`
+first and then follows the reported `experience_state`. The ready card renders the
+comparison action as its visually primary action and uses only the health history
+actually shared in the conversation; the observed model-selected routing is
+captured in `tests/golden-prompt-routing-traces.json`.
+
 ### DNA import
 
 `show_dna_import` renders a self-contained Apps SDK component that parses the
@@ -122,6 +142,7 @@ mutant-mcp/
 ├── scripts/
 │   ├── build-ui.mjs               # esbuild -> generated/html.ts
 │   └── sync-genomics.mjs          # vendor front-end-web/src/genomics (+ --check)
+├── plugin.json                    # packaged-plugin interface copy + entry prompts
 ├── docs/
 │   ├── mcp-contract.md            # implemented schemas, semantics, error codes
 │   └── mcp-runbook.md             # Cognito/OAuth setup, linking, monitoring
@@ -238,6 +259,14 @@ npm run typecheck     # tsc --noEmit
 npm run lint          # eslint
 npm run build:ui      # esbuild -> src/ui/dna-import/generated/html.ts
 npm run check:genomics# fails on any drift from front-end-web/src/genomics
+```
+
+The entry-prompt routing evaluation replays observed, recorded tool traces rather
+than hand-authored sequences. It runs as part of `npm test`; set the release gate
+once a real ChatGPT capture has replaced the fixtures:
+
+```bash
+GOLDEN_TRACES_REQUIRED=1 npx vitest run tests/golden-prompt-routing.test.ts
 ```
 
 `build:ui` runs two esbuild passes: the parser worker (`workerEntry.js`) as its

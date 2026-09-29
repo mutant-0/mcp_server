@@ -21,6 +21,13 @@ export const getAnalysisStatusTool: MutantToolDefinition = {
     "Check whether the user has connected DNA, whether an analysis is ready, what their plan " +
     "permits, and what to do next. Use this first when readiness is unknown. Read " +
     "experience_state and capabilities rather than inferring readiness yourself.\n\n" +
+    "Three entry prompts can open a fresh conversation: \"Which of my Mutant findings best fits " +
+    "the health history or records I've shared here?\", \"Show my current Mutant findings.\", and " +
+    "\"Help me add my DNA data to Mutant.\". Call this tool first for all three. For the comparison " +
+    "prompt, compare only against health history or records actually shared in this ChatGPT " +
+    "conversation; when none were shared, ask what the user wants to share and do not imply access " +
+    "to records. Pass only catalog-topic keywords to list_health_hypotheses, never the user's " +
+    "health-history prose. For the add-DNA prompt, call show_dna_import.\n\n" +
     'If the result has experience_state="NO_DNA", do not answer with import instructions: call ' +
     "show_dna_import in the same turn so the DNA import UI is rendered.\n\n" +
     'If experience_state="READY" and the user is opening Mutant or asking a broad opening ' +

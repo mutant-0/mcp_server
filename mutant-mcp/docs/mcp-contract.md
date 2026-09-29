@@ -282,6 +282,32 @@ analysis; pass the value a card or prompt suggestion displayed to bind the call
 to that exact revision. A mismatch is rejected with `ANALYSIS_VERSION_CHANGED`
 (see [Snapshot consistency](#snapshot-consistency)).
 
+### Pre-message entry prompts
+
+Three prompts can open a fresh conversation before any Apps SDK card exists:
+
+- `Which of my Mutant findings best fits the health history or records I've shared here?`
+- `Show my current Mutant findings.`
+- `Help me add my DNA data to Mutant.`
+
+They are published as the packaged plugin's
+`extensions.com.openai.interface.defaultPrompt` (comparison first) in
+`plugin.json`, and the connector description states the same first question for
+surfaces without a starter-prompt field. Every one of them calls
+`get_analysis_status` first (readiness is unknown), then follows
+`experience_state` and `capabilities`:
+
+- A ready broad-results prompt opens `show_analysis_overview` (exactly one card in
+  the same turn).
+- A ready comparison prompt uses the accessible findings and only the health
+  history or records actually present in the ChatGPT conversation; when none were
+  shared it asks what the user wants to share and never implies records access.
+  The user's history prose is never passed as the `list_health_hypotheses.query`
+  argument — only catalog-topic keywords reach search tools.
+- `NO_DNA` opens `show_dna_import`.
+- A processing state shows only the current processing experience, with no
+  promised future results and no extra polling instructions.
+
 ### `get_analysis_status`
 
 Input: `{}`. A successful call even with no analysis.
@@ -1049,11 +1075,12 @@ Free account has locked hypotheses:
 ```
 
 The card is navigation only: it never carries the generated answer, hypothesis
-prose, evidence rows, genotypes, or the user's health history. The comparison
-intent offers a "Compare with my history" action whose prompt explicitly asks the
-user what they wish to share before comparing. `resolve_analysis_followups` is
-internal-only: it is accepted by `parse_request` but is **not** a model-facing
-tool.
+prose, evidence rows, genotypes, or the user's health history. Both intents offer
+the "Compare with my history" action — an explanation offers `Why this rank?`
+then history, a comparison offers `Explain #1` then history — and its prompt
+explicitly asks the user what they wish to share before comparing.
+`resolve_analysis_followups` is internal-only: it is accepted by `parse_request`
+but is **not** a model-facing tool.
 
 ### `analysis_version` pin
 
@@ -1238,12 +1265,15 @@ variables (`useHostStyles`).
 Two 3.0.0 behaviors on the completion view:
 
 - **Prompt chips.** After loading findings, the component fetches
-  `get_analysis_context` and renders its `suggested_prompts` as chips. Clicking
-  one sends the exact `prompt` prose through the same host follow-up path, and
-  the chip's structured `action.analysis_version` travels with the follow-up so
-  the answer binds to the displayed snapshot. The chip label is shown; the prose
-  is never rendered inside the card. Free accounts with an upgrade URL from the
-  status or context response also see an `Upgrade to Mutant Full` action that
+  `get_analysis_context` and renders its `suggested_prompts`. The comparison chip
+  (`compare-medical-records`) is rendered as the card's visually primary action
+  with the helper line `Uses only health history or records you share in this
+  chat.`; the remaining suggestions render as secondary chips. Clicking one sends
+  the exact `prompt` prose through the same host follow-up path (once per click),
+  and the chip's structured `action.analysis_version` travels with the follow-up
+  so the answer binds to the displayed snapshot. The chip label is shown; the
+  prose is never rendered inside the card. Free accounts with an upgrade URL from
+  the status or context response also see an `Upgrade to Mutant Full` action that
   asks the host to open that URL.
 - **Refresh banner.** When `experience_state` is `READY_REFRESH_AVAILABLE`, the
   card shows a refresh banner explaining that the current results remain usable
@@ -1303,8 +1333,11 @@ add a `suggested_prompts` array to their `data`
   why-refresh and start-refresh in the refresh states), the two no-usable-analysis
   processing states (**none** — the component owns those states), `PROCESSING_FAILED`
   (regenerate), analysis context
-  (explain #1 / compare top three / compare with the health history shared in the
-  chat, plus compare-all for Full; Free accounts with locked findings get no
+  (compare with the health history shared in the chat **first**, then explain #1
+  and compare top three, plus compare-all for Full; the ready card renders the
+  comparison chip as its visually primary action with the helper line `Uses only
+  health history or records you share in this chat.`, and the card sends the
+  server-selected prompt once per click; Free accounts with locked findings get no
   Full-scope chip, only the separate `Upgrade to Mutant Full` link), and
   hypothesis detail (why ranked / evidence / confirmation /
   what changes it / clinician).
@@ -1730,7 +1763,15 @@ The contract is covered by:
   `get_analysis_status` → `show_analysis_overview` and mount exactly one bound
   overview card, specific prompts never mount the overview and (after an
   explanation or comparison) mount one follow-up card, a stale follow-up pin is a
-  structured status with no card, and a processing state mounts nothing.
+  structured status with no card, and a processing state mounts nothing. It also
+  covers the three pre-message entry prompts across `NO_DNA`, `READY` Free,
+  `READY` Full, and processing, asserting status-first, the state-appropriate card,
+  and that no history prose reaches a catalog search.
+- `mutant-mcp/tests/golden-prompt-routing.test.ts` — replays the observed
+  model-selected tool traces in `golden-prompt-routing-traces.json` for the three
+  entry prompts through the real server, which is what proves ChatGPT (not a
+  hand-authored fixture) selected those tools. `GOLDEN_TRACES_REQUIRED=1` fails
+  the suite while any trace still has placeholder provenance.
 - `mutant-mcp/tests/followups.test.ts` — follow-up card integration: one card per
   answer with every action pinned to the answer's revision and ids, a
   single-line model-facing text, `ANALYSIS_VERSION_CHANGED` / `PLAN_REQUIRED`

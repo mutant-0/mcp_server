@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "mutant-genomics",
+  "version": "1.0.0",
+  "description": "Compare Mutant DNA findings with health history you share, explore findings, or add DNA data.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Mutant Genomics",
+        "shortDescription": "Compare your DNA findings with health history you share, explore results, or add DNA data.",
+        "longDescription": "Ask which Mutant findings best fit the health history or records you share in this ChatGPT conversation. You can also explore findings or add DNA data. Mutant does not automatically access your medical records; genetic findings are hypotheses, not diagnoses.",
+        "developerName": "Mutant Genomics",
+        "category": "Health",
+        "defaultPrompt": [
+          "Which of my Mutant findings best fits the health history or records I've shared here?",
+          "Show my current Mutant findings.",
+          "Help me add my DNA data to Mutant."
+        ]
+      }
+    }
+  }
+}
