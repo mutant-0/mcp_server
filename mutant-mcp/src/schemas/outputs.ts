@@ -422,7 +422,12 @@ export const explainHypothesisDataSchema = z.looseObject({
   provisional_evidence: z.array(patternContributionSchema),
   converging_patterns: z.array(
     z.looseObject({
-      pattern_id: z.string().nullable(),
+      display_name: z
+        .string()
+        .nullable()
+        .describe(
+          "Readable catalog name for this converging pattern; use it in the explanation, never an internal pattern id.",
+        ),
       state: z.string().nullable(),
       structural_fit: z.number().nullable(),
       pattern_confidence: z.number().nullable(),

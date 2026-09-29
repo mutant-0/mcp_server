@@ -302,7 +302,7 @@ function dataFor(operation: BackendOperation): Record<string, unknown> {
         provisional_evidence: [],
         converging_patterns: [
           {
-            pattern_id: "CONV_1",
+            display_name: "Histamine Handling: Clearance & Immune Reactivity",
             state: "observed",
             structural_fit: 0.9,
             pattern_confidence: 0.8,

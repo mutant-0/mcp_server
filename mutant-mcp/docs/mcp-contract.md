@@ -832,7 +832,7 @@ scoring drivers.
   "provisional_evidence": [ /* the provisional subset of patterns */ ],
   "converging_patterns": [
     {
-      "pattern_id": "CONV_1",
+      "display_name": "Histamine Handling: Clearance & Immune Reactivity",
       "state": "observed",
       "structural_fit": 0.9,
       "pattern_confidence": 0.8,
@@ -905,6 +905,10 @@ scoring drivers.
   [Module-aware explanations](#module-aware-explanations).
 - `converging_pattern_adjustment` is a separate priority-only family and is
   never summed into `module_support` or `pattern_support`.
+- `converging_patterns[].display_name` is the readable name resolved from the
+  canonical `stories/*.json` catalog. The internal converging `pattern_id` stays
+  in scoring and traces and is never surfaced; a missing catalog name yields a
+  neutral label, never the `PRESSURE_*` code.
 - `clinical_context` is bounded (5 / 5 / 4) and always carries
   `source: "catalog_general"`. `subtypes[].distinction` comes from the catalog
   `signature` (falling back to lab/clinical corroboration). Catalog context is

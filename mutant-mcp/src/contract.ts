@@ -566,7 +566,12 @@ export interface ScoreBreakdown {
  * never summed into `module_support` or `pattern_support`.
  */
 export interface ConvergingPatternContribution {
-  pattern_id: string | null;
+  /**
+   * Readable catalog name resolved from `stories/*.json`. The internal
+   * converging `pattern_id` stays in scoring and traces and is never surfaced
+   * here; a missing catalog name yields a neutral label.
+   */
+  display_name: string | null;
   state: string | null;
   structural_fit: number | null;
   pattern_confidence: number | null;
