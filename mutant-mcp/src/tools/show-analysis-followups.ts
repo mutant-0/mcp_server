@@ -10,7 +10,12 @@ import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
 
 /**
- * Mount the compact follow-up card after an explanation or comparison.
+ * Mount the compact follow-up card for an explicit finding request.
+ *
+ * Eligibility comes from the user's requested task, never from which data tools
+ * were called: mount only when the user asked to explain one identified finding
+ * or to compare two or more accessible findings. A topical question that used
+ * `explain_health_hypothesis` as supporting research must not mount it.
  *
  * The card is navigation only: this tool asks the backend to verify and bind the
  * follow-up (`resolve_analysis_followups`) against the same revision the answer
@@ -22,15 +27,25 @@ export const showAnalysisFollowupsTool: MutantToolDefinition = {
   name: "show_analysis_followups",
   title: "Show Analysis Follow-ups",
   description:
-    "Display a compact follow-up card with context-specific next steps. Call this once, " +
-    "after an explanation (`explain_health_hypothesis`) or a comparison " +
-    "(`list_health_hypotheses`), when the host supports Apps SDK UI and the preceding result " +
-    "gave you the analysis_version and hypothesis ids. Pass the same analysis_version and the " +
-    "hypothesis ids the answer covered (at most three); a mismatch is rejected rather than " +
-    "silently switching revisions. This card never replaces or repeats the chat answer: keep " +
-    "your explanation in ChatGPT and let the card offer the next question. Do not call it for " +
-    "a broad opening question (use show_analysis_overview) and do not mount it more than once " +
-    "per answer. If the host cannot render UI or this call fails, the chat answer still stands.",
+    "Display a compact follow-up card with context-specific next steps. Call this once only " +
+    "when the user's request itself asked to explain, interpret, or understand one identified " +
+    "finding (by rank or name, including a deliberate \"Explain\" action), or to compare two or " +
+    "more accessible findings (for example \"Compare my top three\"). Decide this from the " +
+    "user's requested task, not from which tools you called: do not infer eligibility because " +
+    "explain_health_hypothesis or list_health_hypotheses was used as supporting research. Do " +
+    "not call it for an open-ended topic or symptom question (for example \"What can you say " +
+    "about my thyroid issues?\" or \"What about histamine?\") even if the answer discusses one " +
+    "ranked finding; nor for a catalog search, a no-match answer, an evidence or marker lookup, " +
+    "a broad overview, a processing/import/recovery turn, an incidental mention, or a request " +
+    "that already compares findings with the user's health history or records. When eligible, " +
+    "pass the same analysis_version and the hypothesis ids the answer covered (at most three) " +
+    "when the host supports Apps SDK UI; a mismatch is rejected rather than silently switching " +
+    "revisions. The actions must be relevant and must not repeat the question just answered; if " +
+    "neither server-selected action is a relevant next step, omit the card rather than showing " +
+    "generic buttons. This card never replaces or repeats the chat answer: keep your " +
+    "explanation in ChatGPT and let the card offer the next question. Do not call it for a " +
+    "broad opening question (use show_analysis_overview) and do not mount it more than once per " +
+    "answer. If the host cannot render UI or this call fails, the chat answer still stands.",
   scope: "analysis.read",
   uiVisibility: ["model", "app"],
   uiResourceUri: ANALYSIS_FOLLOWUPS_UI_URI,

@@ -194,7 +194,10 @@ live in process memory, so restarting the dev server clears them.
 4. After linking, run the scenario prompts for a **sanitized** Free test account
    and then a **sanitized** Full test account:
    - "What does my Mutant analysis say about my health?"
-   - "Show me the details of the top result."
+   - "Show me the details of the top result." (eligible compact card)
+   - "What can you say about my thyroid issues?" (topical; no compact card)
+   - "What about my histamine issues?" (topical topic search; no compact card)
+   - "Which finding fits my history?" (history comparison; no compact card)
    - "What evidence supports that?"
    - "Explore the histamine pathway." (Full)
    - "Upload my 23andMe data." (import flow: `show_dna_import` renders the component)
@@ -255,13 +258,31 @@ conversation and confirm on each supported surface:
   state-appropriate path. A broad ready prompt mounts exactly one overview card
   and does not end with only "use the card above". The comparison prompt compares
   only against history actually shared and asks when none was; it never sends the
-  history prose as a `list_health_hypotheses` query. Processing text promises no
-  future genes, variants, hypotheses, or scores. No blank "Worked for …" final
-  answer after a nonempty starter prompt.
+  history prose as a `list_health_hypotheses` query. Because that prompt already
+  asks to compare with the user's history, it mounts **no** compact follow-up
+  card - the card's "Compare with my history" action would repeat the request.
+  Processing text promises no future genes, variants, hypotheses, or scores. No
+  blank "Worked for …" final answer after a nonempty starter prompt.
+- **Compact card eligibility:** the card is an optional navigation aid for
+  explicit intent, not the default after any evidence-backed answer. It appears
+  only when the user's request asked to explain one identified finding ("Explain
+  #1", "Explain the B12 finding", a deliberate Explain click) or to compare
+  findings ("Compare my top three"), and only when its actions are relevant next
+  steps. It must **not** appear for a topical or symptom question ("What can you
+  say about my thyroid issues?", "What about histamine?") even when the answer
+  discusses one ranked finding or called `explain_health_hypothesis` as supporting
+  research, nor for a catalog search, a no-match answer, an evidence or marker
+  lookup, a broad overview, a processing/import/recovery turn, or a request that
+  already compares findings with the user's health history or records.
+- **Card placement:** check where the host renders the compact card relative to
+  the prose. If it renders the card before the answer, confirm the copy still
+  reads correctly in that position - the labels ("Explore this finding" / "Keep
+  exploring") are deliberately not phrased as an after-answer element.
 - **Enter on an empty composer:** record what happens. If a blank "Worked for …"
   turn occurs with **no** Mutant tool call, that is a ChatGPT host/composer edge
   case, not an MCP failure — report it as such.
-- Record the observed model-selected tool calls for the three prompts in
+- Record the observed model-selected tool calls for the entry, explicit-intent,
+  and topical prompts in
   `mutant-mcp/tests/golden-prompt-routing-traces.json` (set `provenance` to
   `observed`), then run
   `GOLDEN_TRACES_REQUIRED=1 npm test -- tests/golden-prompt-routing.test.ts`.

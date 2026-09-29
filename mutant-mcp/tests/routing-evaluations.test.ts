@@ -96,7 +96,7 @@ const SPECIFIC_PROMPTS: Scenario[] = [
   },
   {
     name: "Explain a named finding",
-    prompt: "What is the B12 one?",
+    prompt: "Explain the B12 finding.",
     tools: [
       { name: "list_health_hypotheses", arguments: { query: "b12" } },
       { name: "explain_health_hypothesis", arguments: { hypothesis_id: "HYP_A" } },
@@ -113,12 +113,47 @@ const SPECIFIC_PROMPTS: Scenario[] = [
     noUiOn: ["list_health_hypotheses"],
   },
   {
+    name: "Topical symptom question",
+    // "What can you say about my thyroid issues?" is a topic question, not a
+    // finding request. The answer may search the catalog and call
+    // explain_health_hypothesis for supporting detail, but the user did not ask
+    // to explain or compare an identified finding, so no compact card mounts.
+    prompt: "What can you say about my thyroid issues?",
+    tools: [
+      { name: "get_analysis_status" },
+      { name: "list_health_hypotheses", arguments: { query: "thyroid" } },
+      { name: "explain_health_hypothesis", arguments: { hypothesis_id: "HYP_A" } },
+    ],
+    noUiOn: ["get_analysis_status", "list_health_hypotheses", "explain_health_hypothesis"],
+  },
+  {
+    name: "Histamine topic search",
+    prompt: "What about histamine?",
+    tools: [{ name: "list_health_hypotheses", arguments: { query: "histamine" } }],
+    noUiOn: ["list_health_hypotheses"],
+  },
+  {
     name: "Free topic miss",
     // "What about my histamine issues?" becomes a catalog-topic search; the
     // history prose is never forwarded. The bounded scope answer mounts no card.
     prompt: "What about my histamine issues?",
-    tools: [{ name: "list_health_hypotheses", arguments: { query: "histamine" } }],
-    noUiOn: ["list_health_hypotheses"],
+    tools: [
+      { name: "get_analysis_status" },
+      { name: "list_health_hypotheses", arguments: { query: "histamine" } },
+    ],
+    noUiOn: ["get_analysis_status", "list_health_hypotheses"],
+  },
+  {
+    name: "History comparison",
+    // A request that already compares findings against the user's history must
+    // not mount the card: its "Compare with my history" action would only repeat
+    // the action just performed.
+    prompt: "Which finding fits my history?",
+    tools: [
+      { name: "get_analysis_context" },
+      { name: "list_health_hypotheses", arguments: { limit: 3 } },
+    ],
+    noUiOn: ["get_analysis_context", "list_health_hypotheses"],
   },
 ];
 
@@ -406,15 +441,6 @@ describe("starter prompt routing", () => {
   };
   const OVERVIEW_CALL = { name: "show_analysis_overview" };
 
-  const FOLLOWUP_CALL = {
-    name: "show_analysis_followups",
-    arguments: {
-      intent: "comparison",
-      analysis_version: "rev42-v3.0.0",
-      hypothesis_ids: ["HYP_A"],
-    },
-  };
-
   /** A real-world history prose the user might have typed in the chat. */
   const SHARED_HISTORY =
     "I have had fatigue and brain fog for months and my B12 was low in March 2024.";
@@ -446,7 +472,6 @@ describe("starter prompt routing", () => {
         { name: "get_analysis_status" },
         { name: "get_analysis_context" },
         { name: "list_health_hypotheses", arguments: { limit: 3 } },
-        FOLLOWUP_CALL,
       ],
       expectOverview: false,
       expectImport: false,
@@ -459,7 +484,6 @@ describe("starter prompt routing", () => {
         { name: "get_analysis_status" },
         { name: "get_analysis_context" },
         { name: "list_health_hypotheses", arguments: { limit: 10 } },
-        FOLLOWUP_CALL,
       ],
       expectOverview: false,
       expectImport: false,
@@ -598,7 +622,6 @@ describe("starter prompt routing", () => {
         { name: "get_analysis_status" },
         { name: "get_analysis_context" },
         { name: "list_health_hypotheses", arguments: { query: "b12" } },
-        FOLLOWUP_CALL,
       ],
       (operation) =>
         operation === "get_analysis_status"
@@ -608,5 +631,23 @@ describe("starter prompt routing", () => {
     const search = callTo(calls, "list_health_hypotheses");
     expect(search?.arguments.query).toBe("b12");
     expect(JSON.stringify(calls.map((call) => call.arguments))).not.toContain(SHARED_HISTORY);
+  });
+
+  it("mounts no compact follow-up card for the history-comparison starter prompt", async () => {
+    // This prompt already asks to compare findings against the user's history, so
+    // the card's "Compare with my history" action would only repeat the request.
+    const calls = await runScenario(
+      [
+        { name: "get_analysis_status" },
+        { name: "get_analysis_context" },
+        { name: "list_health_hypotheses", arguments: { limit: 3 } },
+      ],
+      (operation) =>
+        operation === "get_analysis_status"
+          ? makeSuccessResponse(READY_FREE)
+          : makeToolResponse(operation),
+    );
+    expect(calls.some((call) => call.name === "show_analysis_followups")).toBe(false);
+    expect(calls.some((call) => call.name === "show_analysis_overview")).toBe(false);
   });
 });

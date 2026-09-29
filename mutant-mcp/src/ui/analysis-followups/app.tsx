@@ -2,7 +2,8 @@
  * Mutant analysis follow-up - Apps SDK component.
  *
  * A compact companion to the overview card, mounted only by the deliberate
- * `show_analysis_followups` render tool after an explanation or comparison. It
+ * `show_analysis_followups` render tool when the user's request asked to explain
+ * one identified finding or to compare findings. It
  * is navigation, not a summary: a context label, at most two action buttons
  * bound to the hypothesis ids and the analysis revision the answer already
  * covered, and - Free only - a quiet route to Mutant Full.

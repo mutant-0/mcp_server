@@ -14,9 +14,12 @@ export const listHealthHypothesesTool: MutantToolDefinition = {
     'Mutant find?"), call get_analysis_status then show_analysis_overview so the card presents ' +
     "the ranked findings and hints. Use this tool after that for browsing, pagination, topic " +
     "search, sorting, and explicit comparisons such as \"Compare my top three,\" and never to " +
-    "reproduce the overview card's list in prose. After a comparison answer, when the host " +
-    "supports Apps SDK UI, call show_analysis_followups once with the same analysis_version and " +
-    "the compared hypothesis ids. Every success returns a server-authored search_scope describing " +
+    "reproduce the overview card's list in prose. Only when the request itself asked to compare " +
+    "two or more accessible findings, when the host supports Apps SDK UI, call " +
+    "show_analysis_followups once with the same analysis_version and the compared hypothesis " +
+    "ids; do not call it for a topic search, a no-match or browse answer, or a request that " +
+    "compares findings with the user's health history or records. Every success returns a " +
+    "server-authored search_scope describing " +
     "what the search actually covered: hypothesis_scope, the searched and unsearched ranked counts, " +
     "and broader_ranked_search_available. When a topic query returns no items, answer once from that " +
     "scope instead of treating the miss as proof the topic is absent. A Free no_match_in_accessible_scope " +

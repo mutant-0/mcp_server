@@ -25,10 +25,12 @@ export const explainHealthHypothesisTool: MutantToolDefinition = {
     "never be restated as the user's history or experience. Keep genetic findings distinct " +
     "from symptoms or test results the user has not reported, and use priority_score only for " +
     "ordering and genetic_support only for strength within the analyzed evidence; neither is a " +
-    "disease probability. After you answer, when the host supports Apps SDK UI, call " +
-    "show_analysis_followups once with the same analysis_version and this hypothesis id so the " +
-    "card can offer the next question; keep the explanation itself in the conversation and do " +
-    "not restate the card.",
+    "disease probability. Only when the request itself asked to explain this finding (by rank " +
+    "or name, including a deliberate \"Explain\" click), when the host supports Apps SDK UI, " +
+    "call show_analysis_followups once with the same analysis_version and this hypothesis id so " +
+    "the card can offer the next question; do not call it when this tool was supporting " +
+    "research for an open-ended topic or symptom question. Keep the explanation itself in the " +
+    "conversation and do not restate the card.",
   scope: "analysis.read",
   inputSchema: explainHealthHypothesisInputSchema,
   outputSchema: explainHypothesisOutputSchema,

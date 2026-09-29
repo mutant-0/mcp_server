@@ -27,8 +27,9 @@ What changed from 2.0.0:
   an optional `analysis_version` pin that is rejected with
   `ANALYSIS_VERSION_CHANGED` on a mismatch.
 - A compact follow-up card (`show_analysis_followups` over the internal
-  `resolve_analysis_followups` operation) that renders contextual next steps after
-  an explanation or comparison, bound to the same revision and authorized ids.
+  `resolve_analysis_followups` operation) that renders contextual next steps for a
+  deliberate finding explanation or a direct finding comparison, bound to the same
+  revision and authorized ids.
 
 ## Transport and authentication
 
@@ -240,7 +241,7 @@ Each tool maps to a distinct user goal. The routing contract is:
 | `get_analysis_status` | Establish connection, DNA readiness, the canonical `experience_state`, entitlement, capabilities, and the single next action. Model-facing. |
 | `poll_analysis_status` | App-only (`app` visibility) status read used by the DNA import component while it owns the processing experience. Same payload as `get_analysis_status`, minus polling hints and suggested prompts. |
 | `show_analysis_overview` | Resolve one immutable analysis snapshot and open the ready-analysis Apps SDK card bound to it. Model-facing; the deliberate render tool for broad opening questions. |
-| `show_analysis_followups` | Verify and open the compact Apps SDK follow-up card after an explanation or comparison, bound to the same revision and hypothesis ids. Model-facing; the only render tool for the follow-up card. |
+| `show_analysis_followups` | Verify and open the compact Apps SDK follow-up card for an explicit finding explanation or a direct finding comparison, bound to the same revision and hypothesis ids. Model-facing; the only render tool for the follow-up card. |
 | `get_analysis_context` | Supply the interpretation contract, coverage, access scope, a compact top-hypothesis preview, and useful next questions for specific analysis questions. |
 | `list_health_hypotheses` | Browse, search, sort, paginate, and compare accessible hypotheses. |
 | `explain_health_hypothesis` | Explain one hypothesis in depth. |
@@ -258,21 +259,40 @@ findings and hints. A broad opening question is **never** answered with
 specific question, call `get_analysis_context` first, then use
 `list_health_hypotheses` for subsequent browsing, searching, sorting,
 pagination, and comparison; use `explain_health_hypothesis` or
-`get_supporting_evidence` for a single finding. After an explanation or a
-comparison, when the host supports Apps SDK UI, call `show_analysis_followups`
-once with the same `analysis_version` and the ids the answer covered; the answer
-itself stays in the conversation and is never restated by the card.
+`get_supporting_evidence` for a single finding. The compact follow-up card is an
+**optional navigation aid for explicit intent**, not the default after every
+answer that uses evidence. Call `show_analysis_followups`, once, only when the
+user's request itself asked to explain, interpret, or understand one identified
+finding (by rank or name, including a deliberate "Explain" action), or to compare
+two or more accessible findings (for example "Compare my top three"). Decide this
+from the requested task, **not** from which data tools were called: calling
+`explain_health_hypothesis` or `list_health_hypotheses` as supporting research
+does not make the card eligible. Do **not** show it for an open-ended topic or
+symptom question (for example "What can you say about my thyroid issues?" or
+"What about histamine?") even if the answer discusses one ranked finding; nor for
+a catalog search, a no-match answer, an evidence or marker lookup, a broad result
+overview, a processing/import/recovery turn, a finding mentioned incidentally, or
+a request that already asks to compare findings with the user's health history or
+records (the card's "Compare with my history" action would repeat the action just
+performed; the overview card's own history-comparison action remains available).
+When eligible, pass the same `analysis_version` and the ids the answer covered;
+its actions must be relevant and must not repeat the question just answered, so
+if neither server-selected action is a relevant next step, omit the card rather
+than showing generic buttons. The answer itself stays in the conversation and is
+never restated by the card.
 
 ```mermaid
 flowchart TD
   Q[Broad opening question] --> S[get_analysis_status]
   S -->|can_show_overview| O[show_analysis_overview]
   O --> Card[Overview card: ranked items + hints]
-  Q2[Explain #1] --> E[explain_health_hypothesis]
+  Q2[Explain #1 or a named finding] --> E[explain_health_hypothesis]
   E --> F[show_analysis_followups]
   Q3[Compare my top three] --> L[list_health_hypotheses]
   L --> F
   F --> FCard[Follow-up card: up to 2 actions + optional Full]
+  Q4[Topic or symptom question] --> L2[list_health_hypotheses / explain_health_hypothesis]
+  L2 --> A[Answer only: no compact card]
 ```
 
 Both `list_health_hypotheses` and `explain_health_hypothesis` (plus
@@ -1139,6 +1159,13 @@ explicitly asks the user what they wish to share before comparing.
 `resolve_analysis_followups` is internal-only: it is accepted by `parse_request`
 but is **not** a model-facing tool.
 
+`resolve_analysis_followups` verifies and binds; it **cannot infer the user's
+intent**, because it never receives the user's request. It only re-checks the
+revision pin, entitlement, and id accessibility. Whether the card is eligible at
+all is the model's routing rule (see [Tools](#tools)); an added model-supplied
+intent flag would document a choice but would not independently verify it, so the
+backend is deliberately not asked to gate on it.
+
 Each action also carries a bounded `heading` (`FOLLOWUP_HEADING_MAX`, 80 chars).
 It is display metadata for the card's host handoff only: the card prefixes its
 handoff prompt with one generic instruction asking ChatGPT to start the reply
@@ -1206,7 +1233,10 @@ with **no** UI descriptor, so an unready analysis can never mount the card.
 Input:
 `{ intent: "explanation" | "comparison", analysis_version, hypothesis_ids (1-3), source? }`.
 Scope `analysis.read`. Calls `resolve_analysis_followups` and mounts the compact
-follow-up card. Its result is `{ ui_rendered: true, mode: "followups", intent,
+follow-up card. It is eligible only for an explicit finding explanation or a
+direct finding comparison, and only when the actions are relevant next steps
+(see [Tools](#tools)); the backend assumes eligibility and only verifies and binds
+the revision and ids. Its result is `{ ui_rendered: true, mode: "followups", intent,
 plan, displayed_analysis_version, displayed_hypotheses, actions, upgrade? }` plus
 the UI descriptor and widget-only `mutant.mode: "followups"`. The model-facing
 `content` is a single line (`Follow-up card displayed.`) that never repeats the
@@ -1875,12 +1905,18 @@ The contract is covered by:
 - `mutant-mcp/tests/routing-evaluations.test.ts` — runnable routing fixtures for
   broad opening questions and specific requests: broad prompts route
   `get_analysis_status` → `show_analysis_overview` and mount exactly one bound
-  overview card, specific prompts never mount the overview and (after an
-  explanation or comparison) mount one follow-up card, a stale follow-up pin is a
-  structured status with no card, and a processing state mounts nothing. It also
-  covers the three pre-message entry prompts across `NO_DNA`, `READY` Free,
-  `READY` Full, and processing, asserting status-first, the state-appropriate card,
-  and that no history prose reaches a catalog search.
+  overview card; specific prompts never mount the overview, and only an explicit
+  finding explanation ("Explain #1", "Explain the B12 finding") or a direct
+  finding comparison ("Compare my top three") mounts one follow-up card, while
+  topical/symptom questions ("What can you say about my thyroid issues?", a
+  histamine topic search), a Free no-match answer, and a "fits my history"
+  request mount none — even when the answer called `explain_health_hypothesis`. A
+  stale follow-up pin is a structured status with no card, and a processing state
+  mounts nothing. It also covers the three pre-message entry prompts across
+  `NO_DNA`, `READY` Free, `READY` Full, and processing, asserting status-first,
+  the state-appropriate card, that the ready comparison prompt mounts no compact
+  card (its history action would repeat the request), and that no history prose
+  reaches a catalog search.
 - `mutant-mcp/tests/evaluations.test.ts` — assistant behavior evaluations,
   including a Free topic miss ("What about my histamine issues?"): the answer must
   name the searched top three, say the remaining ranked set was not checked,
@@ -1888,9 +1924,12 @@ The contract is covered by:
   scope, invent no mechanism, and carry no transactional or checkout link. Every
   grader group has a negative control.
 - `mutant-mcp/tests/golden-prompt-routing.test.ts` — replays the observed
-  model-selected tool traces in `golden-prompt-routing-traces.json` for the three
-  entry prompts through the real server, which is what proves ChatGPT (not a
-  hand-authored fixture) selected those tools. `GOLDEN_TRACES_REQUIRED=1` fails
+  model-selected tool traces in `golden-prompt-routing-traces.json` (the three
+  entry prompts plus the explicit-intent and topical prompts) through the real
+  server, which is what proves ChatGPT (not a hand-authored fixture) selected
+  those tools. It asserts per trace whether an overview, import, or compact card
+  mounted, including that the thyroid topic prompt mounts no compact card even
+  though it calls `explain_health_hypothesis`. `GOLDEN_TRACES_REQUIRED=1` fails
   the suite while any trace still has placeholder provenance.
 - `mutant-mcp/tests/followups.test.ts` — follow-up card integration: one card per
   answer with every action pinned to the answer's revision and ids, a

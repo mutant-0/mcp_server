@@ -46,6 +46,8 @@ interface GoldenTrace {
   state: string;
   provenance: string;
   capturedAt: string | null;
+  /** The Apps SDK card(s) this trace must (or must not) mount. */
+  expect: { overview: boolean; import: boolean; followups: boolean };
   toolCalls: TraceToolCall[];
 }
 
@@ -175,32 +177,36 @@ describe("golden-prompt routing (observed traces)", () => {
       const imports = calls.filter((call) => call.name === "show_dna_import");
       const followups = calls.filter((call) => call.name === "show_analysis_followups");
 
+      // Exactly the card(s) the trace expects, and each one is a valid mount.
+      expect(overviews.length, `${trace.prompt}: overview cards`).toBe(
+        trace.expect.overview ? 1 : 0,
+      );
+      expect(imports.length, `${trace.prompt}: import cards`).toBe(trace.expect.import ? 1 : 0);
+      expect(followups.length, `${trace.prompt}: follow-up cards`).toBe(
+        trace.expect.followups ? 1 : 0,
+      );
+
       if (overviews.length > 0) {
-        // Broad ready-state results mount exactly one overview card, in this turn.
-        expect(overviews).toHaveLength(1);
         expect(overviews[0]?.isError).toBe(false);
         expect(overviews[0]?.meta.ui?.resourceUri).toBe(DNA_IMPORT_UI_URI);
         expect(overviews[0]?.meta.mutant?.mode).toBe("overview");
       }
 
       if (imports.length > 0) {
-        expect(imports).toHaveLength(1);
         expect(imports[0]?.isError).toBe(false);
         expect(imports[0]?.meta.ui?.resourceUri).toBe(DNA_IMPORT_UI_URI);
       }
 
       if (followups.length > 0) {
-        expect(followups).toHaveLength(1);
         expect(followups[0]?.isError).toBe(false);
         expect(followups[0]?.meta.ui?.resourceUri).toBe(ANALYSIS_FOLLOWUPS_UI_URI);
         expect(followups[0]?.meta.mutant?.mode).toBe("followups");
       }
 
-      if (trace.state === "NO_DNA") {
-        // No DNA means the import component, never an analysis read.
-        expect(imports.length).toBeGreaterThan(0);
-        expect(overviews).toHaveLength(0);
-        expect(names).not.toContain("list_health_hypotheses");
+      // A topical question never mounts a compact card, even when the answer
+      // called explain_health_hypothesis for supporting detail.
+      if (names.includes("explain_health_hypothesis") && !trace.expect.followups) {
+        expect(followups).toHaveLength(0);
       }
 
       if (trace.state === "PROCESSING") {
@@ -209,30 +215,6 @@ describe("golden-prompt routing (observed traces)", () => {
         expect(names).toEqual(["get_analysis_status"]);
         for (const call of calls) {
           expect(carriesUi(call)).toBe(false);
-        }
-      }
-
-      if (trace.state.startsWith("READY")) {
-        const isAddDnaPrompt = /add my DNA data/i.test(trace.prompt);
-        const isComparePrompt = /health history|records/i.test(trace.prompt);
-        const isFindingsPrompt = !isAddDnaPrompt && !isComparePrompt;
-        if (isFindingsPrompt) {
-          // A ready broad-results prompt opens exactly one overview card and does
-          // not fall back to the DNA import flow.
-          expect(overviews).toHaveLength(1);
-          expect(imports).toHaveLength(0);
-        }
-        if (isComparePrompt) {
-          // A ready comparison uses the accessible findings and closes with the
-          // compact follow-up card bound to the same revision.
-          expect(overviews).toHaveLength(0);
-          expect(imports).toHaveLength(0);
-          expect(followups).toHaveLength(1);
-          expect(names).toContain("list_health_hypotheses");
-        }
-        if (isAddDnaPrompt) {
-          expect(imports).toHaveLength(1);
-          expect(overviews).toHaveLength(0);
         }
       }
 
