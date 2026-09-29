@@ -256,6 +256,7 @@ export function makeFollowupsData(
         id: "why-ranked",
         label: "Why this rank?",
         prompt: "Why did my \"Alpha finding\" finding rank where it did?",
+        heading: "Mutant follow-up: Why \"Alpha finding\" ranked",
         intent: "explain",
         hypothesis_id: "HYP_A",
         action: {
@@ -269,6 +270,7 @@ export function makeFollowupsData(
         label: "Compare with my history",
         prompt:
           "Which of my top three Mutant findings seems most relevant to the health history I've shared? If I have not shared any health history, ask me what I want to share before comparing.",
+        heading: "Mutant follow-up: Compare with my history",
         intent: "comparison",
         hypothesis_id: "HYP_A",
         action: {

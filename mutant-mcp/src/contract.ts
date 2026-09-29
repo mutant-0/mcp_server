@@ -283,6 +283,13 @@ export interface PromptSuggestion {
   id: string;
   label: string;
   prompt: string;
+  /**
+   * Bounded, server-authored heading the card prefixes onto the host handoff so
+   * the new assistant reply identifies the clicked action (and finding where
+   * applicable). Display metadata only: never rendered inside the card, never
+   * an internal command, id, score, or user health history.
+   */
+  heading?: string;
   intent:
     | "overview"
     | "explain"

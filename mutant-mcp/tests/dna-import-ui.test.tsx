@@ -404,6 +404,7 @@ afterEach(() => {
   cleanup();
   activeBridge?.stop();
   activeBridge = null;
+  delete (window as Window & { openai?: unknown }).openai;
 });
 
 describe("DNA import component", () => {
@@ -749,7 +750,7 @@ describe("DNA import component", () => {
     fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
     await screen.findByText(/Alpha finding/i);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /explain this finding/i })[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /explain finding #1/i })[0]!);
 
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
     const sent = JSON.stringify(bridge.messages[0]);
@@ -1090,7 +1091,7 @@ describe("DNA import component", () => {
 
     const findingsBefore = screen.getByRole("list").textContent;
 
-    fireEvent.click(screen.getAllByRole("button", { name: /explain this finding/i })[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /explain finding #1/i })[0]!);
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
 
     fireEvent.click(screen.getByRole("button", { name: /ask chatgpt about my results/i }));
@@ -1103,7 +1104,9 @@ describe("DNA import component", () => {
       return params.content?.map((block) => block.text ?? "").join("") ?? "";
     });
     expect(texts[0]).toMatch(/Explain my "Alpha finding"/);
-    expect(texts[1]).toBe("Ask ChatGPT about my Mutant results.");
+    // The heading instruction is prepended; the server-selected prompt survives.
+    expect(texts[1]).toContain("Mutant follow-up: Ask about my results");
+    expect(texts[1]).toContain("Ask ChatGPT about my Mutant results.");
 
     // The widget's findings are unchanged and the prompt text is nowhere in the card.
     expect(screen.getByRole("list").textContent).toBe(findingsBefore);
@@ -1111,6 +1114,17 @@ describe("DNA import component", () => {
     expect(screen.queryByText(/Ask ChatGPT about my Mutant results\./)).toBeNull();
     expect(screen.getByText(/Alpha finding/i)).toBeDefined();
     expect(screen.getByText(/First summary\./)).toBeDefined();
+
+    // The clicked action's short label is acknowledged; the prompt is not echoed.
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toContain(
+        "Question sent: Ask about my results",
+      ),
+    );
+    const ack = screen.getByRole("status").textContent ?? "";
+    expect(ack).toContain("See the latest reply below");
+    expect(ack).not.toContain("Retrieve the full finding details");
+    expect(ack).not.toContain("Mutant follow-up");
   });
 
   it("uses the ChatGPT host API when the widget is injected with window.openai", async () => {
@@ -1127,7 +1141,7 @@ describe("DNA import component", () => {
       fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
       await screen.findByText(/Alpha finding/i);
 
-      fireEvent.click(screen.getAllByRole("button", { name: /explain this finding/i })[0]!);
+      fireEvent.click(screen.getAllByRole("button", { name: /explain finding #1/i })[0]!);
 
       await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
       expect(sendFollowUpMessage).toHaveBeenCalledWith({
@@ -1153,13 +1167,167 @@ describe("DNA import component", () => {
     fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
     await screen.findByText(/Alpha finding/i);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /explain this finding/i })[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /explain finding #1/i })[0]!);
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toMatch(/couldn't send that follow-up message/i);
     // The prompt is reported as an error, not echoed into the card.
     expect(screen.queryByText(/Explain my "Alpha finding"/)).toBeNull();
     expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
+    // A rejected handoff never claims the question was sent.
+    expect(screen.queryByText(/Question sent:/)).toBeNull();
+  });
+
+  it("prefixes the server-authored heading on a chip handoff", async () => {
+    const bridge = renderWith({
+      poll_analysis_status: statusResponse("ready"),
+      get_analysis_context: makeSuccessResponse(
+        makeContextData({
+          suggested_prompts: [
+            {
+              id: "explain-first",
+              label: "Explain #1",
+              prompt: "Explain my #1 finding in plain English.",
+              heading: "Mutant follow-up: Explain finding #1",
+              intent: "explain",
+              action: { analysis_version: "analysis_1", intent: "explain" },
+            },
+          ],
+        }),
+      ),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+    await screen.findByText(/Alpha finding/i);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Explain #1" }));
+    await waitFor(() => expect(bridge.messages).toHaveLength(1));
+
+    const sent =
+      (bridge.messages[0]?.params as { content?: Array<{ text?: string }> }).content
+        ?.map((block) => block.text ?? "")
+        .join("") ?? "";
+    // The heading instruction precedes the untouched server-selected prompt.
+    expect(sent).toContain('Start your reply with this heading on its own line: "Mutant follow-up: Explain finding #1"');
+    expect(sent).toContain("Explain my #1 finding in plain English.");
+    expect(sent.indexOf("Mutant follow-up:")).toBeLessThan(
+      sent.indexOf("Explain my #1 finding in plain English."),
+    );
+  });
+
+  it("disables the clicked action and shows Sending while the handoff is in flight", async () => {
+    let resolveSend: () => void = () => undefined;
+    const sendFollowUpMessage = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    Object.defineProperty(window, "openai", {
+      value: { sendFollowUpMessage },
+      configurable: true,
+      writable: true,
+    });
+    try {
+      renderWith({ poll_analysis_status: statusResponse("ready") });
+
+      await screen.findByText(/Analysis ready/i);
+      fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+      await screen.findByText(/Alpha finding/i);
+
+      const button = screen.getByRole("button", { name: /ask chatgpt about my results/i });
+      fireEvent.click(button);
+
+      await waitFor(() => expect(button.textContent).toBe("Sending…"));
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+
+      resolveSend();
+      await waitFor(() => expect(button.textContent).toBe("Ask ChatGPT about my results"));
+    } finally {
+      delete (window as unknown as { openai?: unknown }).openai;
+    }
+  });
+
+  it("stops a stale card click and offers the current findings", async () => {
+    let version = "analysis_1";
+    const bridge = renderWith({
+      poll_analysis_status: () =>
+        makeSuccessResponse(
+          statusResponse("ready").data as Record<string, unknown>,
+          version,
+        ),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+    await screen.findByText(/Alpha finding/i);
+
+    // The analysis advanced after this card was rendered.
+    version = "analysis_2";
+    fireEvent.click(screen.getAllByRole("button", { name: /explain finding #1/i })[0]!);
+
+    await screen.findByText(/These results have changed/);
+    // The old action never reached the host.
+    expect(bridge.messages).toHaveLength(0);
+    expect(version).toBe("analysis_2");
+
+    // The recovery action hands off the current-findings prompt instead.
+    fireEvent.click(screen.getByRole("button", { name: /open your current findings/i }));
+    await waitFor(() => expect(bridge.messages).toHaveLength(1));
+    expect(JSON.stringify(bridge.messages[0])).toContain("Show my current Mutant findings.");
+  });
+
+  it("persists only the sent action id and label through widget state", async () => {
+    const sendFollowUpMessage = vi.fn().mockResolvedValue(undefined);
+    const setWidgetState = vi.fn();
+    Object.defineProperty(window, "openai", {
+      value: { sendFollowUpMessage, setWidgetState, widgetState: {} },
+      configurable: true,
+      writable: true,
+    });
+    try {
+      renderWith({ poll_analysis_status: statusResponse("ready") });
+
+      await screen.findByText(/Analysis ready/i);
+      fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+      await screen.findByText(/Alpha finding/i);
+
+      fireEvent.click(screen.getAllByRole("button", { name: /explain finding #1/i })[0]!);
+
+      await waitFor(() => expect(setWidgetState).toHaveBeenCalled());
+      const state = setWidgetState.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(state.mutantSentAction).toEqual({
+        id: "explain-finding-1",
+        label: "Explain finding #1",
+      });
+      // No prompt or health history is persisted.
+      expect(JSON.stringify(state)).not.toContain("Retrieve the full finding details");
+      expect(JSON.stringify(state)).not.toContain("Alpha finding");
+    } finally {
+      delete (window as unknown as { openai?: unknown }).openai;
+    }
+  });
+
+  it("restores the sent acknowledgment from host widget state", async () => {
+    Object.defineProperty(window, "openai", {
+      value: {
+        widgetState: {
+          mutantSentAction: { id: "ask-results", label: "Ask about my results" },
+        },
+      },
+      configurable: true,
+      writable: true,
+    });
+    try {
+      renderWith({ poll_analysis_status: statusResponse("ready") });
+
+      await screen.findByText(/Analysis ready/i);
+      const status = await screen.findByRole("status");
+      expect(status.textContent).toContain("Question sent: Ask about my results");
+    } finally {
+      delete (window as unknown as { openai?: unknown }).openai;
+    }
   });
 
   it("feature-detects the host API and reports when none is available", async () => {

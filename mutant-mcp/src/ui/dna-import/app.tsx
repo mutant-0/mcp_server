@@ -36,9 +36,17 @@ import { DARK_PALETTE, LIGHT_PALETTE, paletteVars } from "../shared/theme";
 import {
   FOLLOW_UP_FAILED_MESSAGE,
   FOLLOW_UP_UNAVAILABLE_MESSAGE,
+  STALE_CARD_MESSAGE,
+  STALE_CARD_RECOVERY_HEADING,
+  STALE_CARD_RECOVERY_PROMPT,
   deliverFollowUp,
   logBridgeError,
+  persistSentAction,
+  readSentAction,
+  verifyBoundVersion,
+  withCardHeading,
   type FollowUpOutcome,
+  type SentAction,
 } from "../shared/host";
 import { parseDnaFile } from "./parseFile";
 
@@ -166,8 +174,23 @@ interface PromptChip {
   prompt: string;
   /** The chip's intent, used to pick the ready card's primary action. */
   intent: string | null;
+  /** Bounded server-authored heading prepended to the handoff prompt. */
+  heading: string | null;
   /** The server's structured binding, forwarded verbatim; never rebuilt here. */
   action: Record<string, unknown> | null;
+}
+
+/**
+ * One card action the user can send: everything the handoff needs, plus the
+ * revision the action was rendered from so a stale click can be stopped.
+ */
+interface CardAction {
+  id: string;
+  label: string;
+  prompt: string;
+  heading: string | null;
+  /** The analysis revision this action was bound to, when known. */
+  boundVersion: string | null;
 }
 
 /**
@@ -529,6 +552,7 @@ function promptsFrom(data: unknown): PromptChip[] {
       label,
       prompt,
       intent: firstString(item.intent),
+      heading: firstString(item.heading),
       action: asRecord(item.action),
     });
   });
@@ -705,6 +729,11 @@ const styles = {
     color: "var(--mutant-error-text, #7f1d1d)",
     fontSize: 13,
   } as const,
+  handoffStatus: {
+    margin: "10px 0 0",
+    fontSize: 13,
+    color: "var(--color-text-secondary, #5f6368)",
+  } as const,
   refreshBanner: {
     background: "var(--color-background-secondary, #f5f7f6)",
     border: "1px solid var(--color-border-secondary, #ced4da)",
@@ -819,6 +848,16 @@ export function DnaImportApp({
   const [prompts, setPrompts] = useState<PromptChip[]>([]);
   /** Set when a follow-up handoff failed; holds copy, never the prompt itself. */
   const [handoffError, setHandoffError] = useState<string | null>(null);
+  /** The action currently being sent; disables that button and shows `Sending…`. */
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  /**
+   * The last action successfully handed off. Only its short id and label are
+   * kept, restored from host widget state so the acknowledgment survives a
+   * remount. The prompt and any health history are never stored or shown.
+   */
+  const [sentAction, setSentAction] = useState<SentAction | null>(() => readSentAction());
+  /** Set when the clicked card's bound revision is no longer current. */
+  const [staleNotice, setStaleNotice] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   /** Ticks while processing so the elapsed timer advances without polling state. */
   const [now, setNow] = useState(() => Date.now());
@@ -1438,22 +1477,57 @@ export function DnaImportApp({
    * no host API is available (or the host rejects it) the user sees an error.
    * A re-entrancy guard makes the server-selected prompt send exactly once, even
    * if the user double-clicks the primary comparison action.
+   *
+   * Before sending, the card re-checks its bound revision through the app-only
+   * status channel: the host handoff transmits only a prompt string, so a
+   * changed analysis must stop the old action rather than silently explaining a
+   * different finding.
    */
   const handoffPendingRef = useRef(false);
   const askChatGpt = useCallback(
-    async (text: string) => {
+    async (action: CardAction) => {
       if (handoffPendingRef.current) return;
       handoffPendingRef.current = true;
       setHandoffError(null);
+      setStaleNotice(false);
+      setPendingActionId(action.id);
       try {
-        const outcome = await deliverFollowUp(app, text);
-        if (outcome === "unavailable") setHandoffError(FOLLOW_UP_UNAVAILABLE_MESSAGE);
-        else if (outcome === "failed") setHandoffError(FOLLOW_UP_FAILED_MESSAGE);
+        const check = await verifyBoundVersion(app, action.boundVersion);
+        if (check === "stale") {
+          setStaleNotice(true);
+          return;
+        }
+        const outcome = await deliverFollowUp(
+          app,
+          withCardHeading(action.prompt, action.heading),
+        );
+        if (outcome === "sent") {
+          const next: SentAction = { id: action.id, label: action.label };
+          setSentAction(next);
+          persistSentAction(next);
+        } else if (outcome === "unavailable") {
+          setHandoffError(FOLLOW_UP_UNAVAILABLE_MESSAGE);
+        } else {
+          setHandoffError(FOLLOW_UP_FAILED_MESSAGE);
+        }
       } finally {
+        setPendingActionId(null);
         handoffPendingRef.current = false;
       }
     },
     [app],
+  );
+
+  /** Fixed recovery action for a stale card; carries no revision pin. */
+  const currentFindingsAction = useCallback(
+    (): CardAction => ({
+      id: "current-findings",
+      label: "Current findings",
+      prompt: STALE_CARD_RECOVERY_PROMPT,
+      heading: STALE_CARD_RECOVERY_HEADING,
+      boundVersion: null,
+    }),
+    [],
   );
 
   const onDrop = useCallback(
@@ -1614,13 +1688,20 @@ export function DnaImportApp({
                 <button
                   type="button"
                   style={styles.subtleButton}
+                  disabled={pendingActionId === `explain-finding-${finding.rank}`}
                   onClick={() =>
-                    void askChatGpt(
-                      `Explain my "${finding.title}" finding from my Mutant analysis in useful detail. Retrieve the full finding details first. Cover what it means, why it ranked where it did, the main module and pattern evidence, what is provisional or uncertain, what would strengthen or weaken it, and the specific confirmation options returned for this finding. Use clear headings and distinguish my genetic results from symptoms or test results I have not shared.`,
-                    )
+                    void askChatGpt({
+                      id: `explain-finding-${finding.rank}`,
+                      label: `Explain finding #${finding.rank}`,
+                      prompt: `Explain my "${finding.title}" finding from my Mutant analysis in useful detail. Retrieve the full finding details first. Cover what it means, why it ranked where it did, the main module and pattern evidence, what is provisional or uncertain, what would strengthen or weaken it, and the specific confirmation options returned for this finding. Use clear headings and distinguish my genetic results from symptoms or test results I have not shared.`,
+                      heading: `Mutant follow-up: Explain finding #${finding.rank}`,
+                      boundVersion: displayedVersionRef.current,
+                    })
                   }
                 >
-                  Explain this finding
+                  {pendingActionId === `explain-finding-${finding.rank}`
+                    ? "Sending…"
+                    : `Explain finding #${finding.rank}`}
                 </button>
               </li>
             ))}
@@ -1658,14 +1739,37 @@ export function DnaImportApp({
           </p>
         ) : null}
 
+        {staleNotice ? (
+          <div role="alert" style={styles.handoffError}>
+            <p style={{ margin: "0 0 8px" }}>{STALE_CARD_MESSAGE}</p>
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              disabled={pendingActionId === "current-findings"}
+              onClick={() => void askChatGpt(currentFindingsAction())}
+            >
+              {pendingActionId === "current-findings" ? "Sending…" : "Open your current findings"}
+            </button>
+          </div>
+        ) : null}
+
         {primaryPrompt ? (
           <div style={styles.primaryPrompt}>
             <button
               type="button"
               style={{ ...styles.primaryButton, width: "100%" }}
-              onClick={() => void askChatGpt(primaryPrompt.prompt)}
+              disabled={pendingActionId === primaryPrompt.id}
+              onClick={() =>
+                void askChatGpt({
+                  id: primaryPrompt.id,
+                  label: primaryPrompt.label,
+                  prompt: primaryPrompt.prompt,
+                  heading: primaryPrompt.heading,
+                  boundVersion: firstString(primaryPrompt.action?.analysis_version),
+                })
+              }
             >
-              {primaryPrompt.label}
+              {pendingActionId === primaryPrompt.id ? "Sending…" : primaryPrompt.label}
             </button>
             <p style={styles.small}>{COMPARISON_HELPER}</p>
           </div>
@@ -1678,12 +1782,27 @@ export function DnaImportApp({
                 key={chip.id}
                 type="button"
                 style={styles.chip}
-                onClick={() => void askChatGpt(chip.prompt)}
+                disabled={pendingActionId === chip.id}
+                onClick={() =>
+                  void askChatGpt({
+                    id: chip.id,
+                    label: chip.label,
+                    prompt: chip.prompt,
+                    heading: chip.heading,
+                    boundVersion: firstString(chip.action?.analysis_version),
+                  })
+                }
               >
-                {chip.label}
+                {pendingActionId === chip.id ? "Sending…" : chip.label}
               </button>
             ))}
           </div>
+        ) : null}
+
+        {sentAction ? (
+          <p role="status" aria-live="polite" style={styles.handoffStatus}>
+            Question sent: {sentAction.label}. See the latest reply below.
+          </p>
         ) : null}
 
         <div style={{ ...styles.buttonRow, marginTop: 14 }}>
@@ -1691,9 +1810,18 @@ export function DnaImportApp({
             <button
               type="button"
               style={styles.secondaryButton}
-              onClick={() => void askChatGpt("Ask ChatGPT about my Mutant results.")}
+              disabled={pendingActionId === "ask-results"}
+              onClick={() =>
+                void askChatGpt({
+                  id: "ask-results",
+                  label: "Ask about my results",
+                  prompt: "Ask ChatGPT about my Mutant results.",
+                  heading: "Mutant follow-up: Ask about my results",
+                  boundVersion: displayedVersionRef.current,
+                })
+              }
             >
-              Ask ChatGPT about my results
+              {pendingActionId === "ask-results" ? "Sending…" : "Ask ChatGPT about my results"}
             </button>
           ) : null}
           <button type="button" style={styles.subtleButton} onClick={openFilePicker}>

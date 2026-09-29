@@ -89,6 +89,13 @@ export const promptSuggestionSchema = z.looseObject({
   id: z.string(),
   label: z.string(),
   prompt: z.string(),
+  heading: z
+    .string()
+    .max(80)
+    .optional()
+    .describe(
+      "Bounded server-authored heading the card prefixes onto the host handoff so the reply identifies the clicked action. Display metadata only; never rendered in the card.",
+    ),
   intent: z.enum([
     "overview",
     "explain",

@@ -52,6 +52,7 @@ function statusPrompts(data: JsonObject, analysisVersion: string | null): Prompt
       id: "import-format",
       label: "Accepted files",
       prompt: "What DNA file formats can I import, and how does the import work?",
+      heading: "Mutant follow-up: Accepted DNA files",
       intent: "import_help",
       action: action("import_help", null),
     });
@@ -59,6 +60,7 @@ function statusPrompts(data: JsonObject, analysisVersion: string | null): Prompt
       id: "import-privacy",
       label: "Is my DNA private?",
       prompt: "How is my DNA file handled during import, and is it kept private?",
+      heading: "Mutant follow-up: DNA privacy",
       intent: "import_help",
       action: action("import_help", null),
     });
@@ -70,6 +72,7 @@ function statusPrompts(data: JsonObject, analysisVersion: string | null): Prompt
       id: "top-findings",
       label: "My top findings",
       prompt: "What are my top health hypotheses?",
+      heading: "Mutant follow-up: Top findings",
       intent: "overview",
       action: action("overview", analysisVersion),
     });
@@ -77,6 +80,7 @@ function statusPrompts(data: JsonObject, analysisVersion: string | null): Prompt
       id: "explain-first",
       label: "Explain #1",
       prompt: "Explain my #1 finding in plain English.",
+      heading: "Mutant follow-up: Explain finding #1",
       intent: "explain",
       action: action("explain", analysisVersion),
     });
@@ -88,6 +92,7 @@ function statusPrompts(data: JsonObject, analysisVersion: string | null): Prompt
         id: "why-refresh",
         label: "Why refresh?",
         prompt: "Why is a refreshed analysis available, and what might change?",
+        heading: "Mutant follow-up: Why refresh?",
         intent: "regeneration",
         action: action("regeneration", analysisVersion),
       });
@@ -96,6 +101,7 @@ function statusPrompts(data: JsonObject, analysisVersion: string | null): Prompt
           id: "start-refresh",
           label: "Refresh analysis",
           prompt: "I'd like to refresh my analysis with the newer platform.",
+          heading: "Mutant follow-up: Refresh analysis",
           intent: "regeneration",
           action: action("regeneration", analysisVersion),
         });
@@ -105,6 +111,7 @@ function statusPrompts(data: JsonObject, analysisVersion: string | null): Prompt
       id: "compare-top",
       label: "Compare top 3",
       prompt: "Compare my top three findings.",
+      heading: "Mutant follow-up: Compare top 3",
       intent: "comparison",
       action: action("comparison", analysisVersion),
     });
@@ -112,6 +119,7 @@ function statusPrompts(data: JsonObject, analysisVersion: string | null): Prompt
       id: "clinician-questions",
       label: "Ask my clinician",
       prompt: "What should I ask my clinician about my top findings?",
+      heading: "Mutant follow-up: Ask my clinician",
       intent: "clinician_questions",
       action: action("clinician_questions", analysisVersion),
     });
@@ -133,6 +141,7 @@ function statusPrompts(data: JsonObject, analysisVersion: string | null): Prompt
       id: "regenerate",
       label: "Regenerate analysis",
       prompt: "My analysis could not be served. What do I need to do to regenerate it?",
+      heading: "Mutant follow-up: Regenerate analysis",
       intent: "regeneration",
       action: action("regeneration", analysisVersion),
     });
@@ -158,6 +167,7 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
       label: "Compare with my history",
       prompt:
         "Which of my top three Mutant findings seems most relevant to the health history I've shared? What supports or argues against each? If I have not shared any health history in this conversation, ask me what I want to share before comparing; do not imply access to records I have not provided, and do not assume symptoms or test results I have not given you.",
+      heading: "Mutant follow-up: Compare with my history",
       intent: "comparison",
       action: action("comparison", analysisVersion),
     },
@@ -165,6 +175,7 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
       id: "explain-first",
       label: "Explain #1",
       prompt: "Explain my #1 finding in plain English.",
+      heading: "Mutant follow-up: Explain finding #1",
       intent: "explain",
       action: action("explain", analysisVersion, firstId),
     },
@@ -172,6 +183,7 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
       id: "compare-top-three",
       label: "Compare top 3",
       prompt: "Compare my top three findings and explain how they differ.",
+      heading: "Mutant follow-up: Compare top 3",
       intent: "comparison",
       action: action("comparison", analysisVersion, firstId),
     },
@@ -182,6 +194,7 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
       id: "search-all",
       label: "Search all findings",
       prompt: "Search my complete analysis for findings by topic.",
+      heading: "Mutant follow-up: Search all findings",
       intent: "overview",
       action: action("overview", analysisVersion),
     });
@@ -190,6 +203,7 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
       label: "Compare all findings",
       prompt:
         "Compare all findings in my complete Mutant analysis with medical records you can actually access in this conversation, including connected health records if available. First check what records are accessible; do not infer access from my account or claim to have read records you cannot see. If none are accessible, ask me to provide records here. Keep genetic findings separate from my clinical records.",
+      heading: "Mutant follow-up: Compare all findings",
       intent: "comparison",
       action: action("comparison", analysisVersion),
     });
@@ -203,11 +217,15 @@ function detailsPrompts(data: JsonObject, analysisVersion: string | null): Promp
   const id = hypothesis ? asText(hypothesis.id) : null;
   const name = hypothesis ? asText(hypothesis.name) : null;
   const ref = name ? `"${name}"` : "top";
+  const rankHeading = name
+    ? `Mutant follow-up: Why ${ref} ranked`
+    : "Mutant follow-up: Why this finding ranked";
   const base: PromptSuggestion[] = [
     {
       id: "why-ranked",
       label: "Why this rank?",
       prompt: `Why did my ${ref} finding rank where it did?`,
+      heading: rankHeading,
       intent: "explain",
       action: action("explain", analysisVersion, id),
     },
@@ -215,6 +233,7 @@ function detailsPrompts(data: JsonObject, analysisVersion: string | null): Promp
       id: "support-architecture",
       label: "Broad or concentrated?",
       prompt: `Is the genetic support for my ${ref} finding broad or concentrated?`,
+      heading: "Mutant follow-up: Broad or concentrated?",
       intent: "explain",
       action: action("explain", analysisVersion, id),
     },
@@ -222,6 +241,7 @@ function detailsPrompts(data: JsonObject, analysisVersion: string | null): Promp
       id: "module-contributions",
       label: "Which modules?",
       prompt: `Which biological modules contributed to my ${ref} finding, and which were contextual only?`,
+      heading: "Mutant follow-up: Which modules?",
       intent: "evidence",
       action: action("evidence", analysisVersion, id),
     },
@@ -229,6 +249,7 @@ function detailsPrompts(data: JsonObject, analysisVersion: string | null): Promp
       id: "supporting-evidence",
       label: "Supporting evidence",
       prompt: `Which variants and patterns support my ${ref} finding?`,
+      heading: "Mutant follow-up: Supporting evidence",
       intent: "evidence",
       action: action("evidence", analysisVersion, id),
     },
@@ -236,6 +257,7 @@ function detailsPrompts(data: JsonObject, analysisVersion: string | null): Promp
       id: "strengthen-weaken",
       label: "What changes it?",
       prompt: `What would strengthen or weaken my ${ref} finding?`,
+      heading: "Mutant follow-up: What changes it?",
       intent: "evidence",
       action: action("evidence", analysisVersion, id),
     },

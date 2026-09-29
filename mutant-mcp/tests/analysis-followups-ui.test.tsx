@@ -48,9 +48,15 @@ interface FollowupsBridge {
   stop(): void;
 }
 
+/** Optional per-test control over what the app-only status channel answers. */
+interface FollowupsBridgeOptions {
+  /** When set, `poll_analysis_status` reports this analysis_version. */
+  statusVersion?: string;
+}
+
 let activeBridge: FollowupsBridge | null = null;
 
-function installHostBridge(): FollowupsBridge {
+function installHostBridge(options: FollowupsBridgeOptions = {}): FollowupsBridge {
   const openLinks: string[] = [];
 
   function reply(id: number, result: unknown): void {
@@ -62,7 +68,7 @@ function installHostBridge(): FollowupsBridge {
       jsonrpc?: string;
       id?: number;
       method?: string;
-      params?: { url?: string };
+      params?: { name?: string; url?: string };
     };
     if (!message || message.jsonrpc !== "2.0") return;
     if (typeof message.method !== "string" || message.id === undefined) return;
@@ -74,6 +80,16 @@ function installHostBridge(): FollowupsBridge {
     if (message.method === "ui/open-link") {
       openLinks.push(String(message.params?.url ?? ""));
       reply(message.id, {});
+      return;
+    }
+    if (message.method === "tools/call" && options.statusVersion) {
+      // The stale guard reads the app-only status channel before handing off.
+      const envelope = makeSuccessResponse({}, options.statusVersion);
+      reply(message.id, {
+        content: [{ type: "text", text: JSON.stringify(envelope) }],
+        structuredContent: envelope,
+        isError: false,
+      });
       return;
     }
     reply(message.id, {});
@@ -93,8 +109,8 @@ function installHostBridge(): FollowupsBridge {
 
 const FOLLOWUPS_META = { mutant: { mode: "followups" } };
 
-function renderCard(): FollowupsBridge {
-  const bridge = installHostBridge();
+function renderCard(options: FollowupsBridgeOptions = {}): FollowupsBridge {
+  const bridge = installHostBridge(options);
   render(<AnalysisFollowupsApp />);
   return bridge;
 }
@@ -131,7 +147,7 @@ describe("analysis follow-up card", () => {
     expect(screen.getAllByRole("button")).toHaveLength(2);
   });
 
-  it("sends the server-selected prompt on click", async () => {
+  it("sends the server-selected prompt, prefixed with its heading, on click", async () => {
     const bridge = renderCard();
     bridge.sendToolResult(
       makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
@@ -141,13 +157,115 @@ describe("analysis follow-up card", () => {
     const button = await screen.findByRole("button", { name: "Why this rank?" });
     fireEvent.click(button);
 
-    await waitFor(() =>
-      expect(sendFollowUpMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          prompt: expect.stringContaining("rank where it did"),
-        }),
-      ),
+    await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
+    const args = sendFollowUpMessage.mock.calls[0]?.[0] as {
+      prompt: string;
+      scrollToBottom?: boolean;
+    };
+    expect(args.scrollToBottom).toBe(true);
+    // The heading instruction comes first; the server prompt is unchanged after it.
+    expect(args.prompt).toContain('Mutant follow-up: Why "Alpha finding" ranked');
+    expect(args.prompt).toContain("rank where it did");
+    expect(args.prompt.indexOf("Mutant follow-up:")).toBeLessThan(
+      args.prompt.indexOf("rank where it did"),
     );
+  });
+
+  it("acknowledges the clicked label without rendering the full prompt", async () => {
+    const bridge = renderCard();
+    bridge.sendToolResult(
+      makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
+      FOLLOWUPS_META,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Why this rank?" }));
+
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toContain("Question sent: Why this rank?");
+    expect(status.textContent).toContain("See the latest reply below");
+    // The handoff prompt itself is never rendered in the card.
+    expect(screen.queryByText(/rank where it did/)).toBeNull();
+    expect(screen.queryByText(/Start your reply with this heading/)).toBeNull();
+  });
+
+  it("disables the clicked action and shows Sending while the handoff is in flight", async () => {
+    let resolveSend: () => void = () => undefined;
+    sendFollowUpMessage.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const bridge = renderCard();
+    bridge.sendToolResult(
+      makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
+      FOLLOWUPS_META,
+    );
+
+    const button = await screen.findByRole("button", { name: "Why this rank?" });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(button.textContent).toBe("Sending…"));
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+
+    resolveSend();
+    await waitFor(() => expect(button.textContent).toBe("Why this rank?"));
+  });
+
+  it("sends exactly one follow-up on a double click", async () => {
+    const bridge = renderCard();
+    bridge.sendToolResult(
+      makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
+      FOLLOWUPS_META,
+    );
+
+    const button = await screen.findByRole("button", { name: "Why this rank?" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
+  it("reports a rejected handoff and never claims the question was sent", async () => {
+    sendFollowUpMessage.mockRejectedValue(new Error("host rejected the follow-up"));
+    const bridge = renderCard();
+    bridge.sendToolResult(
+      makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
+      FOLLOWUPS_META,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Why this rank?" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/couldn't send that follow-up message/i)).toBeTruthy(),
+    );
+    expect(screen.queryByText(/Question sent:/)).toBeNull();
+    // The action is usable again after the failure.
+    expect((await screen.findByRole("button", { name: "Why this rank?" })).hasAttribute("disabled")).toBe(
+      false,
+    );
+  });
+
+  it("stops a stale click and offers the current-findings recovery", async () => {
+    // The card is bound to rev42, but the account has moved to rev43.
+    const bridge = renderCard({ statusVersion: "rev43-v3.0.0" });
+    bridge.sendToolResult(
+      makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
+      FOLLOWUPS_META,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Why this rank?" }));
+
+    await screen.findByText(/These results have changed/);
+    // The old action never reached the host.
+    expect(sendFollowUpMessage).not.toHaveBeenCalled();
+
+    // The recovery handoff re-resolves the current analysis instead.
+    fireEvent.click(screen.getByRole("button", { name: /Open your current findings/i }));
+    await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
+    const args = sendFollowUpMessage.mock.calls[0]?.[0] as { prompt: string };
+    expect(args.prompt).toContain("Show my current Mutant findings.");
   });
 
   it("uses the comparison label and shows the history action's non-assuming prompt", async () => {

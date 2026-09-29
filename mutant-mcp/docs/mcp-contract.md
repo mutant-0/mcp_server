@@ -1121,6 +1121,7 @@ Free account has locked hypotheses:
       "id": "why-ranked",
       "label": "Why this rank?",
       "prompt": "Why did my \"Alpha\" finding rank where it did?",
+      "heading": "Mutant follow-up: Why \"Alpha\" ranked",
       "intent": "explain",
       "hypothesis_id": "RC_A",
       "action": { "analysis_version": "rev42-v3.0.0", "hypothesis_id": "RC_A", "intent": "explain" }
@@ -1137,6 +1138,30 @@ then history, a comparison offers `Explain #1` then history — and its prompt
 explicitly asks the user what they wish to share before comparing.
 `resolve_analysis_followups` is internal-only: it is accepted by `parse_request`
 but is **not** a model-facing tool.
+
+Each action also carries a bounded `heading` (`FOLLOWUP_HEADING_MAX`, 80 chars).
+It is display metadata for the card's host handoff only: the card prefixes its
+handoff prompt with one generic instruction asking ChatGPT to start the reply
+with that heading, then appends the server-selected `prompt`. This is what makes
+a card-triggered answer identify the clicked action (and finding, where
+applicable) at the top of a long conversation. The heading is never rendered
+inside the card and never carries an id, score, or health history.
+
+#### Residual host-handoff race
+
+The host handoff transmits **only a prompt string**
+(`sendFollowUpMessage({ prompt, scrollToBottom: true })` on ChatGPT, `App.sendMessage`
+elsewhere), so a card's bound `analysis_version` and `hypothesis_id` cannot travel
+into the model's next tool call. Storing them in the card does not pin that call.
+Both cards therefore narrow the window before sending: they read the app-only
+`poll_analysis_status` and compare its `analysis_version` with the revision the
+clicked action was bound to. A mismatch stops the handoff and shows
+`These results have changed. Open your current findings.` with a fixed recovery
+prompt (`Show my current Mutant findings.`) that re-resolves the current analysis
+instead of silently explaining a different rank #1. A check that cannot complete
+(no pin, no bridge, a scope gap, or a transient error) leaves the handoff to
+proceed, and the server's own `ANALYSIS_VERSION_CHANGED` remains the backstop:
+the race between the check and the model's call is documented, not eliminated.
 
 ### `analysis_version` pin
 
@@ -1309,14 +1334,27 @@ never a countdown, percentage, or estimated time remaining.
 When the analysis is ready the same card becomes the completion view, offering
 either `View my top 3 findings`, which calls `list_health_hypotheses` from the
 component (pinned to `displayed_analysis_version`) and renders the summaries
-inline, or `Ask ChatGPT about my results` / `Explain this finding`, which hand
-off to ChatGPT only when the user asks for interpretation. The handoff is
+inline, or `Ask ChatGPT about my results` / `Explain finding #N`, which hand off
+to ChatGPT only when the user asks for interpretation. The handoff is
 feature-detected and delivered as a real follow-up turn, never rendered inside the
 card: on ChatGPT it uses `window.openai.sendFollowUpMessage({ prompt,
 scrollToBottom: true })`, on MCP Apps hosts it uses the `ui/message` bridge
 (`App.sendMessage`), and when neither is available (or the host rejects it) the
 card shows a user-visible error instead. It applies the host's theme and CSS
 variables (`useHostStyles`).
+
+Each handoff prepends the action's server-authored bounded `heading` as one
+generic instruction (`Start your reply with this heading on its own line: …`) so
+the new assistant reply identifies the clicked action at the top, then appends the
+server-selected `prompt` unchanged. While an action is in flight that button is
+disabled and shows `Sending…`; on success the card shows a persistent
+`role="status"` line — `Question sent: <label>. See the latest reply below.` — and
+persists only the non-sensitive `{id, label}` through host widget state, so the
+acknowledgment survives a remount. The full prompt and any health history are
+never stored or rendered. Clicking an older card whose bound `analysis_version` no
+longer matches the current analysis stops the handoff with the stale-results path
+instead of silently explaining a different finding; see
+[Residual host-handoff race](#residual-host-handoff-race).
 
 Two 3.0.0 behaviors on the completion view:
 
@@ -1366,6 +1404,13 @@ sees a search-all discovery hint. It never renders the generated answer, the
 hypothesis prose, or any health context, and it renders nothing at all when the
 result is missing or an error.
 
+Clicking an action prefixes its server-authored `heading` onto the handoff,
+disables that button while sending, and shows the same `role="status"`
+acknowledgment line as the overview card. As on the overview card, a click whose
+bound `analysis_version` is no longer current is stopped with the
+`These results have changed. Open your current findings.` recovery path rather
+than silently answering the new analysis.
+
 ## Prompt suggestions
 
 `get_analysis_status`, `get_analysis_context`, and `explain_health_hypothesis`
@@ -1377,6 +1422,7 @@ add a `suggested_prompts` array to their `data`
   "id": "why-refresh",
   "label": "Why refresh?",
   "prompt": "Why is a refreshed analysis available, and what might change?",
+  "heading": "Mutant follow-up: Why refresh?",
   "intent": "regeneration",
   "action": { "analysis_version": "rev42-v3.0.0", "intent": "regeneration" }
 }
@@ -1404,6 +1450,10 @@ add a `suggested_prompts` array to their `data`
 - `action` is the structured follow-up binding (`{analysis_version?,
   hypothesis_id?, intent}`). `analysis_version` pins the click to the revision
   the chip was rendered from.
+- `heading` is the bounded (`≤ 80`) display heading the card prefixes onto its
+  host handoff so the new assistant reply identifies the clicked action; like
+  the follow-up card's actions it is never rendered inside the card and never
+  carries an id, score, or health history.
 - `suggested_prompts` is omitted entirely (the property is absent, not null or
   empty) in `PROCESSING_INITIAL` and `REFRESH_PROCESSING_NO_USABLE_ANALYSIS`, so
   neither the model nor the card is offered a question that cannot be answered.
@@ -1848,9 +1898,11 @@ The contract is covered by:
   statuses instead of silent switches, Free vs Full upgrade visibility, and a
   failed render that leaves the answer intact.
 - `mutant-mcp/tests/analysis-followups-ui.test.tsx` — the compact card renders at
-  most two actions, sends the server-selected prompt on click, opens the tagged
-  upgrade route, never repeats the answer, renders nothing on an error result,
-  and stays single-column at a narrow viewport.
+  most two actions, sends the server-selected prompt (with its heading) on click,
+  disables the clicked button while sending, shows and persists the `role="status"`
+  acknowledgment, blocks a stale click with the recovery path, opens the tagged
+  upgrade route, never repeats the answer or the full prompt, renders nothing on
+  an error result, and stays single-column at a narrow viewport.
 - `mutant-mcp/tests/ui-resource.test.ts` — both UI resource URIs (mime type,
   stable unversioned pointer, self-contained document, empty CSP, no portal auth
   or direct network access), including that the follow-up document is separate
@@ -1860,8 +1912,11 @@ The contract is covered by:
   the two target states omit `suggested_prompts` and (on the component path)
   `next_action` while returning the exact short content.
 - `mutant-mcp/tests/dna-import-ui.test.tsx` — prompt chips and the refresh
-  banner driven by `experience_state`, and that the card polls to a terminal
-  state (ready or failed) with no `next_action` or `suggested_prompts`.
+  banner driven by `experience_state`, the card polling to a terminal state
+  (ready or failed) with no `next_action` or `suggested_prompts`, and the
+  card-follow-up handoff: heading-prefixed prompts, the per-button `Sending…`
+  state, the `Question sent: <label>` acknowledgment, no prompt echo, and the
+  stale-card guard.
 - `mutant-mcp/tests/mcp-server.test.ts` — `modules`/`include_context`
   pass-through, that `structuredContent` is never duplicated into `content`, and
   the parameterized target-state assertions (property absence, exact text, false

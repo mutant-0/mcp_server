@@ -493,6 +493,10 @@ describe("contract v3.0 acceptance", () => {
         expect(typeof prompt.id).toBe("string");
         expect(typeof prompt.label).toBe("string");
         expect(typeof prompt.prompt).toBe("string");
+        // Every action carries a bounded, non-command heading for the handoff.
+        expect(typeof prompt.heading, `${name} prompt heading`).toBe("string");
+        expect(String(prompt.heading)).toMatch(/^Mutant follow-up: /);
+        expect(String(prompt.heading).length).toBeLessThanOrEqual(80);
         // Prompts are user-visible prose, never internal tool commands.
         expect(String(prompt.prompt)).not.toMatch(/call_|_id=|\(\)/);
       }

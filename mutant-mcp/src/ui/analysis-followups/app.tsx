@@ -12,15 +12,23 @@
  * through the bridge; the history action's prompt explicitly asks the user what
  * they wish to share.
  */
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useApp, useDocumentTheme, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
 import type { App } from "@modelcontextprotocol/ext-apps";
 import { DARK_PALETTE, LIGHT_PALETTE, paletteVars } from "../shared/theme";
 import {
   FOLLOW_UP_FAILED_MESSAGE,
   FOLLOW_UP_UNAVAILABLE_MESSAGE,
+  STALE_CARD_MESSAGE,
+  STALE_CARD_RECOVERY_HEADING,
+  STALE_CARD_RECOVERY_PROMPT,
   deliverFollowUp,
   logBridgeError,
+  persistSentAction,
+  readSentAction,
+  verifyBoundVersion,
+  withCardHeading,
+  type SentAction,
 } from "../shared/host";
 
 /** The host context shape App exposes once connected. */
@@ -31,7 +39,11 @@ interface FollowupAction {
   id: string;
   label: string;
   prompt: string;
+  /** Bounded server-authored heading prepended to the handoff prompt. */
+  heading: string | null;
   hypothesisId: string | null;
+  /** The analysis revision this action was bound to, for the stale guard. */
+  boundVersion: string | null;
 }
 
 /** The verified payload this card renders. Nothing here is derived client-side. */
@@ -116,6 +128,7 @@ export function followupsFrom(data: unknown): FollowupsPayload | null {
   }
 
   const actions: FollowupAction[] = [];
+  const displayedVersion = firstString(row.displayed_analysis_version);
   if (Array.isArray(row.actions)) {
     for (const entry of row.actions) {
       const item = asRecord(entry);
@@ -127,7 +140,9 @@ export function followupsFrom(data: unknown): FollowupsPayload | null {
         id: firstString(item.id) ?? String(actions.length),
         label,
         prompt,
+        heading: firstString(item.heading),
         hypothesisId: firstString(item.hypothesis_id, bound?.hypothesis_id),
+        boundVersion: firstString(bound?.analysis_version, displayedVersion),
       });
     }
   }
@@ -137,7 +152,7 @@ export function followupsFrom(data: unknown): FollowupsPayload | null {
     mode: "followups",
     intent,
     plan,
-    analysisVersion: firstString(row.displayed_analysis_version),
+    analysisVersion: displayedVersion,
     hypotheses,
     // The server selects at most two; the client never invents more.
     actions: actions.slice(0, 2),
@@ -206,6 +221,26 @@ const styles = {
     fontSize: 12,
     color: "var(--mutant-error-text, #7f1d1d)",
   } as CSSProperties,
+  status: {
+    margin: "10px 0 0",
+    fontSize: 12,
+    color: "var(--color-text-secondary, #6b7280)",
+  } as CSSProperties,
+  stale: {
+    margin: "10px 0 0",
+    fontSize: 12,
+    color: "var(--mutant-error-text, #7f1d1d)",
+  } as CSSProperties,
+  staleButton: {
+    background: "transparent",
+    color: "var(--mutant-accent)",
+    border: "1px solid var(--mutant-accent)",
+    borderRadius: 8,
+    padding: "8px 12px",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+  } as CSSProperties,
 };
 
 function Shell({ children }: { children: ReactNode }) {
@@ -222,6 +257,16 @@ function contextLabel(intent: FollowupsPayload["intent"]): string {
 export function AnalysisFollowupsApp() {
   const [payload, setPayload] = useState<FollowupsPayload | null>(null);
   const [handoffError, setHandoffError] = useState<string | null>(null);
+  /** The action currently being sent; disables that button and shows `Sending…`. */
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  /**
+   * The last action successfully handed off. Only its short id and label are
+   * kept, restored from host widget state so the acknowledgment survives a
+   * remount; the prompt is never stored or rendered.
+   */
+  const [sentAction, setSentAction] = useState<SentAction | null>(() => readSentAction());
+  /** Set when the clicked card's bound revision is no longer current. */
+  const [staleNotice, setStaleNotice] = useState(false);
 
   const { app, isConnected } = useApp({
     appInfo: { name: "Mutant Genomics", version: "1.0.0" },
@@ -246,15 +291,52 @@ export function AnalysisFollowupsApp() {
   }, [isConnected, app]);
   useHostStyles(app, hostContext);
 
+  const handoffPendingRef = useRef(false);
   const runAction = useCallback(
     async (action: FollowupAction) => {
+      if (handoffPendingRef.current) return;
+      handoffPendingRef.current = true;
       setHandoffError(null);
-      const outcome = await deliverFollowUp(app, action.prompt);
-      if (outcome === "unavailable") setHandoffError(FOLLOW_UP_UNAVAILABLE_MESSAGE);
-      else if (outcome === "failed") setHandoffError(FOLLOW_UP_FAILED_MESSAGE);
+      setStaleNotice(false);
+      setPendingActionId(action.id);
+      try {
+        const check = await verifyBoundVersion(app, action.boundVersion);
+        if (check === "stale") {
+          setStaleNotice(true);
+          return;
+        }
+        const outcome = await deliverFollowUp(
+          app,
+          withCardHeading(action.prompt, action.heading),
+        );
+        if (outcome === "sent") {
+          const next: SentAction = { id: action.id, label: action.label };
+          setSentAction(next);
+          persistSentAction(next);
+        } else if (outcome === "unavailable") {
+          setHandoffError(FOLLOW_UP_UNAVAILABLE_MESSAGE);
+        } else {
+          setHandoffError(FOLLOW_UP_FAILED_MESSAGE);
+        }
+      } finally {
+        setPendingActionId(null);
+        handoffPendingRef.current = false;
+      }
     },
     [app],
   );
+
+  /** Fixed recovery action for a stale card; carries no revision pin. */
+  const openCurrentFindings = useCallback(() => {
+    void runAction({
+      id: "current-findings",
+      label: "Current findings",
+      prompt: STALE_CARD_RECOVERY_PROMPT,
+      heading: STALE_CARD_RECOVERY_HEADING,
+      hypothesisId: null,
+      boundVersion: null,
+    });
+  }, [runAction]);
 
   const openUpgrade = useCallback(
     (url: string) => {
@@ -281,10 +363,11 @@ export function AnalysisFollowupsApp() {
           <button
             key={action.id}
             type="button"
+            disabled={pendingActionId === action.id}
             style={index === 0 ? { ...styles.action, ...styles.primaryAction } : styles.action}
             onClick={() => void runAction(action)}
           >
-            {action.label}
+            {pendingActionId === action.id ? "Sending…" : action.label}
           </button>
         ))}
       </div>
@@ -303,6 +386,24 @@ export function AnalysisFollowupsApp() {
         </a>
       ) : payload.plan === "mutant_full" ? (
         <p style={styles.hint}>Search any ranked finding by topic to keep exploring.</p>
+      ) : null}
+      {sentAction ? (
+        <p role="status" aria-live="polite" style={styles.status}>
+          Question sent: {sentAction.label}. See the latest reply below.
+        </p>
+      ) : null}
+      {staleNotice ? (
+        <div role="alert" style={styles.stale}>
+          <p style={{ margin: "0 0 8px" }}>{STALE_CARD_MESSAGE}</p>
+          <button
+            type="button"
+            style={styles.staleButton}
+            disabled={pendingActionId === "current-findings"}
+            onClick={openCurrentFindings}
+          >
+            {pendingActionId === "current-findings" ? "Sending…" : "Open your current findings"}
+          </button>
+        </div>
       ) : null}
       {handoffError ? <p style={styles.error}>{handoffError}</p> : null}
     </Shell>

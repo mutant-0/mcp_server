@@ -28,6 +28,7 @@ interface FollowupAction {
   id: string;
   label: string;
   prompt: string;
+  heading?: string;
   intent?: string;
   hypothesis_id?: string;
   action?: { analysis_version?: string; hypothesis_id?: string; intent?: string };
@@ -95,6 +96,10 @@ describe("follow-up card integration", () => {
       expect(action.action?.analysis_version).toBe("rev42-v3.0.0");
       expect(action.hypothesis_id).toBe("HYP_A");
       expect(action.prompt.length).toBeGreaterThan(0);
+      // Each action carries a bounded, non-command heading for the host handoff.
+      expect(action.heading).toBeTruthy();
+      expect(action.heading).toMatch(/^Mutant follow-up: /);
+      expect(action.heading?.length).toBeLessThanOrEqual(80);
     }
   });
 

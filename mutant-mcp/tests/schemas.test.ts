@@ -47,6 +47,27 @@ describe("per-tool output schemas (contract 3.0.0)", () => {
     );
   });
 
+  it("accepts an optional bounded heading on a suggested prompt", () => {
+    const prompt = (heading: string) => ({
+      id: "explain-first",
+      label: "Explain #1",
+      prompt: "Explain my #1 finding in plain English.",
+      heading,
+      intent: "explain",
+    });
+
+    const ok = makeSuccessResponse(
+      makeStatusData({ suggested_prompts: [prompt("Mutant follow-up: Explain finding #1")] }),
+    );
+    expect(analysisStatusOutputSchema.safeParse(ok).success).toBe(true);
+
+    // The heading is bounded: a handoff prompt cannot balloon.
+    const tooLong = makeSuccessResponse(
+      makeStatusData({ suggested_prompts: [prompt(`Mutant follow-up: ${"x".repeat(80)}`)] }),
+    );
+    expect(analysisStatusOutputSchema.safeParse(tooLong).success).toBe(false);
+  });
+
   it("accepts a processing envelope with no next_action or suggested_prompts", () => {
     for (const state of ["PROCESSING_INITIAL", "REFRESH_PROCESSING_NO_USABLE_ANALYSIS"]) {
       const data = makeStatusData({
