@@ -702,10 +702,40 @@ export interface AnalysisContextData {
 }
 
 /** The `list_health_hypotheses` payload. */
+export interface SearchScope {
+  /**
+   * Ranked hypotheses this search actually reached: `top_three` for Free (the
+   * accessible set), `all` for Full. Server-authored, never guessed by the MCP
+   * layer.
+   */
+  hypothesis_scope: "top_three" | "all";
+  /** Ranked hypotheses the search reached. Omitted only when unavailable. */
+  searched_count?: number;
+  /** Total ranked hypotheses in the analysis. Omitted only when unavailable. */
+  total_ranked_count?: number;
+  /** Ranked hypotheses the current plan could not search (`total - searched`). */
+  unsearched_ranked_count?: number;
+  /**
+   * Set only for a nonempty catalog-topic query whose first page has zero matches
+   * across the applicable scope; absent for an unfiltered list or an empty later
+   * page. Free never discloses whether a *particular* query matches a locked
+   * finding, so this is identical for a locked match and a nowhere match.
+   */
+  query_outcome?: "no_match_in_accessible_scope" | "no_match_in_ranked_search_fields";
+  /** True only when Free has locked findings a wider search could reach. */
+  broader_ranked_search_available: boolean;
+}
+
 export interface HypothesisListData {
   items: HypothesisSummary[];
   next_cursor: string | null;
   total_accessible?: number;
+  /**
+   * What the search actually covered. Present on every successful list response
+   * so a Free zero-result topic search can be explained as "no match in the
+   * accessible top three" rather than "no such finding".
+   */
+  search_scope?: SearchScope;
 }
 
 // ---------------------------------------------------------------------------

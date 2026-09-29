@@ -16,7 +16,17 @@ export const listHealthHypothesesTool: MutantToolDefinition = {
     "search, sorting, and explicit comparisons such as \"Compare my top three,\" and never to " +
     "reproduce the overview card's list in prose. After a comparison answer, when the host " +
     "supports Apps SDK UI, call show_analysis_followups once with the same analysis_version and " +
-    "the compared hypothesis ids.",
+    "the compared hypothesis ids. Every success returns a server-authored search_scope describing " +
+    "what the search actually covered: hypothesis_scope, the searched and unsearched ranked counts, " +
+    "and broader_ranked_search_available. When a topic query returns no items, answer once from that " +
+    "scope instead of treating the miss as proof the topic is absent. A Free no_match_in_accessible_scope " +
+    "means only that the accessible top three did not match; it does not say whether the locked ranked " +
+    "set contains the topic, so never speculate about a specific locked finding and never claim Mutant " +
+    "Full will find it. State the wider-search sentence only when broader_ranked_search_available is true; " +
+    "a Full no_match_in_ranked_search_fields is limited to the catalog search fields (name, summary, " +
+    "plain-language summary, and type), not every biological evidence layer. Do not compare unseen scores, " +
+    "invent gene or variant mechanisms, or pitch an upgrade; the entitlement boundary is a factual scope " +
+    "statement, and follow-up questions about plan capabilities may be answered from search_scope.",
   scope: "analysis.read",
   inputSchema: listHealthHypothesesInputSchema,
   outputSchema: hypothesisListOutputSchema,

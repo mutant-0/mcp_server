@@ -162,11 +162,56 @@ function listContent(data: JsonObject): string {
   const lines = asList(data.items)
     .map(hypothesisLine)
     .filter((line): line is string => line !== null);
-  if (lines.length === 0) return "No health hypotheses matched.";
+  if (lines.length === 0) {
+    const scope = asRecord(data.search_scope);
+    const outcome = scope ? asText(scope.query_outcome) : null;
+    if (scope && outcome) return searchMissContent(scope, outcome);
+    return "No health hypotheses matched.";
+  }
   const parts = [`${lines.length} health ${lines.length === 1 ? "hypothesis" : "hypotheses"}:`];
   for (const line of lines) parts.push(line);
   if (asText(data.next_cursor)) parts.push("More results are available.");
   return parts.join("\n");
+}
+
+/** Small cardinal word so a server-provided count still reads as prose. */
+const COUNT_WORDS = [
+  "zero",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+] as const;
+
+function countWord(value: number | null): string {
+  if (value === null) return "three";
+  return COUNT_WORDS[value] ?? String(value);
+}
+
+/**
+ * Deterministic text for a zero-result catalog-topic search. It states the scope
+ * the server actually searched and, only when a wider search exists, that the
+ * remaining ranked set was not checked. It never claims the topic is present or
+ * absent outside the searched scope, never echoes the query, and never promotes
+ * a plan.
+ */
+function searchMissContent(scope: JsonObject, outcome: string): string {
+  if (outcome === "no_match_in_ranked_search_fields") {
+    return "No ranked hypothesis matched in the catalog search fields.";
+  }
+  const searched = countWord(asNumber(scope.searched_count));
+  const base = `No matching hypothesis was found among the ${searched} findings searchable with Mutant Free.`;
+  if (scope.broader_ranked_search_available !== true) return base;
+  return (
+    `${base} This result cannot tell whether the topic appears elsewhere in the ` +
+    "ranked analysis. Mutant Full allows searching the complete ranked set."
+  );
 }
 
 /**

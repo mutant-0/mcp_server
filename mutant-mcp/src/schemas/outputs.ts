@@ -239,10 +239,41 @@ export const analysisContextDataSchema = z.looseObject({
   suggested_prompts: z.array(promptSuggestionSchema),
 });
 
+export const searchScopeSchema = z.looseObject({
+  hypothesis_scope: z
+    .enum(["top_three", "all"])
+    .describe(
+      "Ranked hypotheses the search actually reached: Free searches the accessible top_three, Full searches all.",
+    ),
+  searched_count: z
+    .number()
+    .int()
+    .optional()
+    .describe("Ranked hypotheses the search reached. Omitted only when unavailable."),
+  total_ranked_count: z.number().int().optional(),
+  unsearched_ranked_count: z
+    .number()
+    .int()
+    .optional()
+    .describe("Ranked hypotheses the current plan could not search."),
+  query_outcome: z
+    .enum(["no_match_in_accessible_scope", "no_match_in_ranked_search_fields"])
+    .optional()
+    .describe(
+      "Set only for a nonempty catalog-topic query whose first page has zero matches across the applicable scope; absent for an unfiltered list or an empty later page. A Free no_match_in_accessible_scope never implies the topic is absent from the locked ranked set.",
+    ),
+  broader_ranked_search_available: z
+    .boolean()
+    .describe("True only when Free has locked findings a wider search could reach."),
+});
+
 export const hypothesisListDataSchema = z.looseObject({
   items: z.array(hypothesisSummarySchema),
   next_cursor: z.string().nullable().optional(),
   total_accessible: z.number().int().optional(),
+  search_scope: searchScopeSchema
+    .optional()
+    .describe("Entitlement-bounded scope the search actually covered, authored by the server."),
 });
 
 const patternContributionSchema = z.looseObject({

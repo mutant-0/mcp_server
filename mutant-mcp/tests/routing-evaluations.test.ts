@@ -112,6 +112,14 @@ const SPECIFIC_PROMPTS: Scenario[] = [
     tools: [{ name: "list_health_hypotheses", arguments: { query: "thyroid" } }],
     noUiOn: ["list_health_hypotheses"],
   },
+  {
+    name: "Free topic miss",
+    // "What about my histamine issues?" becomes a catalog-topic search; the
+    // history prose is never forwarded. The bounded scope answer mounts no card.
+    prompt: "What about my histamine issues?",
+    tools: [{ name: "list_health_hypotheses", arguments: { query: "histamine" } }],
+    noUiOn: ["list_health_hypotheses"],
+  },
 ];
 
 async function runScenario(

@@ -164,6 +164,19 @@ describe("tool definitions", () => {
     expect(description).toContain("never the user's health-history prose");
   });
 
+  it("explains the Free search boundary on the list tool description", () => {
+    const list = TOOL_DEFINITIONS.find((tool) => tool.name === "list_health_hypotheses");
+    const description = list?.description ?? "";
+    // The server-authored scope is named, and a Free miss is bounded to it.
+    expect(description).toContain("search_scope");
+    expect(description).toContain("broader_ranked_search_available");
+    expect(description).toContain("no_match_in_accessible_scope");
+    expect(description).toContain("does not say whether the locked ranked");
+    // The Full miss stays limited to the catalog search fields, and no pitch.
+    expect(description).toContain("catalog search fields");
+    expect(description).not.toContain("Upgrade now");
+  });
+
   it("echoes the UI descriptor on the show_dna_import result metadata", () => {
     expect(dnaImportUiMeta()).toEqual({
       ui: { resourceUri: DNA_IMPORT_UI_URI, visibility: ["model", "app"] },

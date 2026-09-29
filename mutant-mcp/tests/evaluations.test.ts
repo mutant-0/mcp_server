@@ -235,11 +235,64 @@ const GRADERS: Record<string, Grader[]> = {
           : "guardrails were not marked catalog_general",
     },
   ],
+  "free-search-miss": [
+    {
+      name: "states the search covered only the accessible top three",
+      check: ({ content }) =>
+        /three findings searchable with Mutant Free/i.test(content)
+          ? null
+          : "did not state that only the accessible top three were searched",
+    },
+    {
+      name: "says the remaining ranked set was not checked",
+      check: ({ content }) =>
+        /cannot tell whether the topic appears elsewhere in the ranked analysis/i.test(content)
+          ? null
+          : "did not say the rest of the ranked set was left unchecked",
+    },
+    {
+      name: "never echoes the patient-specific query or claims a result",
+      check: ({ content }) => {
+        if (/histamine/i.test(content)) return "echoed the patient-specific query";
+        if (/we found|there (?:is|are) (?:a|an)? ?(?:histamine|matching)|no histamine/i.test(content)) {
+          return "claimed a finding exists or does not exist beyond the searched scope";
+        }
+        return null;
+      },
+    },
+    {
+      name: "invents no mechanism and gives no checkout link",
+      check: ({ content }) => {
+        if (/mast cell|diamine oxidase|\bDAO\b|\bHNMT\b/i.test(content)) {
+          return "invented a biological mechanism";
+        }
+        if (/https?:\/\/|checkout|subscribe|upgrade now/i.test(content)) {
+          return "presented a transactional or checkout link";
+        }
+        return null;
+      },
+    },
+  ],
+};
+
+/** Free with locked findings, for the "What about my histamine issues?" fixture. */
+const FREE_SEARCH_MISS_DATA = {
+  items: [],
+  next_cursor: null,
+  search_scope: {
+    hypothesis_scope: "top_three",
+    searched_count: 3,
+    total_ranked_count: 92,
+    unsearched_ranked_count: 89,
+    query_outcome: "no_match_in_accessible_scope",
+    broader_ranked_search_available: true,
+  },
 };
 
 function defaultDataFor(
   operation: BackendOperation,
   details: Record<string, unknown>,
+  listData?: Record<string, unknown>,
 ): Record<string, unknown> {
   switch (operation) {
     case "explain_health_hypothesis":
@@ -247,7 +300,7 @@ function defaultDataFor(
     case "get_supporting_evidence":
       return TESTS_EVIDENCE;
     case "list_health_hypotheses":
-      return { items: [{ id: "HYP_A", rank: 1, name: "Alpha finding" }] };
+      return listData ?? { items: [{ id: "HYP_A", rank: 1, name: "Alpha finding" }] };
     default:
       return makeSuccessResponse(details).data as Record<string, unknown>;
   }
@@ -258,9 +311,10 @@ async function runScenario(
   details: Record<string, unknown>,
   tools: Array<{ name: string; arguments: Record<string, unknown> }>,
   userSuppliedHistory: boolean,
+  listData?: Record<string, unknown>,
 ): Promise<EvalContext> {
   const responder = (operation: BackendOperation): ToolResponse =>
-    makeSuccessResponse(defaultDataFor(operation, details));
+    makeSuccessResponse(defaultDataFor(operation, details, listData));
   const backendClient = new StubBackendClient(responder);
   const { logger } = makeCapturingLogger();
   const server = createMcpServer(
@@ -358,6 +412,22 @@ describe("assistant behavior evaluations", () => {
     expect(results.every((r) => r.failure === null), JSON.stringify(results)).toBe(true);
   });
 
+  it("a Free topic miss answers within the searched scope without overselling", async () => {
+    const ctx = await runScenario(
+      "What about my histamine issues?",
+      makeDetailsData(),
+      [{ name: "list_health_hypotheses", arguments: { query: "histamine" } }],
+      false,
+      FREE_SEARCH_MISS_DATA,
+    );
+    const results = grade(["free-search-miss"], ctx);
+    expect(results.every((r) => r.failure === null), JSON.stringify(results)).toBe(true);
+    // The answer keeps the bounded scope but never carries a transactional offer.
+    expect(ctx.data).toBeDefined();
+    expect(ctx.content).toContain("Mutant Full allows searching the complete ranked set");
+    expect(ctx.content).not.toMatch(/upgrade|https?:\/\//i);
+  });
+
   it.each([true, false])(
     "supplement caution is general catalog guidance (prior history: %s)",
     async (userSuppliedHistory) => {
@@ -374,7 +444,7 @@ describe("assistant behavior evaluations", () => {
   );
 
   it("graders reject non-compliant drafts (negative control)", () => {
-    const bad: [EvalContext, EvalContext, EvalContext, EvalContext] = [
+    const bad: [EvalContext, EvalContext, EvalContext, EvalContext, EvalContext] = [
       {
         prompt: "Why did it rank first?",
         userSuppliedHistory: false,
@@ -399,12 +469,20 @@ describe("assistant behavior evaluations", () => {
         content: "Ferritin via Serum immunoassay, fasting.",
         data: makeDetailsData(),
       },
+      {
+        prompt: "What about my histamine issues?",
+        userSuppliedHistory: false,
+        content:
+          "We found a histamine-related hypothesis locked behind Mutant Full. Upgrade now: https://mutantgenomics.com/upgrade",
+        data: FREE_SEARCH_MISS_DATA as Record<string, unknown>,
+      },
     ];
     const failures = [
       grade(["why-ranked"], bad[0])[0]?.failure,
       grade(["one-snp"], bad[1])[0]?.failure,
       grade(["supplement-caution"], bad[2])[0]?.failure,
       grade(["detailed-tests"], bad[3])[0]?.failure,
+      grade(["free-search-miss"], bad[4])[0]?.failure,
     ];
     expect(failures.every((failure) => failure !== null)).toBe(true);
   });

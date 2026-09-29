@@ -587,7 +587,8 @@ stays under ~1,500 characters (names and summaries are bounded).
 ### `list_health_hypotheses`
 
 Input: `{ query?, limit? (1-20, default 10), cursor?, analysis_version? }`.
-`query` matches hypothesis names/summaries only.
+`query` is a catalog-topic keyword only (never the user's health-history prose)
+and matches the hypothesis name, summary, plain-language summary, and type.
 
 Output:
 
@@ -595,13 +596,68 @@ Output:
 {
   "items": [ /* HypothesisSummary[] */ ],
   "next_cursor": "…",
-  "total_accessible": 12
+  "total_accessible": 12,
+  "search_scope": {
+    "hypothesis_scope": "top_three",
+    "searched_count": 3,
+    "total_ranked_count": 92,
+    "unsearched_ranked_count": 89,
+    "query_outcome": "no_match_in_accessible_scope",
+    "broader_ranked_search_available": true
+  }
 }
 ```
 
 `next_cursor` is present only when more items remain; there is no `page`
 wrapper. `total_accessible` is optional. Free returns its frozen top three in
 rank order; Full returns the whole set.
+
+`search_scope` is on every successful list response. It is authored by the
+backend from the same entitlement and ranked snapshot used for filtering, so the
+MCP layer never guesses the counts:
+
+- `hypothesis_scope` is `top_three` for Free and `all` for Full, mirroring the
+  `get_analysis_status` `entitlement.hypothesis_scope` vocabulary.
+- `searched_count` is the accessible hypotheses searched, `total_ranked_count`
+  the ranked hypotheses in the analysis, and `unsearched_ranked_count` the
+  difference (`0` for Full).
+- `query_outcome` is set only for a nonempty catalog-topic `query` whose
+  **first page** has zero matches across the applicable scope — never for an
+  unfiltered list or an empty later page. Free reports
+  `no_match_in_accessible_scope`; Full reports `no_match_in_ranked_search_fields`.
+- `broader_ranked_search_available` is true only when Free has locked findings
+  (`unsearched_ranked_count > 0`); it is false for Full and for a Free analysis
+  with nothing locked.
+
+A Free empty search means only that the accessible top three did not match. It
+never states whether the topic appears in the locked ranked set, and a query that
+matches a locked finding is indistinguishable from one that matches nothing
+anywhere: locked names, ids, ranks, scores, and per-query matches are never
+searched or disclosed. The outcome is tied to the catalog search fields above,
+not to every biological evidence layer. This is a successful response within
+scope, not a `PLAN_REQUIRED` error, and it carries no `upgrade` offer.
+
+#### Model-facing `content`
+
+The list `content` is deterministic prose. For a zero-result catalog-topic
+search the builder renders the scope instead of "No health hypotheses matched.":
+
+```text
+No matching hypothesis was found among the three findings searchable with Mutant Free.
+This result cannot tell whether the topic appears elsewhere in the ranked analysis.
+Mutant Full allows searching the complete ranked set.
+```
+
+- "three" is rendered from `searched_count`; the user's total ranked count is
+  never stated and the patient-specific query is never echoed.
+- The wider-search sentence is included only when
+  `broader_ranked_search_available` is true, so a Free analysis with nothing
+  locked does not suggest a broader search.
+- For Full (`no_match_in_ranked_search_fields`) the content is exactly
+  `No ranked hypothesis matched in the catalog search fields.` — it never claims
+  the user lacks a related variant, a genetic signal, or a health condition.
+- With no `query_outcome` (an unfiltered list or an empty later page) the content
+  stays `No health hypotheses matched.`
 
 ### `explain_health_hypothesis`
 
@@ -1751,6 +1807,14 @@ The contract is covered by:
 - `mutant-mcp/tests/schemas.test.ts` — per-tool output schemas, the object
   `next_action`, the processing payload with no `next_action`/`suggested_prompts`,
   and the `analysis_version` input.
+- `mutant-mcp/tests/list-search-scope.test.ts` — the `list_health_hypotheses`
+  `search_scope`: the server-authored object is preserved verbatim in
+  `structuredContent`, a Free miss is explained as bounded to the accessible top
+  three with the wider-search sentence only when
+  `broader_ranked_search_available` is true, the searched count is rendered from
+  `searched_count` without stating the user's total, a Free analysis with nothing
+  locked suggests no wider search, a Full miss is limited to the catalog search
+  fields, and an unfiltered empty list receives no query outcome.
 - `mutant-mcp/tests/tools.test.ts` — twelve tools, version, and input schemas
   (including `show_dna_import.mode`, `show_analysis_followups`'s required
   `analysis_version` and bounded `hypothesis_ids`, the `modules` evidence kind,
@@ -1767,6 +1831,12 @@ The contract is covered by:
   covers the three pre-message entry prompts across `NO_DNA`, `READY` Free,
   `READY` Full, and processing, asserting status-first, the state-appropriate card,
   and that no history prose reaches a catalog search.
+- `mutant-mcp/tests/evaluations.test.ts` — assistant behavior evaluations,
+  including a Free topic miss ("What about my histamine issues?"): the answer must
+  name the searched top three, say the remaining ranked set was not checked,
+  never echo the query or claim a finding exists or does not exist beyond that
+  scope, invent no mechanism, and carry no transactional or checkout link. Every
+  grader group has a negative control.
 - `mutant-mcp/tests/golden-prompt-routing.test.ts` — replays the observed
   model-selected tool traces in `golden-prompt-routing-traces.json` for the three
   entry prompts through the real server, which is what proves ChatGPT (not a
