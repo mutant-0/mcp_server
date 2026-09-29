@@ -41,6 +41,7 @@ import {
   STALE_CARD_RECOVERY_PROMPT,
   deliverFollowUp,
   logBridgeError,
+  logTiming,
   persistSentAction,
   readSentAction,
   verifyBoundVersion,
@@ -201,6 +202,24 @@ interface CardAction {
 const COMPARISON_PROMPT_ID = "compare-medical-records";
 const COMPARISON_HELPER = "Uses only health history or records you share in this chat.";
 
+/**
+ * The server's top-three comparison chip. Unlike the other chip actions, its
+ * first click expands an in-card panel instead of sending a chat turn; the
+ * server-authored prompt is only handed to the host from the panel's own
+ * "Explore this comparison in chat" action.
+ */
+const COMPARE_TOP_THREE_PROMPT_ID = "compare-top-three";
+
+/** The card shows exactly the three ranked findings the overview is bound to. */
+const COMPARISON_LIMIT = 3;
+
+/** Stable id linking the compare chip to the panel it controls. */
+const COMPARISON_PANEL_ID = "mutant-comparison-panel";
+
+/** Scores are ranking/support signals, never clinical probabilities. */
+const COMPARISON_CAVEAT =
+  "Scores describe genetic support and ranking. They are not diagnoses or probabilities.";
+
 /** Why polling is not running, when it is not: each is a recoverable notice. */
 interface PollState {
   /** The polling ceiling was reached; the analysis may still be processing. */
@@ -216,9 +235,27 @@ interface Finding {
   rank: number;
   title: string;
   summary: string | null;
+  /**
+   * Server-provided support scores, rendered only when the server returned them
+   * on this exact read. The card never derives or infers a score, so a field the
+   * backend omitted stays absent rather than being filled in here.
+   */
+  geneticSupport?: number | null;
+  geneticEvidence?: string | null;
 }
 
 type FindingsState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "loaded"; items: Finding[] }
+  | { status: "error"; message: string };
+
+/**
+ * The in-card comparison panel. It is populated only from a version-pinned
+ * `list_health_hypotheses` read that matches the bound overview snapshot, so a
+ * mixed-version comparison is never rendered.
+ */
+type ComparisonState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "loaded"; items: Finding[] }
@@ -526,14 +563,42 @@ function findingsFrom(data: unknown): Finding[] {
     const title = firstString(item.title, item.name);
     if (!title) return;
     const rank = typeof item.rank === "number" ? item.rank : index + 1;
+    // Score fields are copied verbatim when present; an omitted field stays
+    // omitted so the card never invents support data.
+    const geneticSupport =
+      typeof item.genetic_support === "number" ? item.genetic_support : undefined;
+    const geneticEvidence = firstString(item.genetic_evidence);
     findings.push({
       id: firstString(item.id, item.hypothesis_id),
       rank,
       title,
       summary: firstString(item.summary, item.description),
+      ...(geneticSupport === undefined ? {} : { geneticSupport }),
+      ...(geneticEvidence === null ? {} : { geneticEvidence }),
     });
   });
   return findings;
+}
+
+/**
+ * Whether a freshly read finding is the same bound finding. Rank is identity for
+ * display order; the server id (or, when it omits one, the title) proves the
+ * row is the one the overview snapshot showed.
+ */
+function sameFinding(read: Finding, bound: Finding): boolean {
+  if (read.rank !== bound.rank) return false;
+  if (read.id && bound.id) return read.id === bound.id;
+  return read.title === bound.title;
+}
+
+/**
+ * Verify a comparison read against the bound top-three snapshot. A partial read,
+ * a reordered list, or a different revision must not render as this comparison.
+ */
+function matchesBoundTopThree(items: Finding[], bound: Finding[]): boolean {
+  if (items.length === 0) return false;
+  if (items.length !== bound.length) return false;
+  return items.every((item, index) => sameFinding(item, bound[index]!));
 }
 
 /** Pull the state-aware suggestion chips out of a context envelope. */
@@ -752,6 +817,27 @@ const styles = {
     fontSize: 13,
     cursor: "pointer",
   } as const,
+  comparisonBlock: { margin: "12px 0 0" } as const,
+  comparisonPanel: {
+    margin: "10px 0 0",
+    padding: "12px 14px",
+    border: "1px solid var(--color-border-secondary, #ced4da)",
+    borderRadius: 8,
+    background: "var(--color-background-secondary, #fafbfc)",
+  } as const,
+  comparisonList: {
+    listStyle: "none",
+    margin: "10px 0",
+    padding: 0,
+    display: "grid",
+    gap: 10,
+  } as const,
+  comparisonItem: {
+    border: "1px solid var(--color-border-secondary, #eceff1)",
+    borderRadius: 8,
+    padding: "10px 12px",
+    minWidth: 0,
+  } as const,
 };
 
 /** The three broad stages that are always true after `create_report` succeeds. */
@@ -760,6 +846,25 @@ const STAGE_STEPS = [
   { label: "Relevant variants imported", state: "done" },
   { label: "Analyzing genetic patterns and health hypotheses", state: "active" },
 ] as const;
+
+/**
+ * Whether the card is in a narrow (phone-width) viewport. The comparison panel
+ * stacks its findings in one column when narrow and lays them out three-up
+ * otherwise. SSR/no-window hosts default to the wide layout.
+ */
+function useNarrowViewport(maxWidth = 480): boolean {
+  const [narrow, setNarrow] = useState(() =>
+    typeof window === "undefined" ? false : window.innerWidth <= maxWidth,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const update = () => setNarrow(window.innerWidth <= maxWidth);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [maxWidth]);
+  return narrow;
+}
 
 /**
  * Every state renders inside this shell so the host palette is applied in one
@@ -844,6 +949,10 @@ export function DnaImportApp({
   const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
   const [poll, setPoll] = useState<PollState>(INITIAL_POLL);
   const [findings, setFindings] = useState<FindingsState>({ status: "idle" });
+  /** The in-card top-three comparison, populated from a version-pinned read. */
+  const [comparison, setComparison] = useState<ComparisonState>({ status: "idle" });
+  /** Whether the comparison panel is expanded under the compare chip. */
+  const [comparisonOpen, setComparisonOpen] = useState(false);
   /** State-aware follow-up chips from `get_analysis_context`. */
   const [prompts, setPrompts] = useState<PromptChip[]>([]);
   /** Set when a follow-up handoff failed; holds copy, never the prompt itself. */
@@ -938,6 +1047,15 @@ export function DnaImportApp({
    * ranked-list fallback both want them, but each must not fetch them twice.
    */
   const promptsLoadedRef = useRef(false);
+  /**
+   * Validated comparison results, keyed by analysis version. A cached entry lets
+   * a later click expand immediately and guarantees one read per revision.
+   */
+  const comparisonCacheRef = useRef<Map<string, Finding[]>>(new Map());
+  /** The analysis version whose comparison read is in flight, if any. */
+  const comparisonInFlightRef = useRef<string | null>(null);
+  /** The version already prefetched, so the quiet read runs once per revision. */
+  const comparisonPrefetchedRef = useRef<string | null>(null);
 
   const setFindingsState = useCallback((next: FindingsState) => {
     findingsRef.current = next;
@@ -958,6 +1076,9 @@ export function DnaImportApp({
   }, [isConnected, app]);
 
   useHostStyles(app, hostContext);
+
+  /** The comparison panel stacks at phone width; three-up otherwise. */
+  const narrow = useNarrowViewport();
 
   const loadCatalog = useCallback(async (client: App) => {
     setCatalogError(null);
@@ -1480,6 +1601,88 @@ export function DnaImportApp({
     }
   }, [app, isFull, loadPromptChips, setFindingsState]);
 
+  /**
+   * The three rank-ordered findings the overview is bound to. It is the authority
+   * a comparison read is validated against; an unloaded snapshot yields null so
+   * the card refuses to compare rather than guessing from a different revision.
+   */
+  const boundTopThree = useCallback((): Finding[] | null => {
+    const current = findingsRef.current;
+    if (current.status !== "loaded") return null;
+    const ordered = [...current.items].sort((a, b) => a.rank - b.rank).slice(0, COMPARISON_LIMIT);
+    return ordered.length > 0 ? ordered : null;
+  }, []);
+
+  /**
+   * Read the top-three comparison for the pinned revision and validate it against
+   * the bound snapshot.
+   *
+   * `fromClick` separates an explicit click from the quiet prefetch: a click on an
+   * unusable card switches to the stale recovery notice, while a prefetch that
+   * cannot run yet just waits. Only a validated three-item result is cached and
+   * rendered; a version change, a mismatched read, or a missing pin never renders
+   * a mixed-version comparison, and the card never falls back to an unpinned chat
+   * request.
+   */
+  const fetchComparison = useCallback(
+    async (fromClick = false) => {
+      const version = displayedVersionRef.current;
+      const bound = boundTopThree();
+      if (!version || !bound) {
+        if (fromClick) {
+          setComparison({ status: "idle" });
+          setStaleNotice(true);
+        }
+        return;
+      }
+      const cached = comparisonCacheRef.current.get(version);
+      if (cached) {
+        setComparison({ status: "loaded", items: cached });
+        return;
+      }
+      if (!app || comparisonInFlightRef.current === version) return;
+      comparisonInFlightRef.current = version;
+      const startedAt = Date.now();
+      setComparison({ status: "loading" });
+      try {
+        const result = await app.callServerTool({
+          name: "list_health_hypotheses",
+          arguments: { limit: COMPARISON_LIMIT, analysis_version: version },
+        });
+        const envelope = envelopeOf(result);
+        if (result.isError || !envelope || !envelope.ok) {
+          if (envelope?.error?.code === "ANALYSIS_VERSION_CHANGED") {
+            setComparison({ status: "idle" });
+            setStaleNotice(true);
+            return;
+          }
+          setComparison({ status: "error", message: errorMessage(envelope?.error) });
+          return;
+        }
+        // The read must describe the same revision the card is displaying.
+        if (envelope.analysis_version !== version) {
+          setComparison({ status: "idle" });
+          setStaleNotice(true);
+          return;
+        }
+        const items = findingsFrom(envelope.data);
+        if (!matchesBoundTopThree(items, bound)) {
+          setComparison({ status: "idle" });
+          setStaleNotice(true);
+          return;
+        }
+        comparisonCacheRef.current.set(version, items);
+        setComparison({ status: "loaded", items });
+        logTiming("compare-top-three data", Date.now() - startedAt);
+      } catch {
+        setComparison({ status: "error", message: messageFor("service_unavailable") });
+      } finally {
+        if (comparisonInFlightRef.current === version) comparisonInFlightRef.current = null;
+      }
+    },
+    [app, boundTopThree],
+  );
+
   // The overview route opens directly on its findings and follow-up hints.
   useEffect(() => {
     if (stage !== "analysis_ready" || importMode !== "overview") return;
@@ -1490,6 +1693,20 @@ export function DnaImportApp({
     // supply it: a second read would duplicate the card's authoritative list.
     if (findingsRef.current.status === "idle") void loadFindings();
   }, [stage, importMode, loadFindings, loadPromptChips]);
+
+  // Quietly prefetch the version-pinned top-three comparison so a later click on
+  // the compare chip expands immediately. Gated on the server actually offering
+  // the chip; the read only writes the comparison slice, so it never overwrites
+  // the bound overview findings or the displayed revision.
+  useEffect(() => {
+    if (stage !== "analysis_ready") return;
+    if (!prompts.some((chip) => chip.id === COMPARE_TOP_THREE_PROMPT_ID)) return;
+    if (findings.status !== "loaded") return;
+    const version = displayedVersionRef.current;
+    if (!version || comparisonPrefetchedRef.current === version) return;
+    comparisonPrefetchedRef.current = version;
+    void fetchComparison();
+  }, [stage, prompts, findings.status, fetchComparison]);
 
   /**
    * Hand control back to ChatGPT only when the user asks for interpretation.
@@ -1550,6 +1767,37 @@ export function DnaImportApp({
     }),
     [],
   );
+
+  /**
+   * The server-authored compare-top-three action. The panel's chat button is the
+   * only place this prompt is handed to the host; the chip's first click expands
+   * the card instead.
+   */
+  const comparisonAction = useCallback((): CardAction | null => {
+    const chip = prompts.find((entry) => entry.id === COMPARE_TOP_THREE_PROMPT_ID);
+    if (!chip) return null;
+    return {
+      id: chip.id,
+      label: chip.label,
+      prompt: chip.prompt,
+      heading: chip.heading,
+      boundVersion: firstString(chip.action?.analysis_version) ?? displayedVersionRef.current,
+    };
+  }, [prompts]);
+
+  /**
+   * Send the detailed interpretation to ChatGPT. This is the only action that
+   * transmits the compare prompt; it keeps the version guard and the one-send
+   * protection inside `askChatGpt`. The timing diagnostic records click to host
+   * acknowledgment only, never the prompt text.
+   */
+  const exploreComparisonInChat = useCallback(async () => {
+    const action = comparisonAction();
+    if (!action) return;
+    const startedAt = Date.now();
+    await askChatGpt(action);
+    logTiming("compare-top-three chat handoff", Date.now() - startedAt);
+  }, [askChatGpt, comparisonAction]);
 
   const onDrop = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
@@ -1672,6 +1920,13 @@ export function DnaImportApp({
     // the request. A card that cannot identify it falls back to plain chips.
     const primaryPrompt = prompts.find((chip) => chip.id === COMPARISON_PROMPT_ID) ?? null;
     const secondaryPrompts = prompts.filter((chip) => chip.id !== COMPARISON_PROMPT_ID);
+    // The compare chip owns an in-card panel; every other secondary chip still
+    // hands its server-authored prompt to ChatGPT on click.
+    const compareTopThreePrompt =
+      prompts.find((chip) => chip.id === COMPARE_TOP_THREE_PROMPT_ID) ?? null;
+    const otherPrompts = secondaryPrompts.filter(
+      (chip) => chip.id !== COMPARE_TOP_THREE_PROMPT_ID,
+    );
     return (
       <Shell>
         <h1 style={styles.h1}>Analysis ready</h1>
@@ -1796,9 +2051,9 @@ export function DnaImportApp({
           </div>
         ) : null}
 
-        {secondaryPrompts.length > 0 ? (
+        {otherPrompts.length > 0 ? (
           <div style={styles.chipRow}>
-            {secondaryPrompts.map((chip) => (
+            {otherPrompts.map((chip) => (
               <button
                 key={chip.id}
                 type="button"
@@ -1817,6 +2072,99 @@ export function DnaImportApp({
                 {pendingActionId === chip.id ? "Sending…" : chip.label}
               </button>
             ))}
+          </div>
+        ) : null}
+
+        {compareTopThreePrompt ? (
+          <div style={styles.comparisonBlock}>
+            <button
+              type="button"
+              style={styles.chip}
+              aria-expanded={comparisonOpen}
+              aria-controls={COMPARISON_PANEL_ID}
+              onClick={() => {
+                const next = !comparisonOpen;
+                setComparisonOpen(next);
+                if (next) void fetchComparison(true);
+              }}
+            >
+              {compareTopThreePrompt.label}
+            </button>
+            {comparisonOpen && !staleNotice ? (
+              <div
+                id={COMPARISON_PANEL_ID}
+                role="region"
+                aria-label="Comparing your top three findings"
+                style={styles.comparisonPanel}
+              >
+                <p style={{ ...styles.findingTitle, marginBottom: 6 }}>
+                  Comparing your top three findings
+                </p>
+                {comparison.status === "loading" ? (
+                  <p style={styles.small} role="status">
+                    Loading comparison…
+                  </p>
+                ) : comparison.status === "error" ? (
+                  <div role="alert">
+                    <p style={{ margin: "0 0 8px" }}>{comparison.message}</p>
+                    <button
+                      type="button"
+                      style={styles.secondaryButton}
+                      onClick={() => void fetchComparison(true)}
+                    >
+                      Try again
+                    </button>
+                  </div>
+                ) : comparison.status === "loaded" ? (
+                  <>
+                    <ol
+                      style={{
+                        ...styles.comparisonList,
+                        gridTemplateColumns: narrow
+                          ? "minmax(0, 1fr)"
+                          : `repeat(${comparison.items.length}, minmax(0, 1fr))`,
+                      }}
+                    >
+                      {comparison.items.map((finding) => (
+                        <li
+                          key={`${finding.rank}-${finding.title}`}
+                          style={styles.comparisonItem}
+                        >
+                          <p style={styles.findingTitle}>
+                            {finding.rank}. {finding.title}
+                          </p>
+                          {finding.summary ? (
+                            <p style={styles.findingSummary}>{finding.summary}</p>
+                          ) : null}
+                          {finding.geneticSupport !== undefined &&
+                          finding.geneticSupport !== null ? (
+                            <p style={styles.small}>
+                              Genetic support: {finding.geneticSupport}
+                              {finding.geneticEvidence ? ` (${finding.geneticEvidence})` : ""}
+                            </p>
+                          ) : finding.geneticEvidence ? (
+                            <p style={styles.small}>
+                              Genetic evidence: {finding.geneticEvidence}
+                            </p>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ol>
+                    <p style={styles.small}>{COMPARISON_CAVEAT}</p>
+                    <button
+                      type="button"
+                      style={styles.secondaryButton}
+                      disabled={pendingActionId === COMPARE_TOP_THREE_PROMPT_ID}
+                      onClick={() => void exploreComparisonInChat()}
+                    >
+                      {pendingActionId === COMPARE_TOP_THREE_PROMPT_ID
+                        ? "Sending…"
+                        : "Explore this comparison in chat"}
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         ) : null}
 

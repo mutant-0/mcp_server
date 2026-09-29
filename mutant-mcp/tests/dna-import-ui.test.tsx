@@ -19,7 +19,7 @@ import {
   McpUiInitializeResultSchema,
   McpUiToolResultNotificationSchema,
 } from "@modelcontextprotocol/ext-apps";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DnaImportApp, deliverFollowUp, type DnaImportAppProps } from "../src/ui/dna-import/app";
 import { makeContextData, makeErrorResponse, makeSuccessResponse } from "./helpers.js";
@@ -213,13 +213,107 @@ function readyAt(version: string): ToolResponse {
   return statusResponse("ready", {}, version);
 }
 
-const FINDINGS = makeSuccessResponse({  items: [
-    { id: "HYP_A", rank: 1, name: "Alpha finding", summary: "First summary." },
-    { id: "HYP_B", rank: 2, name: "Beta finding", summary: "Second summary." },
-    { id: "HYP_C", rank: 3, name: "Gamma finding", summary: "Third summary." },
-  ],
-  next_cursor: null,
-});
+const FINDINGS = makeSuccessResponse(
+  {
+    items: [
+      {
+        id: "HYP_A",
+        rank: 1,
+        name: "Alpha finding",
+        summary: "First summary.",
+        genetic_support: 72,
+        genetic_evidence: "strong",
+      },
+      {
+        id: "HYP_B",
+        rank: 2,
+        name: "Beta finding",
+        summary: "Second summary.",
+        genetic_support: 61,
+        genetic_evidence: "moderate",
+      },
+      {
+        id: "HYP_C",
+        rank: 3,
+        name: "Gamma finding",
+        summary: "Third summary.",
+        genetic_support: 40,
+        genetic_evidence: "weak",
+      },
+    ],
+    next_cursor: null,
+  },
+  // Matches the revision the ready status reports, so a comparison read is not
+  // mistaken for a different analysis.
+  "analysis_1",
+);
+
+/** The server-authored top-three comparison chip the overview card renders. */
+const COMPARE_CHIP = {
+  id: "compare-top-three",
+  label: "Compare top 3",
+  prompt: "Compare my top three findings and explain how they differ.",
+  heading: "## Comparing your top three findings",
+  intent: "comparison",
+  action: { analysis_version: "analysis_1", intent: "comparison" },
+};
+
+/** A `get_analysis_context` result that offers only the compare chip. */
+function chipContext(): ToolResponse {
+  return makeSuccessResponse(makeContextData({ suggested_prompts: [COMPARE_CHIP] }));
+}
+
+/** Responders for the overview route with the compare chip and a ready analysis. */
+function compareOverviewResponders(
+  overrides: Responders = {},
+): Responders {
+  return {
+    poll_analysis_status: statusResponse("ready"),
+    get_analysis_context: chipContext(),
+    list_health_hypotheses: FINDINGS,
+    ...overrides,
+  };
+}
+
+/** The bound overview result a host pushes to mount the overview card. */
+function boundOverview(version = "analysis_1"): ToolResponse {
+  return makeSuccessResponse(
+    {
+      ui_rendered: true,
+      mode: "overview",
+      displayed_analysis_version: version,
+      displayed_hypotheses: [
+        { id: "HYP_A", rank: 1, name: "Alpha finding" },
+        { id: "HYP_B", rank: 2, name: "Beta finding" },
+        { id: "HYP_C", rank: 3, name: "Gamma finding" },
+      ],
+    },
+    version,
+  );
+}
+
+/**
+ * Render the card the way a host mounts it from `show_analysis_overview`: the
+ * bound snapshot pins the revision and the ranked list before the comparison
+ * prefetch can run, so the comparison read is the card's only
+ * `list_health_hypotheses` call. This mirrors production, where the card opens
+ * from the display tool result rather than fetching its own list.
+ */
+async function renderCompareOverview(
+  overrides: Responders = {},
+  options: BridgeOptions = {},
+): Promise<HostBridge> {
+  const bridge = renderWith(compareOverviewResponders(overrides), {}, options);
+  await screen.findByText(/Analysis ready/i);
+  bridge.sendToolResult(boundOverview(), { mutant: { mode: "overview" } });
+  await screen.findByText(/Alpha finding/i);
+  return bridge;
+}
+
+/** Wait for the quiet version-pinned comparison prefetch to have been issued. */
+async function waitForComparisonPrefetch(bridge: HostBridge): Promise<void> {
+  await waitFor(() => expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1));
+}
 
 const MICROARRAY_BODY = [
   "# rsid\tchromosome\tposition\tgenotype",
@@ -257,6 +351,8 @@ interface HostBridge {
   openLinks: string[];
   callsTo(name: string): ToolCall[];
   sendToolResult(structured: ToolResponse, meta?: Record<string, unknown>): void;
+  /** Release every tool reply held by `deferToolNames`, in arrival order. */
+  releaseDeferred(): void;
   /** Detach the listener, so a finished test cannot answer the next one's calls. */
   stop(): void;
 }
@@ -267,6 +363,12 @@ let activeBridge: HostBridge | null = null;
 interface BridgeOptions {
   /** Result the host returns for `ui/message`; `{ isError: true }` simulates rejection. */
   messageResult?: unknown;
+  /**
+   * Tool names whose replies are held until `releaseDeferred()` is called, so a
+   * test can observe an in-flight read (and its loading state) rather than the
+   * instant answer a synchronous bridge would give.
+   */
+  deferToolNames?: string[];
 }
 
 /** Stand up a fake host on `window` and answer bridge requests from it. */
@@ -276,6 +378,8 @@ function installHostBridge(responders: Responders = {}, options: BridgeOptions =
   const messages: Array<Record<string, unknown>> = [];
   const openLinks: string[] = [];
   const calls = new Map<string, number>();
+  /** Replies held back until the test releases them, in arrival order. */
+  const deferred: Array<() => void> = [];
 
   function answer(name: string, args: Record<string, unknown>): ToolResponse {
     const call = (calls.get(name) ?? 0) + 1;
@@ -310,6 +414,16 @@ function installHostBridge(responders: Responders = {}, options: BridgeOptions =
       const args = message.params?.arguments ?? {};
       toolCalls.push({ name, arguments: args });
       const envelope = answer(name, args);
+      if (options.deferToolNames?.includes(name)) {
+        deferred.push(() =>
+          reply(message.id as number, {
+            content: [{ type: "text", text: JSON.stringify(envelope) }],
+            structuredContent: envelope,
+            isError: false,
+          }),
+        );
+        return;
+      }
       reply(message.id, {
         content: [{ type: "text", text: JSON.stringify(envelope) }],
         structuredContent: envelope,
@@ -347,6 +461,9 @@ function installHostBridge(responders: Responders = {}, options: BridgeOptions =
     callsTo: (name) => toolCalls.filter((call) => call.name === name),
     sendToolResult: (structured, meta) => {
       deliverToApp({ jsonrpc: "2.0", ...toolResultNotification(structured, meta) });
+    },
+    releaseDeferred: () => {
+      for (const release of deferred.splice(0)) release();
     },
     stop: () => window.removeEventListener("message", onMessage),
   };
@@ -1549,5 +1666,183 @@ describe("DNA import component", () => {
 
     await screen.findByText(/Drag and drop your DNA file here/i);
     expect(bridge.callsTo("create_report")).toHaveLength(0);
+  });
+
+  it("expands the top-three comparison in the clicked card without a chat turn", async () => {
+    const bridge = await renderCompareOverview();
+    await waitForComparisonPrefetch(bridge);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compare top 3" }));
+
+    const panel = await screen.findByRole("region", {
+      name: "Comparing your top three findings",
+    });
+    const rows = within(panel).getAllByRole("listitem").map((row) => row.textContent ?? "");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toContain("1. Alpha finding");
+    expect(rows[1]).toContain("2. Beta finding");
+    expect(rows[2]).toContain("3. Gamma finding");
+    // Each row carries the server-provided summary and support score.
+    expect(rows[0]).toContain("First summary.");
+    expect(rows[0]).toContain("Genetic support: 72 (strong)");
+    expect(within(panel).getByText(/not diagnoses or probabilities/i)).toBeDefined();
+
+    // The chip click reused the prefetched read and never opened a chat turn.
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
+    expect(bridge.callsTo("list_health_hypotheses")[0]?.arguments).toEqual({
+      limit: 3,
+      analysis_version: "analysis_1",
+    });
+    expect(bridge.messages).toHaveLength(0);
+  });
+
+  it("shows a loading state in the clicked card while the comparison read is in flight", async () => {
+    // The comparison prefetch is held, so the card keeps that read in flight.
+    const bridge = await renderCompareOverview({}, { deferToolNames: ["list_health_hypotheses"] });
+    await waitForComparisonPrefetch(bridge);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compare top 3" }));
+    const panel = await screen.findByRole("region", {
+      name: "Comparing your top three findings",
+    });
+    expect(within(panel).getByText("Loading comparison…")).toBeDefined();
+    expect(bridge.messages).toHaveLength(0);
+
+    bridge.releaseDeferred();
+    expect(await within(panel).findByText("First summary.")).toBeDefined();
+  });
+
+  it("prefers the cached comparison and never reads twice for one revision", async () => {
+    const bridge = await renderCompareOverview();
+    await waitForComparisonPrefetch(bridge);
+
+    const chip = screen.getByRole("button", { name: "Compare top 3" });
+    fireEvent.click(chip);
+    fireEvent.click(chip);
+    fireEvent.click(chip);
+
+    const panel = await screen.findByRole("region", {
+      name: "Comparing your top three findings",
+    });
+    expect(await within(panel).findByText("First summary.")).toBeDefined();
+    // Rapid clicks and the prefetch share exactly one comparison read.
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
+    expect(bridge.messages).toHaveLength(0);
+  });
+
+  it("recovers with the stale notice when the comparison revision changed", async () => {
+    const bridge = await renderCompareOverview({
+      list_health_hypotheses: makeErrorResponse(
+        "ANALYSIS_VERSION_CHANGED",
+        "The analysis changed since that revision.",
+      ),
+    });
+
+    await screen.findByText(/These results have changed/i);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compare top 3" }));
+    await waitFor(() => expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(2));
+    // No panel is rendered: the card shows the recovery notice instead of a
+    // comparison from a different revision.
+    expect(screen.queryByRole("region", { name: "Comparing your top three findings" })).toBeNull();
+    expect(bridge.messages).toHaveLength(0);
+    expect(screen.getByRole("button", { name: /open your current findings/i })).toBeDefined();
+  });
+
+  it("refuses a comparison read that does not match the bound top three", async () => {
+    const bridge = await renderCompareOverview({
+      // Same revision, but a different set of findings than the bound top three.
+      list_health_hypotheses: makeSuccessResponse(
+        {
+          items: [{ id: "HYP_Z", rank: 1, name: "Zeta finding", summary: "Zeta summary." }],
+          next_cursor: null,
+        },
+        "analysis_1",
+      ),
+    });
+
+    await screen.findByText(/These results have changed/i);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compare top 3" }));
+    await waitFor(() => expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(2));
+    expect(screen.queryByRole("region", { name: "Comparing your top three findings" })).toBeNull();
+    expect(screen.queryByText("Zeta finding")).toBeNull();
+    expect(bridge.messages).toHaveLength(0);
+  });
+
+  it("offers a retry in the card when the comparison read fails", async () => {
+    const bridge = await renderCompareOverview({
+      list_health_hypotheses: (_args, call) =>
+        call <= 2 ? makeErrorResponse("SERVICE_UNAVAILABLE", "comparison unavailable") : FINDINGS,
+    });
+    await waitForComparisonPrefetch(bridge);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compare top 3" }));
+    const panel = await screen.findByRole("region", {
+      name: "Comparing your top three findings",
+    });
+    expect(await within(panel).findByText(/comparison unavailable/i)).toBeDefined();
+
+    fireEvent.click(within(panel).getByRole("button", { name: /try again/i }));
+
+    expect(await within(panel).findByText("First summary.")).toBeDefined();
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(3);
+  });
+
+  it("stacks the comparison findings on a narrow viewport", async () => {
+    const original = window.innerWidth;
+    window.innerWidth = 400;
+    try {
+      const bridge = await renderCompareOverview();
+      await waitForComparisonPrefetch(bridge);
+
+      fireEvent.click(screen.getByRole("button", { name: "Compare top 3" }));
+      const panel = await screen.findByRole("region", {
+        name: "Comparing your top three findings",
+      });
+      const list = within(panel).getByRole("list");
+      await waitFor(() => expect(list.style.gridTemplateColumns).toBe("minmax(0, 1fr)"));
+    } finally {
+      window.innerWidth = original;
+      window.dispatchEvent(new Event("resize"));
+    }
+  });
+
+  it("sends the detailed comparison to ChatGPT only from the panel action", async () => {
+    const sendFollowUpMessage = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window, "openai", {
+      value: { sendFollowUpMessage },
+      configurable: true,
+      writable: true,
+    });
+    try {
+      const bridge = await renderCompareOverview();
+      await waitForComparisonPrefetch(bridge);
+
+      fireEvent.click(screen.getByRole("button", { name: "Compare top 3" }));
+      const panel = await screen.findByRole("region", {
+        name: "Comparing your top three findings",
+      });
+      await within(panel).findByText("First summary.");
+      // Opening the panel never sent a chat turn.
+      expect(sendFollowUpMessage).not.toHaveBeenCalled();
+
+      fireEvent.click(
+        within(panel).getByRole("button", { name: /explore this comparison in chat/i }),
+      );
+
+      await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
+      expect(sendFollowUpMessage).toHaveBeenCalledWith({
+        prompt: expect.stringContaining("## Comparing your top three findings"),
+        scrollToBottom: true,
+      });
+      const sent = sendFollowUpMessage.mock.calls[0]?.[0] as { prompt: string };
+      expect(sent.prompt).toContain("Compare my top three findings and explain how they differ.");
+      expect(bridge.messages).toHaveLength(0);
+      // The card acknowledges the sent action without echoing the prompt.
+      expect(screen.getByRole("status").textContent).toContain("Question sent: Compare top 3");
+    } finally {
+      delete (window as unknown as { openai?: unknown }).openai;
+    }
   });
 });

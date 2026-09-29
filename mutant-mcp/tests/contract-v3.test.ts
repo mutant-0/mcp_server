@@ -14,6 +14,7 @@ import {
   DNA_SCOPE,
   makeCapturingLogger,
   makeConfig,
+  makeDetailsData,
   makeErrorResponse,
   makeStatusData,
   makeSuccessResponse,
@@ -494,13 +495,44 @@ describe("contract v3.0 acceptance", () => {
         expect(typeof prompt.label).toBe("string");
         expect(typeof prompt.prompt).toBe("string");
         // Every action carries a bounded, non-command heading for the handoff.
+        // Most are the shared "Mutant follow-up:" line; the top-three comparison
+        // uses a real Markdown heading so the detailed reply opens with one.
         expect(typeof prompt.heading, `${name} prompt heading`).toBe("string");
-        expect(String(prompt.heading)).toMatch(/^Mutant follow-up: /);
+        expect(String(prompt.heading), `${name} prompt heading`).toMatch(
+          /^(Mutant follow-up: |## )/,
+        );
         expect(String(prompt.heading).length).toBeLessThanOrEqual(80);
         // Prompts are user-visible prose, never internal tool commands.
         expect(String(prompt.prompt)).not.toMatch(/call_|_id=|\(\)/);
       }
     }
+  });
+
+  it("bounds the why-ranked heading when the finding name is very long", async () => {
+    const base = makeDetailsData();
+    const longName =
+      "Extremely long backend-authored hypothesis name that would otherwise overflow the cap";
+    const { client } = await connect(() =>
+      makeSuccessResponse({
+        ...base,
+        hypothesis: { ...(base.hypothesis as Record<string, unknown>), name: longName },
+      }),
+    );
+
+    const result = await client.callTool({
+      name: "explain_health_hypothesis",
+      arguments: MINIMAL_ARGS.explain_health_hypothesis,
+    });
+    expect(result.isError).toBe(false);
+
+    const data = envelopeOf(result).data as {
+      suggested_prompts?: Array<{ id: string; heading?: string }>;
+    };
+    const whyRanked = (data.suggested_prompts ?? []).find((prompt) => prompt.id === "why-ranked");
+    expect(whyRanked?.heading).toBeTruthy();
+    expect(whyRanked?.heading).toMatch(/^Mutant follow-up: /);
+    expect(whyRanked?.heading?.length).toBeLessThanOrEqual(80);
+    expect(whyRanked?.heading).toContain("…");
   });
 
   it("renders the context content from the interpretation contract without dumping it", async () => {
@@ -564,6 +596,7 @@ describe("contract v3.0 acceptance", () => {
       suggested_prompts?: Array<{
         id: string;
         label: string;
+        heading?: string;
         action?: { analysis_version?: string; hypothesis_id?: string; intent?: string };
       }>;
     };
@@ -590,6 +623,8 @@ describe("contract v3.0 acceptance", () => {
     const compareTop = prompts.find((prompt) => prompt.id === "compare-top-three");
     expect(compareTop?.action?.analysis_version).toBe("rev42-v3.0.0");
     expect(compareTop?.action?.hypothesis_id).toBe("HYP_A");
+    // The card's in-card comparison action hands off a real Markdown heading.
+    expect(compareTop?.heading).toBe("## Comparing your top three findings");
   });
 
   it("reports errors as short text without echoing the envelope", async () => {

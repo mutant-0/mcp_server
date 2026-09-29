@@ -17,6 +17,26 @@ type JsonObject = Record<string, unknown>;
 
 const MAX_SUGGESTIONS = 5;
 
+/**
+ * `promptSuggestionSchema.heading` is capped at 80 characters. A hypothesis
+ * name is backend-authored and unbounded, so any heading that embeds it must
+ * be built to fit instead of interpolated raw.
+ */
+const MAX_HEADING_CHARS = 80;
+const RANK_HEADING_PREFIX = "Mutant follow-up: Why ";
+const RANK_HEADING_SUFFIX = " ranked";
+const RANK_HEADING_FALLBACK = "Mutant follow-up: Why this finding ranked";
+
+/** Build the `why-ranked` heading, truncating a long finding name to fit. */
+function rankHeading(name: string | null): string {
+  if (!name) return RANK_HEADING_FALLBACK;
+  // The name renders quoted, so two characters are reserved for the quotes.
+  const budget = MAX_HEADING_CHARS - RANK_HEADING_PREFIX.length - RANK_HEADING_SUFFIX.length - 2;
+  const bounded =
+    name.length <= budget ? name : `${name.slice(0, Math.max(0, budget - 1)).trimEnd()}…`;
+  return `${RANK_HEADING_PREFIX}"${bounded}"${RANK_HEADING_SUFFIX}`;
+}
+
 function asRecord(value: unknown): JsonObject | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as JsonObject)
@@ -183,7 +203,10 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
       id: "compare-top-three",
       label: "Compare top 3",
       prompt: "Compare my top three findings and explain how they differ.",
-      heading: "Mutant follow-up: Compare top 3",
+      // A real Markdown heading rather than the generic chip line, so the
+      // detailed reply from the card's "Explore this comparison in chat" opens
+      // with a visually distinct comparison heading.
+      heading: "## Comparing your top three findings",
       intent: "comparison",
       action: action("comparison", analysisVersion, firstId),
     },
@@ -217,15 +240,13 @@ function detailsPrompts(data: JsonObject, analysisVersion: string | null): Promp
   const id = hypothesis ? asText(hypothesis.id) : null;
   const name = hypothesis ? asText(hypothesis.name) : null;
   const ref = name ? `"${name}"` : "top";
-  const rankHeading = name
-    ? `Mutant follow-up: Why ${ref} ranked`
-    : "Mutant follow-up: Why this finding ranked";
+  const heading = rankHeading(name);
   const base: PromptSuggestion[] = [
     {
       id: "why-ranked",
       label: "Why this rank?",
       prompt: `Why did my ${ref} finding rank where it did?`,
-      heading: rankHeading,
+      heading,
       intent: "explain",
       action: action("explain", analysisVersion, id),
     },

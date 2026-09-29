@@ -39,6 +39,18 @@ export function logBridgeError(err: unknown): void {
   console.debug("[mutant-ui] host bridge error", err);
 }
 
+/**
+ * Lightweight timing diagnostic for a card interaction.
+ *
+ * Emits only a static label and a duration. It must never include an analysis
+ * version, finding id or name, score, or prompt text: those are the health
+ * details the card is required to keep out of diagnostics.
+ */
+export function logTiming(label: string, durationMs: number): void {
+  if (typeof console === "undefined" || typeof console.debug !== "function") return;
+  console.debug(`[mutant-ui] timing ${label}: ${Math.max(0, Math.round(durationMs))}ms`);
+}
+
 /** What happened when a component tried to hand a prompt to the host chat. */
 export type FollowUpOutcome = "sent" | "failed" | "unavailable";
 
