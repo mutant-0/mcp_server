@@ -73,6 +73,8 @@ describe("MCP server integration", () => {
       mode: "overview",
       displayed_analysis_version: "rev42-v3.0.0",
       displayed_hypotheses: [{ id: "HYP_A", rank: 1, name: "Alpha finding" }],
+      total_accessible_count: 1,
+      has_more: false,
     });
     expect((result._meta as { ui?: { resourceUri?: string } }).ui?.resourceUri).toBe(
       "ui://mutant/dna-import/v1.html",

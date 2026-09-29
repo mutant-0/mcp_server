@@ -247,7 +247,18 @@ interface Finding {
 type FindingsState =
   | { status: "idle" }
   | { status: "loading" }
-  | { status: "loaded"; items: Finding[] }
+  | {
+      status: "loaded";
+      items: Finding[];
+      /**
+       * How many ranked findings the account can reach, displayed or not. Set
+       * only from a bound overview snapshot; the ranked-list fallback leaves it
+       * unset so the card does not claim a total it never learned.
+       */
+      totalAccessible?: number | null;
+      /** True when the bound snapshot has more accessible findings than shown. */
+      hasMore?: boolean;
+    }
   | { status: "error"; message: string };
 
 /**
@@ -489,7 +500,7 @@ function overviewSnapshotFrom(result: {
   structuredContent?: unknown;
   content?: Array<{ type: string; text?: string }>;
   _meta?: unknown;
-}): { version: string | null; items: Finding[] } | null {
+}): { version: string | null; items: Finding[]; totalAccessible: number; hasMore: boolean } | null {
   const envelope = envelopeOf(result);
   const data = envelope ? asRecord(envelope.data) : null;
   if (!data || data.mode !== "overview") return null;
@@ -507,9 +518,19 @@ function overviewSnapshotFrom(result: {
       summary: null,
     });
   });
+  // `displayed_hypotheses` is exactly what the card renders. The backend also
+  // reports how much the account can reach, so the card can say "top 10 of 92"
+  // without fetching or appending the rest; a backend that omits it is treated
+  // as having shown everything.
+  const totalAccessible =
+    typeof data.total_accessible_count === "number"
+      ? data.total_accessible_count
+      : items.length;
   return {
     version: firstString(data.displayed_analysis_version, envelope?.analysis_version),
     items,
+    totalAccessible,
+    hasMore: data.has_more === true,
   };
 }
 
@@ -1007,8 +1028,14 @@ export function DnaImportApp({
           pinnedSnapshotRef.current = true;
           if (snapshot.version) displayedVersionRef.current = snapshot.version;
           if (snapshot.items.length > 0) {
-            findingsRef.current = { status: "loaded", items: snapshot.items };
-            setFindingsState({ status: "loaded", items: snapshot.items });
+            const loaded: FindingsState = {
+              status: "loaded",
+              items: snapshot.items,
+              totalAccessible: snapshot.totalAccessible,
+              hasMore: snapshot.hasMore,
+            };
+            findingsRef.current = loaded;
+            setFindingsState(loaded);
           }
         }
       };
@@ -1914,7 +1941,18 @@ export function DnaImportApp({
   }
 
   if (stage === "analysis_ready") {
-    const loaded = findings.status === "loaded" ? findings.items : null;
+    const loadedState = findings.status === "loaded" ? findings : null;
+    const loaded = loadedState ? loadedState.items : null;
+    // The card renders only the bound `displayed_hypotheses`; when the backend
+    // reports the account can reach more, it shows a count cue and leaves the
+    // rest to the existing "Search all findings" action. It never fetches the
+    // full ranked set to expand this inline overview.
+    const totalAccessible =
+      loadedState && typeof loadedState.totalAccessible === "number"
+        ? loadedState.totalAccessible
+        : null;
+    const showOverviewCountCue =
+      isFull && loaded !== null && totalAccessible !== null && totalAccessible > loaded.length;
     // The server orders comparison first; the card renders that one entry as its
     // most prominent action and the rest as secondary chips, without rebuilding
     // the request. A card that cannot identify it falls back to plain chips.
@@ -1951,6 +1989,12 @@ export function DnaImportApp({
               Refresh analysis
             </button>
           </div>
+        ) : null}
+
+        {showOverviewCountCue ? (
+          <p style={styles.meta}>
+            Showing your top {formatCount(loaded!.length)} of {formatCount(totalAccessible!)} findings.
+          </p>
         ) : null}
 
         {loaded ? (

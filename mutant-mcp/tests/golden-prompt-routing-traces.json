@@ -181,6 +181,25 @@
       ]
     },
     {
+      "prompt": "Mutant follow-up: Explain finding #2\n\nExplain my \"Beta finding\" finding from my Mutant analysis in useful detail.",
+      "state": "READY_FULL",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "expect": { "overview": false, "import": false, "followups": true },
+      "toolCalls": [
+        { "name": "get_analysis_status", "arguments": {} },
+        { "name": "explain_health_hypothesis", "arguments": { "hypothesis_id": "HYP_B" } },
+        {
+          "name": "show_analysis_followups",
+          "arguments": {
+            "intent": "explanation",
+            "analysis_version": "rev42-v3.0.0",
+            "hypothesis_ids": ["HYP_B"]
+          }
+        }
+      ]
+    },
+    {
       "prompt": "Explain the B12 finding.",
       "state": "READY_FREE",
       "provenance": "pending-manual-capture",

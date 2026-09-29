@@ -329,11 +329,19 @@ export interface ShowAnalysisOverviewData {
   ui_rendered: true;
   mode: "overview";
   displayed_analysis_version: string | null;
+  /**
+   * The first N accessible ranked findings the card renders. Full cap is 10 and
+   * Free is 3; this is the inline overview, not the searchable ranked set.
+   */
   displayed_hypotheses: Array<{
     id: string | null;
     rank: number;
     name: string;
   }>;
+  /** How many ranked findings the account can reach, whether displayed or not. */
+  total_accessible_count: number;
+  /** True when more accessible findings exist beyond `displayed_hypotheses`. */
+  has_more: boolean;
 }
 
 /**

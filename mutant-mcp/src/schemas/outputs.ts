@@ -610,6 +610,13 @@ export const showAnalysisOverviewDataSchema = z.looseObject({
       name: z.string(),
     }),
   ),
+  total_accessible_count: z
+    .number()
+    .int()
+    .describe("How many ranked findings the account can reach, displayed or not."),
+  has_more: z
+    .boolean()
+    .describe("True when more accessible findings exist beyond displayed_hypotheses."),
 });
 
 /**

@@ -60,12 +60,19 @@ export const showAnalysisOverviewTool: MutantToolDefinition = {
     const snapshot = (response.data ?? {}) as {
       displayed_analysis_version?: string | null;
       displayed_hypotheses?: ShowAnalysisOverviewData["displayed_hypotheses"];
+      total_accessible_count?: number;
+      has_more?: boolean;
     };
+    const displayedHypotheses = snapshot.displayed_hypotheses ?? [];
     const data: ShowAnalysisOverviewData = {
       ui_rendered: true,
       mode: "overview",
       displayed_analysis_version: snapshot.displayed_analysis_version ?? null,
-      displayed_hypotheses: snapshot.displayed_hypotheses ?? [],
+      displayed_hypotheses: displayedHypotheses,
+      // The backend owns the count; a backend from before the cap still mounts
+      // the card by treating everything it returned as all there is.
+      total_accessible_count: snapshot.total_accessible_count ?? displayedHypotheses.length,
+      has_more: snapshot.has_more ?? false,
     };
     const envelope: ToolResponse = {
       contract_version: CONTRACT_VERSION,

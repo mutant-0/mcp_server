@@ -173,6 +173,8 @@ function dataFor(operation: BackendOperation): Record<string, unknown> {
           { id: "HYP_A", rank: 1, name: "Alpha finding" },
           { id: "HYP_B", rank: 2, name: "Beta finding" },
         ],
+        total_accessible_count: 2,
+        has_more: false,
       };
     case "resolve_analysis_followups":
     case "show_analysis_followups":

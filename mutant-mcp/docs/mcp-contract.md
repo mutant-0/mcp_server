@@ -1101,12 +1101,21 @@ analysis in the card. It calls the internal backend operation
 ```json
 {
   "displayed_analysis_version": "rev42-v3.0.0",
-  "displayed_hypotheses": [{ "id": "RC_A", "rank": 1, "name": "Alpha" }]
+  "displayed_hypotheses": [{ "id": "RC_A", "rank": 1, "name": "Alpha" }],
+  "total_accessible_count": 92,
+  "has_more": true
 }
 ```
 
 Only accessible hypotheses are listed (Free never sees locked ids), and no
-variant data is returned. If the analysis is not ready, the operation returns the
+variant data is returned. The card is a focused inline overview, not the full
+analysis: Full displays the first 10 accessible ranked findings and Free its
+fixed top three, so `displayed_hypotheses` is exactly the list the card renders.
+`total_accessible_count` is how many ranked findings the account can reach and
+`has_more` is `total_accessible_count > len(displayed_hypotheses)`, letting the
+card say "top 10 of 92" and keep its **Search all findings** action without
+fetching or appending the rest. The complete ranked set remains reachable through
+`list_health_hypotheses` search. If the analysis is not ready, the operation returns the
 same structured `ANALYSIS_PROCESSING` / `ANALYSIS_NOT_READY` / `DNA_NOT_AVAILABLE`
 envelope an analytical tool would, and `show_analysis_overview` forwards it
 rather than throwing. `resolve_analysis_snapshot` is internal-only: it is
@@ -1227,10 +1236,13 @@ server-derived identity, and returns a narrowed response.
 Input: `{}`. Scope `analysis.read`. Calls `resolve_analysis_snapshot` and mounts
 the shared Apps SDK card. Its result is
 `{ ui_rendered: true, mode: "overview", displayed_analysis_version,
-displayed_hypotheses }` plus the UI descriptor and widget-only
-`mutant.mode: "overview"`. The card renders that bound snapshot and loads
-accessible findings and hints from it; the model should let the card present
-these results rather than repeating the context preview in prose. On failure
+displayed_hypotheses, total_accessible_count, has_more }` plus the UI descriptor
+and widget-only `mutant.mode: "overview"`. `displayed_hypotheses` is capped at 10
+for Full and 3 for Free and is exactly what the card renders; the card shows a
+"top N of M" cue from `total_accessible_count` and keeps **Search all findings**
+for the rest rather than fetching the full ranked set on mount. The card renders
+that bound snapshot and loads accessible hints from it; the model should let the
+card present these results rather than repeating the context preview in prose. On failure
 (processing, locked, failed) the result forwards the structured error envelope
 with **no** UI descriptor, so an unready analysis can never mount the card.
 

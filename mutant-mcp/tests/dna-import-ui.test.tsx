@@ -293,6 +293,44 @@ function boundOverview(version = "analysis_1"): ToolResponse {
 }
 
 /**
+ * A bound Full overview: the first 10 accessible findings plus the account-wide
+ * count. The backend caps `displayed_hypotheses` here, so the card renders the
+ * ten it was given and never fetches the remaining 82 to expand the card.
+ */
+function boundFullOverview(version = "analysis_1"): ToolResponse {
+  return makeSuccessResponse(
+    {
+      ui_rendered: true,
+      mode: "overview",
+      displayed_analysis_version: version,
+      displayed_hypotheses: Array.from({ length: 10 }, (_, index) => ({
+        id: `HYP_${String(index + 1).padStart(2, "0")}`,
+        rank: index + 1,
+        name: `Finding ${String(index + 1).padStart(2, "0")}`,
+      })),
+      total_accessible_count: 92,
+      has_more: true,
+    },
+    version,
+  );
+}
+
+/** The Full-only discovery chip the overview card keeps for the rest of the set. */
+const SEARCH_ALL_CHIP = {
+  id: "search-all",
+  label: "Search all findings",
+  prompt: "Search my complete analysis for findings by topic.",
+  heading: "Mutant follow-up: Search all findings",
+  intent: "overview",
+  action: { analysis_version: "analysis_1", intent: "overview" },
+};
+
+/** The Full entitlement the ready status must report for the capped card. */
+const FULL_PLAN = {
+  entitlement: { plan: "mutant_full", hypothesis_scope: "all" },
+};
+
+/**
  * Render the card the way a host mounts it from `show_analysis_overview`: the
  * bound snapshot pins the revision and the ranked list before the comparison
  * prefetch can run, so the comparison read is the card's only
@@ -1012,6 +1050,35 @@ describe("DNA import component", () => {
     // must not be fetched a second time.
     await screen.findByRole("button", { name: "Explain #1" });
     expect(bridge.callsTo("get_analysis_context")).toHaveLength(1);
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(0);
+  });
+
+  it("renders only the bound top 10 for Full and hints at the rest without fetching it", async () => {
+    const bridge = renderWith({
+      poll_analysis_status: statusResponse("ready", FULL_PLAN),
+      get_analysis_context: makeSuccessResponse(
+        makeContextData({ suggested_prompts: [SEARCH_ALL_CHIP] }),
+      ),
+      // Any list read would return the whole 92-item set; the card must not ask.
+      list_health_hypotheses: makeSuccessResponse({
+        items: Array.from({ length: 92 }, (_, index) => ({
+          id: `HYP_${String(index + 1).padStart(2, "0")}`,
+          rank: index + 1,
+          name: `Finding ${String(index + 1).padStart(2, "0")}`,
+        })),
+        next_cursor: null,
+      }),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    bridge.sendToolResult(boundFullOverview(), { mutant: { mode: "overview" } });
+
+    // Exactly the ten bound findings render, with a cue for the remaining 82.
+    await screen.findByText(/Showing your top 10 of 92 findings/i);
+    expect(screen.getAllByRole("button", { name: /Explain finding #/ })).toHaveLength(10);
+    expect(screen.queryByText(/Finding 11/)).toBeNull();
+    // The rest stays behind the deliberate search action, not an auto-expansion.
+    await screen.findByRole("button", { name: "Search all findings" });
     expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(0);
   });
 

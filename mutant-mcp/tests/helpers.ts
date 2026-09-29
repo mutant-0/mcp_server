@@ -409,6 +409,8 @@ export function defaultBackendData(operation: BackendOperation): Record<string, 
       return {
         displayed_analysis_version: "rev42-v3.0.0",
         displayed_hypotheses: [{ id: "HYP_A", rank: 1, name: "Alpha finding" }],
+        total_accessible_count: 1,
+        has_more: false,
       };
     case "get_analysis_status":
     case "poll_analysis_status":

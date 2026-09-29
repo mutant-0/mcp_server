@@ -53,6 +53,8 @@ interface Scenario {
   noUiOn: string[];
   /** The one tool whose result must mount the compact follow-up card. */
   followupsOn?: string;
+  /** When set, the compact card must be bound to exactly these hypothesis ids. */
+  followupHypothesisIds?: string[];
 }
 
 const BROAD_PROMPTS = [
@@ -79,6 +81,27 @@ const SPECIFIC_PROMPTS: Scenario[] = [
     ],
     noUiOn: ["explain_health_hypothesis"],
     followupsOn: "show_analysis_followups",
+  },
+  {
+    name: "Explain finding #2",
+    // The overview card's per-finding "Explain finding #2" button hands off the
+    // second finding's identity. Answering a specific finding must mount at most
+    // one compact follow-up card bound to that id and never reopen the overview.
+    prompt: 'Mutant follow-up: Explain finding #2\n\nExplain my "Beta finding" finding from my Mutant analysis in useful detail.',
+    tools: [
+      { name: "explain_health_hypothesis", arguments: { hypothesis_id: "HYP_B" } },
+      {
+        name: "show_analysis_followups",
+        arguments: {
+          intent: "explanation",
+          analysis_version: "rev42-v3.0.0",
+          hypothesis_ids: ["HYP_B"],
+        },
+      },
+    ],
+    noUiOn: ["explain_health_hypothesis"],
+    followupsOn: "show_analysis_followups",
+    followupHypothesisIds: ["HYP_B"],
   },
   {
     name: "Compare my top three",
@@ -335,6 +358,10 @@ describe("routing evaluations", () => {
         expect(data.actions?.every((a) => a.action?.analysis_version === "rev42-v3.0.0")).toBe(
           true,
         );
+        if (scenario.followupHypothesisIds) {
+          expect(followups?.arguments.hypothesis_ids).toEqual(scenario.followupHypothesisIds);
+          expect(followups?.arguments.analysis_version).toBe("rev42-v3.0.0");
+        }
       } else {
         expect(calls.some((call) => call.name === "show_analysis_followups")).toBe(false);
       }
