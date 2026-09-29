@@ -264,7 +264,9 @@ describe("get_snp_catalog", () => {
     });
     await client.callTool({ name: "get_snp_catalog", arguments: {} });
     const records = logger.records();
-    const catalogRecord = records.find((record) => record.tool === "get_snp_catalog");
+    const catalogRecord = records.find(
+      (record) => record.tool === "get_snp_catalog" && record.event !== "tool_call",
+    );
     expect(catalogRecord?.catalogVersion).toBe(7);
     expect(catalogRecord?.snpCount).toBe(2);
     // The catalog body itself must never be logged.
@@ -371,7 +373,9 @@ describe("create_report", () => {
     expect(text).not.toContain("rs4680");
     expect(text).not.toContain('"GG"');
 
-    const records = logger.records().filter((entry) => entry.tool === "create_report");
+    const records = logger
+      .records()
+      .filter((entry) => entry.tool === "create_report" && entry.event !== "tool_call");
     expect(records).toHaveLength(2);
     for (const record of records) {
       // Counts and sizes are logged; the payload and the genotype map are not.
@@ -399,7 +403,9 @@ describe("create_report", () => {
     const text = logger.text();
     expect(text).not.toContain("sex_chromosome_pattern");
     expect(text).not.toContain("sex_chromosome_confidence");
-    const records = logger.records().filter((entry) => entry.tool === "create_report");
+    const records = logger
+      .records()
+      .filter((entry) => entry.tool === "create_report" && entry.event !== "tool_call");
     expect(records.length).toBeGreaterThan(0);
     for (const record of records) {
       expect(record).not.toHaveProperty("analysis_context");

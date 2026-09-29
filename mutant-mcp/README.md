@@ -181,6 +181,22 @@ raw file and sent only for a high-confidence `XX`/`XY` detection. The backend us
 it in memory to evaluate sex-specific perfect-storm conditions and never persists,
 caches, queues, logs, traces, or echoes it; it is excluded from every log record.
 
+### Observability
+
+The registration wrapper writes one tool-call audit record per call
+(`event: "tool_call"`, see `src/tools/audit.ts`): the tool name, the request id
+and account, the argument names received, the audited argument values, the outcome
+(`ok` / `error` / `scope_denied`), and the duration. Because it lives in the
+wrapper, a new tool is audited by construction.
+
+Values are limited to what a routing trace needs: genotypes (`snps`,
+`wgs_variant_calls`), `upload_meta`, `analysis_context`, and rsID lists are
+recorded by key only, and a `list_health_hypotheses` query is written as
+`[redacted]` unless it looks like the catalog keyword the tool description asks
+for. That keeps the audit trail out of the genotype-and-health-data class the
+logger redacts, and makes a withheld query a visible routing finding. The routing
+evaluation reads these records through `npm run record:trace`.
+
 ### The shared DNA processor
 
 `src/ui/genomics/*` is **generated**: `scripts/sync-genomics.mjs` copies it
@@ -259,6 +275,7 @@ npm run typecheck     # tsc --noEmit
 npm run lint          # eslint
 npm run build:ui      # esbuild -> src/ui/dna-import/generated/html.ts
 npm run check:genomics# fails on any drift from front-end-web/src/genomics
+npm run record:trace  # writes a routing trace from a captured tool-call log
 ```
 
 The entry-prompt routing evaluation replays observed, recorded tool traces rather
@@ -268,6 +285,12 @@ once a real ChatGPT capture has replaced the fixtures:
 ```bash
 GOLDEN_TRACES_REQUIRED=1 npx vitest run tests/golden-prompt-routing.test.ts
 ```
+
+Record a trace from a deployment log instead of transcribing it by hand: every
+tool call writes one `event: "tool_call"` audit record (`src/tools/audit.ts`). The
+capture procedure is in
+[`docs/mcp-runbook.md`](docs/mcp-runbook.md), including what the audit log
+withholds.
 
 `build:ui` runs two esbuild passes: the parser worker (`workerEntry.js`) as its
 own IIFE, then the component (`main.tsx`) with that script inlined as a string.

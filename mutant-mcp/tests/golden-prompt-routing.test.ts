@@ -26,6 +26,14 @@ import { ANALYSIS_FOLLOWUPS_UI_URI } from "../src/ui/analysis-followups/resource
 import { DNA_IMPORT_UI_URI } from "../src/ui/dna-import/resource.js";
 import tracesFile from "./golden-prompt-routing-traces.json";
 import {
+  OBSERVED_PROVENANCE,
+  TRACE_STATES,
+  isTraceState,
+  traceEntryIssues,
+  type GoldenTrace,
+  type TraceState,
+} from "./golden-trace-contract.js";
+import {
   ANALYSIS_SCOPE,
   DNA_SCOPE,
   StubBackendClient,
@@ -35,21 +43,6 @@ import {
   makeToolResponse,
   makeUser,
 } from "./helpers.js";
-
-interface TraceToolCall {
-  name: string;
-  arguments?: Record<string, unknown>;
-}
-
-interface GoldenTrace {
-  prompt: string;
-  state: string;
-  provenance: string;
-  capturedAt: string | null;
-  /** The Apps SDK card(s) this trace must (or must not) mount. */
-  expect: { overview: boolean; import: boolean; followups: boolean };
-  toolCalls: TraceToolCall[];
-}
 
 interface UiMeta {
   ui?: { resourceUri?: string; visibility?: string[] };
@@ -68,7 +61,7 @@ interface ReplayedCall {
 const TRACES = (tracesFile as { traces: GoldenTrace[] }).traces;
 
 /** The account state each observed trace was captured against. */
-const STATUS_BY_STATE: Record<string, Record<string, unknown>> = {
+const STATUS_BY_STATE = {
   NO_DNA: makeStatusData({
     dna_status: "missing",
     experience_state: "NO_DNA",
@@ -138,20 +131,18 @@ const STATUS_BY_STATE: Record<string, Record<string, unknown>> = {
     },
     next_action: { tool: "get_analysis_status" },
   }),
-};
+} satisfies Record<TraceState, Record<string, unknown>>;
 
 /** A real-world history prose the user might have typed into the chat. */
 const SHARED_HISTORY =
   "I have had fatigue and brain fog for months and my B12 was low in March 2024.";
 
 async function replay(trace: GoldenTrace): Promise<ReplayedCall[]> {
+  if (!isTraceState(trace.state)) throw new Error(`unknown trace state: ${trace.state}`);
   const status = STATUS_BY_STATE[trace.state];
-  if (!status) throw new Error(`unknown trace state: ${trace.state}`);
 
   const backendClient = new StubBackendClient((operation: BackendOperation) =>
-    operation === "get_analysis_status"
-      ? makeSuccessResponse(status)
-      : makeToolResponse(operation),
+    operation === "get_analysis_status" ? makeSuccessResponse(status) : makeToolResponse(operation),
   );
   const server = createMcpServer(
     makeUser({ scopes: [ANALYSIS_SCOPE, DNA_SCOPE] }),
@@ -255,7 +246,7 @@ describe("golden-prompt routing (observed traces)", () => {
   }
 
   it("records observed provenance for every trace before release", () => {
-    const pending = TRACES.filter((trace) => trace.provenance !== "observed").map(
+    const pending = TRACES.filter((trace) => trace.provenance !== OBSERVED_PROVENANCE).map(
       (trace) => `${trace.prompt} (${trace.state})`,
     );
     if (process.env.GOLDEN_TRACES_REQUIRED === "1") {
@@ -266,6 +257,22 @@ describe("golden-prompt routing (observed traces)", () => {
       // Otherwise the replay above is the contract check; report what still needs
       // capturing without blocking the default test run.
       expect(Array.isArray(pending)).toBe(true);
+      if (pending.length > 0) {
+        console.warn(`${pending.length} trace(s) still need a capture: ${pending.join(", ")}`);
+      }
     }
+  });
+
+  it("holds every trace to the shared capture contract", () => {
+    // The same validator the recorder runs, so an imported trace and a
+    // hand-edited one cannot disagree about states, tools, or card mounts.
+    const issues = TRACES.flatMap((trace, index) =>
+      traceEntryIssues(trace, `traces[${index}] ${JSON.stringify(trace.prompt)} (${trace.state})`),
+    );
+    expect(issues).toEqual([]);
+  });
+
+  it("covers the account states the replay can build", () => {
+    expect(Object.keys(STATUS_BY_STATE).sort()).toEqual([...TRACE_STATES].sort());
   });
 });

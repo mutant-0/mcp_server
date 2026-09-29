@@ -282,9 +282,21 @@ conversation and confirm on each supported surface:
   turn occurs with **no** Mutant tool call, that is a ChatGPT host/composer edge
   case, not an MCP failure — report it as such.
 - Record the observed model-selected tool calls for the entry, explicit-intent,
-  and topical prompts in
-  `mutant-mcp/tests/golden-prompt-routing-traces.json` (set `provenance` to
-  `observed`), then run
+  and topical prompts in `mutant-mcp/tests/golden-prompt-routing-traces.json`.
+  Every tool call writes one `event: "tool_call"` audit record (see
+  `mutant-mcp/src/tools/audit.ts`), so a conversation's sequence is taken from the
+  deployment logs rather than transcribed:
+
+  ```powershell
+  npm run record:trace -- --prompt "<the entry prompt>" --state READY_FREE `
+    --calls <log-export.json> --user <sub> --from <iso> --to <iso> --write
+  ```
+
+  The export may be NDJSON, a CloudWatch Logs event array, or a bare
+  `[{ name, arguments }]` list. A `query` the audit log withheld (the model sent
+  something that is not a catalog keyword) is refused with an explanation: that is
+  a routing finding, not a capture to import. Without `--write` the entry is only
+  printed. Then run
   `GOLDEN_TRACES_REQUIRED=1 npm test -- tests/golden-prompt-routing.test.ts`.
 
 ### DNA import checks

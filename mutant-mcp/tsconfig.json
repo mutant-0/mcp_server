@@ -26,6 +26,6 @@
     "sourceMap": true,
     "noEmit": true
   },
-  "include": ["src", "tests", "infrastructure", "vitest.config.ts"],
+  "include": ["src", "tests", "scripts", "infrastructure", "vitest.config.ts"],
   "exclude": ["node_modules", "dist", "cdk.out", "infrastructure/dist"]
 }

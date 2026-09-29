@@ -32,6 +32,11 @@ export default tseslint.config(
     },
   },
   {
+    // Build, sync, and capture scripts run in Node, not the browser or Lambda.
+    files: ["scripts/**/*.mjs", "scripts/**/*.ts"],
+    languageOptions: { globals: { ...globals.node } },
+  },
+  {
     // Component tests render into jsdom, so they legitimately use DOM globals.
     files: ["tests/**/*.tsx"],
     languageOptions: {

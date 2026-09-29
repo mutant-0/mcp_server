@@ -231,13 +231,32 @@ export function safeInferSexChromosomePattern(stats, provider) {
   }
 }
 
+// Wire vocabulary accepted by the backend /reports validator. The internal
+// inference vocabulary is deliberately different (`atypical` / `indeterminate` /
+// `moderate`); it must be translated here or the request is rejected with
+// "analysis_context.sex_chromosome_pattern is invalid".
+//   pattern:    XX | XY | unknown | ambiguous
+//   confidence: high | medium | low | unknown
+const WIRE_PATTERN = {
+  XX: 'XX',
+  XY: 'XY',
+  atypical: 'ambiguous',
+  indeterminate: 'unknown',
+};
+
+const WIRE_CONFIDENCE = {
+  high: 'high',
+  moderate: 'medium',
+  low: 'low',
+};
+
 // Map the in-memory inference to the minimal backend contract. Only the pattern
 // and confidence leave the browser; raw counts and genotypes stay local.
 export function buildAnalysisContext(inference) {
   const pattern = (inference && inference.pattern) || 'indeterminate';
   const confidence = (inference && inference.confidence) || 'low';
   return {
-    sex_chromosome_pattern: pattern,
-    sex_chromosome_confidence: confidence,
+    sex_chromosome_pattern: WIRE_PATTERN[pattern] || 'unknown',
+    sex_chromosome_confidence: WIRE_CONFIDENCE[confidence] || 'unknown',
   };
 }

@@ -1,7 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { MutantUserContext } from "../auth/user-context.js";
-import { createMutantBackendClient, type MutantBackendClient } from "../clients/mutant-lambda-client.js";
+import {
+  createMutantBackendClient,
+  type MutantBackendClient,
+} from "../clients/mutant-lambda-client.js";
 import { scopeFor, type AppConfig } from "../config.js";
+import { auditToolCall, type ToolCallStatus } from "./audit.js";
 import { createReportTool } from "./create-report.js";
 import { getAnalysisContextTool } from "./get-analysis-context.js";
 import { getAnalysisStatusTool } from "./get-analysis-status.js";
@@ -79,6 +83,10 @@ export function toolMeta(
  * transport accepts a token carrying any supported scope (one connection serves
  * both the analysis tools and the DNA import flow), so the boundary that
  * actually narrows the grant must be impossible to forget when a tool is added.
+ *
+ * The same wrapper writes the tool-call audit record every call needs to be
+ * reconstructable from the logs (see `./audit.ts`); because it sits here rather
+ * than in each handler, a new tool is audited by construction.
  */
 export function registerTools(
   server: McpServer,
@@ -101,9 +109,32 @@ export function registerTools(
         _meta: toolMeta(definition, config),
       },
       async (args: Record<string, unknown> | undefined) => {
+        const callArgs = (args ?? {}) as Record<string, unknown>;
+        const startedAt = Date.now();
+        const audit = (status: ToolCallStatus) =>
+          auditToolCall(
+            definition.name,
+            callArgs,
+            { requestId: runtime.requestId, userId: runtime.user.userId },
+            { status, startedAt },
+          );
+
         const denied = enforceScope(definition, runtime);
-        if (denied) return respond(denied, runtime);
-        return definition.handler((args ?? {}) as Record<string, unknown>, runtime);
+        if (denied) {
+          // A denial is a routing fact worth having in a trace: it is what a
+          // token missing a scope looks like from the server's side.
+          runtime.logger.warn(audit("scope_denied"), "tool call denied");
+          return respond(denied, runtime);
+        }
+
+        try {
+          const result = await definition.handler(callArgs, runtime);
+          runtime.logger.info(audit(result.isError === true ? "error" : "ok"), "tool call");
+          return result;
+        } catch (error) {
+          runtime.logger.error({ ...audit("error"), err: error }, "tool call failed");
+          throw error;
+        }
       },
     );
   }
