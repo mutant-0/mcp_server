@@ -4,7 +4,8 @@
  *
  * The card is navigation only, so these tests assert what it may and may not do:
  * mount at most two bound actions, send the server-selected prompt on click,
- * route Free users to the upgrade page, never repeat the answer, and stay usable
+ * render the factual Free plan notice and its optional informational link, never
+ * repeat the answer, and stay usable
  * at a narrow viewport. The card talks to the server only through the host
  * bridge, so the harness is the same fake host the DNA import tests use.
  */
@@ -323,15 +324,18 @@ describe("analysis follow-up card", () => {
     expect(screen.queryByText("A third action")).toBeNull();
   });
 
-  it("opens the upgrade route for Free and only hints at search for Full", async () => {
+  it("renders the factual plan notice for Free and only hints at search for Full", async () => {
     const free = renderCard();
     free.sendToolResult(
       makeSuccessResponse(
         makeFollowupsData({
           plan: "mutant_free",
-          upgrade: {
-            label: "Unlock Full Analysis",
-            url: "https://mutantgenomics.com/upgrade?source=chatgpt",
+          plan_notice: {
+            text: "Your Mutant Free plan includes your top three ranked findings.",
+            learn_more: {
+              label: "Learn about Mutant plans",
+              url: "https://mutantgenomics.com/plans",
+            },
           },
         }),
         "rev42-v3.0.0",
@@ -339,11 +343,14 @@ describe("analysis follow-up card", () => {
       FOLLOWUPS_META,
     );
 
-    const link = await screen.findByRole("link", { name: "Explore all findings with Full" });
-    expect(link.getAttribute("href")).toContain("source=chatgpt");
+    expect(
+      await screen.findByText("Your Mutant Free plan includes your top three ranked findings."),
+    ).toBeTruthy();
+    const link = screen.getByRole("link", { name: "Learn about Mutant plans" });
+    expect(link.getAttribute("href")).toBe("https://mutantgenomics.com/plans");
     fireEvent.click(link);
     await waitFor(() =>
-      expect(free.openLinks).toContain("https://mutantgenomics.com/upgrade?source=chatgpt"),
+      expect(free.openLinks).toContain("https://mutantgenomics.com/plans"),
     );
 
     cleanup();
@@ -355,8 +362,33 @@ describe("analysis follow-up card", () => {
       FOLLOWUPS_META,
     );
     await screen.findByText("Explore this finding");
-    expect(screen.queryByRole("link", { name: "Explore all findings with Full" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Learn about Mutant plans" })).toBeNull();
+    expect(
+      screen.queryByText("Your Mutant Free plan includes your top three ranked findings."),
+    ).toBeNull();
     expect(screen.getByText(/Search any ranked finding by topic/)).toBeTruthy();
+  });
+
+  it("renders the plan notice text without a link when the link is not approved", async () => {
+    const bridge = renderCard();
+    bridge.sendToolResult(
+      makeSuccessResponse(
+        makeFollowupsData({
+          plan: "mutant_free",
+          plan_notice: {
+            text: "Your Mutant Free plan includes your top three ranked findings.",
+          },
+        }),
+        "rev42-v3.0.0",
+      ),
+      FOLLOWUPS_META,
+    );
+
+    expect(
+      await screen.findByText("Your Mutant Free plan includes your top three ranked findings."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(bridge.openLinks).toHaveLength(0);
   });
 
   it("renders nothing when the follow-up result is a structured error", async () => {

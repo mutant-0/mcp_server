@@ -24,7 +24,9 @@ const EnvSchema = z.object({
     .string()
     .trim()
     .default("https://chatgpt.com,https://chat.openai.com"),
-  MUTANT_UPGRADE_URL: z.string().trim().default("https://mutantgenomics.com/upgrade"),
+  // Approved informational plan page for the Free-plan notice's learn-more link.
+  // Must be an https URL on mutantgenomics.com; the link is omitted otherwise.
+  MUTANT_PLAN_INFO_URL: z.string().trim().default("https://mutantgenomics.com/plans"),
   MUTANT_ONBOARDING_URL: z.string().trim().default("https://mutantgenomics.com/onboarding"),
   MUTANT_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
   MUTANT_MAX_RESPONSE_BYTES: z.coerce.number().int().positive().default(512000),
@@ -47,7 +49,7 @@ export interface AppConfig {
   MUTANT_OAUTH_SCOPE_DNA_IMPORT: string;
   MUTANT_MCP_RESOURCE_URI: string;
   MUTANT_CORS_ORIGINS: string;
-  MUTANT_UPGRADE_URL: string;
+  MUTANT_PLAN_INFO_URL: string;
   MUTANT_ONBOARDING_URL: string;
   MUTANT_REQUEST_TIMEOUT_MS: number;
   MUTANT_MAX_RESPONSE_BYTES: number;

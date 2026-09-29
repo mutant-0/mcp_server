@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { BackendOperation, ToolResponse } from "../src/contract.js";
+import type { BackendOperation, McpApplicationError, ToolResponse } from "../src/contract.js";
 import { SERVER_INSTRUCTIONS, SERVER_NAME, createMcpServer } from "../src/server.js";
 import { TOOL_NAMES } from "../src/contract.js";
 import {
@@ -133,38 +133,88 @@ describe("MCP server integration", () => {
     expect((result._meta as { ui?: unknown } | undefined)?.ui).toBeUndefined();
   });
 
-  it("replaces backend-local checkout URLs with the public portal URL", async () => {
+  it("validates the plan notice link and strips legacy upgrade fields", async () => {
     const { client } = await connectServer((operation) =>
       makeSuccessResponse(
         operation === "get_analysis_context"
           ? makeContextData({
               upgrade: { label: "Unlock Full Analysis", url: "http://localhost:3000/cart" },
+              upgrade_url: "http://localhost:3000/cart",
+              plan_notice: {
+                text: "Your Mutant Free plan includes your top three ranked findings.",
+                learn_more: { label: "Learn about Mutant plans", url: "http://localhost:3000/cart" },
+              },
             })
           : makeStatusData({
               upgrade: { label: "Unlock Full Analysis", url: "http://localhost:3000/cart" },
+              upgrade_url: "http://localhost:3000/cart",
             }),
       ),
     );
     const context = await client.callTool({ name: "get_analysis_context", arguments: {} });
     const status = await client.callTool({ name: "get_analysis_status", arguments: {} });
-    // Every upgrade link carries the ChatGPT source tag so the destination can
-    // see that the card prompted it.
-    expect((context.structuredContent as ToolResponse).data?.upgrade).toEqual({
-      label: "Unlock Full Analysis",
-      url: "https://mutantgenomics.com/upgrade?source=chatgpt",
+    const contextData = (context.structuredContent as ToolResponse).data as Record<string, unknown>;
+    const statusData = (status.structuredContent as ToolResponse).data as Record<string, unknown>;
+    // A legacy checkout URL is never rewritten, substituted, or exposed. The
+    // notice's invalid link is replaced with the configured approved URL.
+    expect(contextData.upgrade).toBeUndefined();
+    expect(contextData.upgrade_url).toBeUndefined();
+    expect(contextData.plan_notice).toEqual({
+      text: "Your Mutant Free plan includes your top three ranked findings.",
+      learn_more: {
+        label: "Learn about Mutant plans",
+        url: "https://mutantgenomics.com/plans",
+      },
     });
-    expect((status.structuredContent as ToolResponse).data?.upgrade).toEqual({
-      label: "Unlock Full Analysis",
-      url: "https://mutantgenomics.com/upgrade?source=chatgpt",
+    // Status carries no plan messaging at all.
+    expect(statusData.upgrade).toBeUndefined();
+    expect(statusData.upgrade_url).toBeUndefined();
+    expect(statusData.plan_notice).toBeUndefined();
+  });
+
+  it("keeps the factual plan notice text but drops an unusable notice link", async () => {
+    const backendClient = new StubBackendClient(() =>
+      makeSuccessResponse(
+        makeContextData({
+          plan_notice: {
+            text: "Your Mutant Free plan includes your top three ranked findings.",
+            learn_more: { label: "Learn about Mutant plans", url: "http://localhost:3000/cart" },
+          },
+        }),
+      ),
+    );
+    const server = createMcpServer(
+      makeUser({ scopes: [ANALYSIS_SCOPE] }),
+      makeConfig({ MUTANT_PLAN_INFO_URL: "http://localhost:3000/cart" }),
+      "req-notice",
+      backendClient,
+    );
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+    await client.connect(clientTransport);
+
+    const result = await client.callTool({ name: "get_analysis_context", arguments: {} });
+    const data = (result.structuredContent as ToolResponse).data as Record<string, unknown>;
+    expect(data.plan_notice).toEqual({
+      text: "Your Mutant Free plan includes your top three ranked findings.",
     });
   });
 
-  it("points a PLAN_REQUIRED recovery link at the tagged public portal URL", async () => {
+  it("points a PLAN_REQUIRED recovery link at the approved informational page", async () => {
     const { client } = await connectServer(() =>
-      makeErrorResponse("PLAN_REQUIRED", "This finding needs Mutant Full.", {
-        required_plan: "mutant_full",
-        upgrade_url: "http://localhost:3000/cart",
-      }),
+      makeErrorResponse(
+        "PLAN_REQUIRED",
+        "This request is outside the top three available with your Mutant Free plan.",
+        {
+          required_plan: "mutant_full",
+          upgrade_url: "http://localhost:3000/cart",
+          plan_notice: {
+            text: "Your Mutant Free plan includes your top three ranked findings.",
+            learn_more: { label: "Learn about Mutant plans", url: "http://localhost:3000/cart" },
+          },
+        } as unknown as Partial<McpApplicationError>,
+      ),
     );
     const result = await client.callTool({
       name: "explain_health_hypothesis",
@@ -173,10 +223,17 @@ describe("MCP server integration", () => {
     expect(result.isError).toBe(true);
     const envelope = result.structuredContent as ToolResponse;
     expect(envelope.error?.code).toBe("PLAN_REQUIRED");
-    // The recovery link never leaks an internal origin and stays attributable.
-    expect(envelope.error?.upgrade_url).toBe(
-      "https://mutantgenomics.com/upgrade?source=chatgpt",
-    );
+    expect(envelope.error?.required_plan).toBe("mutant_full");
+    // The legacy recovery link never leaks an internal origin; the notice link is
+    // validated against the approved Mutant domain.
+    expect((envelope.error as unknown as Record<string, unknown>).upgrade_url).toBeUndefined();
+    expect(envelope.error?.plan_notice).toEqual({
+      text: "Your Mutant Free plan includes your top three ranked findings.",
+      learn_more: {
+        label: "Learn about Mutant plans",
+        url: "https://mutantgenomics.com/plans",
+      },
+    });
   });
 
   it("keeps the status tool card-free for a ready analysis with an available update", async () => {
@@ -220,7 +277,7 @@ describe("MCP server integration", () => {
     const { client } = await connectServer(() =>
       makeErrorResponse("PLAN_REQUIRED", "locked", {
         required_plan: "mutant_full",
-        next_action: { tool: "show_dna_import", reason: "Upgrade to continue." },
+        next_action: { tool: "show_dna_import", reason: "Import DNA to continue." },
       }),
     );
     const result = await client.callTool({

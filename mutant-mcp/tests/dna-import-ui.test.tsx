@@ -1099,12 +1099,18 @@ describe("DNA import component", () => {
     expect(screen.queryByText(/temporarily unavailable/i)).toBeNull();
   });
 
-  it("offers history comparison and the Full upgrade link only to Free accounts", async () => {
+  it("renders the factual plan notice and its informational link only for Free accounts", async () => {
     const bridge = renderWith({
       poll_analysis_status: statusResponse("ready"),
       get_analysis_context: makeSuccessResponse(
         makeContextData({
-          upgrade: { label: "Unlock Full Analysis", url: "https://mutantgenomics.com/upgrade" },
+          plan_notice: {
+            text: "Your Mutant Free plan includes your top three ranked findings.",
+            learn_more: {
+              label: "Learn about Mutant plans",
+              url: "https://mutantgenomics.com/plans",
+            },
+          },
           suggested_prompts: [
             {
               id: "explain-first",
@@ -1139,11 +1145,14 @@ describe("DNA import component", () => {
       screen.getByText(/Uses only health history or records you share in this chat\./),
     ).toBeDefined();
     expect(screen.queryByRole("button", { name: "Compare all with Full" })).toBeNull();
-    const upgradeLink = screen.getByRole("link", { name: "Upgrade to Mutant Full" });
-    expect(upgradeLink.getAttribute("href")).toBe("https://mutantgenomics.com/upgrade");
-    expect(upgradeLink.getAttribute("target")).toBe("_blank");
-    fireEvent.click(upgradeLink);
-    await waitFor(() => expect(bridge.openLinks).toEqual(["https://mutantgenomics.com/upgrade"]));
+    expect(
+      screen.getByText("Your Mutant Free plan includes your top three ranked findings."),
+    ).toBeDefined();
+    const planLink = screen.getByRole("link", { name: "Learn about Mutant plans" });
+    expect(planLink.getAttribute("href")).toBe("https://mutantgenomics.com/plans");
+    expect(planLink.getAttribute("target")).toBe("_blank");
+    fireEvent.click(planLink);
+    await waitFor(() => expect(bridge.openLinks).toEqual(["https://mutantgenomics.com/plans"]));
   });
 
   it("sends the server-selected comparison prompt once, even on a double click", async () => {
@@ -1185,7 +1194,7 @@ describe("DNA import component", () => {
     );
   });
 
-  it("does not offer an upgrade to a Full account", async () => {
+  it("does not show a plan notice to a Full account", async () => {
     const bridge = renderWith({
       poll_analysis_status: statusResponse("ready", {
         entitlement: { plan: "mutant_full", hypothesis_scope: "all" },
@@ -1208,8 +1217,36 @@ describe("DNA import component", () => {
     await screen.findByText(/Analysis ready/i);
     fireEvent.click(screen.getByRole("button", { name: /view my findings/i }));
     await screen.findByRole("button", { name: "Compare all findings" });
-    expect(screen.queryByRole("link", { name: "Upgrade to Mutant Full" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Learn about Mutant plans" })).toBeNull();
     expect(bridge.openLinks).toHaveLength(0);
+  });
+
+  it("renders the plan notice text without a link when no approved URL is available", async () => {
+    renderWith({
+      poll_analysis_status: statusResponse("ready"),
+      get_analysis_context: makeSuccessResponse(
+        makeContextData({
+          plan_notice: {
+            text: "Your Mutant Free plan includes your top three ranked findings.",
+          },
+          suggested_prompts: [
+            {
+              id: "explain-first",
+              label: "Explain #1",
+              prompt: "Explain my #1 finding in plain English.",
+              intent: "explain",
+            },
+          ],
+        }),
+      ),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+    expect(
+      await screen.findByText("Your Mutant Free plan includes your top three ranked findings."),
+    ).toBeDefined();
+    expect(screen.queryByRole("link", { name: "Learn about Mutant plans" })).toBeNull();
   });
 
   it("offers an optional refresh when a newer analysis is available", async () => {

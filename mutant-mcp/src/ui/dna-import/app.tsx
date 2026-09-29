@@ -138,6 +138,16 @@ type DnaStatus = "missing" | "available" | "unknown";
  */
 type ImportMode = "initial" | "regenerate" | "overview";
 
+/**
+ * The server-authored factual Free-plan notice. `learnMoreUrl` is already
+ * validated; when it is null the text renders without a link.
+ */
+interface PlanNoticeState {
+  text: string;
+  learnMoreLabel: string | null;
+  learnMoreUrl: string | null;
+}
+
 /** What `poll_analysis_status` told us about the account. */
 interface StatusInfo {
   dnaStatus: DnaStatus;
@@ -147,7 +157,7 @@ interface StatusInfo {
   planLabel: string | null;
   planSlug: string | null;
   hypothesisScope: string | null;
-  upgradeUrl: string | null;
+  planNotice: PlanNoticeState | null;
   /** A refreshed analysis is available; current results stay usable unless required. */
   regenerate: boolean;
   /** Resubmission is required (the current analysis is not usable). */
@@ -162,7 +172,7 @@ interface AnalysisState {
   planLabel: string | null;
   planSlug: string | null;
   hypothesisScope: string | null;
-  upgradeUrl: string | null;
+  planNotice: PlanNoticeState | null;
   regenerate: boolean;
   regenerationRequired: boolean;
   regenerationUsable: boolean;
@@ -450,7 +460,6 @@ function normalizeStatus(value: unknown): LifecycleStatus | null {
 function statusOf(envelope: ToolResponse): StatusInfo {
   const data = asRecord(envelope.data) ?? {};
   const entitlement = asRecord(data.entitlement);
-  const upgrade = asRecord(data.upgrade);
   const active = asRecord(data.active_analysis);
   const pending = asRecord(data.pending_analysis);
   const experience = firstString(data.experience_state);
@@ -484,7 +493,7 @@ function statusOf(envelope: ToolResponse): StatusInfo {
     planLabel: firstString(data.plan, entitlement?.plan_label),
     planSlug: firstString(data.plan_slug, entitlement?.plan),
     hypothesisScope: firstString(entitlement?.hypothesis_scope, data.hypothesis_scope),
-    upgradeUrl: firstString(upgrade?.url, data.upgrade_url),
+    planNotice: planNoticeFrom(data.plan_notice),
     regenerate: refreshOffered,
     regenerationRequired: experience === "PROCESSING_FAILED",
     regenerationUsable: active?.usable !== false,
@@ -500,7 +509,13 @@ function overviewSnapshotFrom(result: {
   structuredContent?: unknown;
   content?: Array<{ type: string; text?: string }>;
   _meta?: unknown;
-}): { version: string | null; items: Finding[]; totalAccessible: number; hasMore: boolean } | null {
+}): {
+  version: string | null;
+  items: Finding[];
+  totalAccessible: number;
+  hasMore: boolean;
+  planNotice: PlanNoticeState | null;
+} | null {
   const envelope = envelopeOf(result);
   const data = envelope ? asRecord(envelope.data) : null;
   if (!data || data.mode !== "overview") return null;
@@ -531,6 +546,7 @@ function overviewSnapshotFrom(result: {
     items,
     totalAccessible,
     hasMore: data.has_more === true,
+    planNotice: planNoticeFrom(data.plan_notice),
   };
 }
 
@@ -542,7 +558,7 @@ function analysisFromStatus(previous: AnalysisState | null, info: StatusInfo): A
     planLabel: info.planLabel ?? previous?.planLabel ?? null,
     planSlug: info.planSlug ?? previous?.planSlug ?? null,
     hypothesisScope: info.hypothesisScope ?? previous?.hypothesisScope ?? null,
-    upgradeUrl: info.upgradeUrl ?? previous?.upgradeUrl ?? null,
+    planNotice: info.planNotice ?? previous?.planNotice ?? null,
     regenerate: info.regenerate,
     regenerationRequired: info.regenerationRequired,
     regenerationUsable: info.regenerationUsable,
@@ -555,7 +571,7 @@ function isFullAccount(analysis: AnalysisState | null): boolean {
 }
 
 /** Only allow browser-safe destinations supplied by the analysis service. */
-function safeUpgradeUrl(value: string | null): string | null {
+function safePlanInfoUrl(value: string | null): string | null {
   if (!value) return null;
   try {
     const url = new URL(value);
@@ -563,6 +579,22 @@ function safeUpgradeUrl(value: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Read the optional factual Free-plan notice out of a payload. The copy is
+ * server-authored; the client only validates the optional link.
+ */
+function planNoticeFrom(value: unknown): PlanNoticeState | null {
+  const row = asRecord(value);
+  const text = firstString(row?.text);
+  if (!text) return null;
+  const learnMore = asRecord(row?.learn_more);
+  return {
+    text,
+    learnMoreLabel: firstString(learnMore?.label),
+    learnMoreUrl: safePlanInfoUrl(firstString(learnMore?.url)),
+  };
 }
 
 /**
@@ -1037,6 +1069,11 @@ export function DnaImportApp({
             findingsRef.current = loaded;
             setFindingsState(loaded);
           }
+          // The overview envelope is the authoritative plan notice for Free
+          // accounts (status no longer carries one); an absent notice clears any
+          // stale one.
+          const notice = snapshot.planNotice;
+          setAnalysis((previous) => (previous ? { ...previous, planNotice: notice } : previous));
         }
       };
     },
@@ -1404,7 +1441,7 @@ export function DnaImportApp({
             planLabel: null,
             planSlug: null,
             hypothesisScope: null,
-            upgradeUrl: null,
+            planNotice: null,
             regenerate: false,
             regenerationRequired: false,
             regenerationUsable: true,
@@ -1552,7 +1589,7 @@ export function DnaImportApp({
   const startedAt = startedAtRef.current;
   const elapsedMs = startedAt === null ? 0 : Math.max(0, now - startedAt);
   const isFull = isFullAccount(analysis);
-  const upgradeUrl = isFull ? null : safeUpgradeUrl(analysis?.upgradeUrl ?? null);
+  const planNotice = isFull ? null : analysis?.planNotice ?? null;
 
   /** Resume polling after the ceiling or a run of transient failures. */
   const checkAgain = useCallback(() => {
@@ -1582,10 +1619,9 @@ export function DnaImportApp({
       const envelope = envelopeOf(result);
       if (result.isError || !envelope || !envelope.ok) return;
       setPrompts(promptsFrom(envelope.data));
-      const upgrade = asRecord(asRecord(envelope.data)?.upgrade);
-      const url = safeUpgradeUrl(firstString(upgrade?.url));
-      if (url) {
-        setAnalysis((previous) => (previous ? { ...previous, upgradeUrl: url } : previous));
+      const notice = planNoticeFrom(asRecord(envelope.data)?.plan_notice);
+      if (notice) {
+        setAnalysis((previous) => (previous ? { ...previous, planNotice: notice } : previous));
       }
     } catch {
       // Chips are an enhancement; a failure must not disturb the findings card.
@@ -2030,7 +2066,7 @@ export function DnaImportApp({
           <p style={styles.meta}>
             {isFull
               ? "Every analyzed health hypothesis is included with Mutant Full."
-              : "Your top 3 ranked health hypotheses are included with Mutant Free. Mutant Full unlocks every analyzed hypothesis."}
+              : "Your top 3 ranked health hypotheses are included with Mutant Free."}
           </p>
         )}
 
@@ -2241,26 +2277,32 @@ export function DnaImportApp({
             Replace DNA data
           </button>
         </div>
-        {upgradeUrl ? (
+        {planNotice ? (
           <div style={{ marginTop: 12 }}>
-            <a
-              href={upgradeUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={styles.subtleButton}
-              onClick={(event) => {
-                if (!app) return;
-                event.preventDefault();
-                void app.openLink({ url: upgradeUrl }).then(
-                  (result) => {
-                    if (result.isError) setHandoffError("The upgrade page could not be opened.");
-                  },
-                  () => setHandoffError("The upgrade page could not be opened."),
-                );
-              }}
-            >
-              Upgrade to Mutant Full
-            </a>
+            <p style={styles.meta}>{planNotice.text}</p>
+            {planNotice.learnMoreUrl ? (
+              <a
+                href={planNotice.learnMoreUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={styles.subtleButton}
+                onClick={(event) => {
+                  if (!app) return;
+                  event.preventDefault();
+                  const url = planNotice.learnMoreUrl as string;
+                  void app.openLink({ url }).then(
+                    (result) => {
+                      if (result.isError) {
+                        setHandoffError("The plan information page could not be opened.");
+                      }
+                    },
+                    () => setHandoffError("The plan information page could not be opened."),
+                  );
+                }}
+              >
+                {planNotice.learnMoreLabel ?? "Learn about Mutant plans"}
+              </a>
+            ) : null}
           </div>
         ) : null}
         {fileInput}

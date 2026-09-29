@@ -80,8 +80,8 @@ describe("tool definitions", () => {
     }
   });
 
-  it("uses contract version 3.0.0", () => {
-    expect(CONTRACT_VERSION).toBe("3.0.0");
+  it("uses contract version 3.1.0", () => {
+    expect(CONTRACT_VERSION).toBe("3.1.0");
   });
 
   it("requires analysis.read for analysis tools and dna.import for DNA import tools", () => {

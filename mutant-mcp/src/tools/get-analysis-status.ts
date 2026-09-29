@@ -1,6 +1,6 @@
 import type { ToolResponse } from "../contract.js";
 import { withSuggestedPrompts } from "../presentation/prompts.js";
-import { withPublicUpgradeUrl } from "../presentation/upgrade.js";
+import { withValidatedPlanNotice } from "../presentation/plan-notice.js";
 import { analysisStatusOutputSchema, getAnalysisStatusInputSchema } from "../schemas/index.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
@@ -77,7 +77,7 @@ export const getAnalysisStatusTool: MutantToolDefinition = {
       runtime.requestId,
     );
     return respond(
-      withSuggestedPrompts(withPublicUpgradeUrl(response, runtime.config), "get_analysis_status"),
+      withSuggestedPrompts(withValidatedPlanNotice(response, runtime.config), "get_analysis_status"),
       runtime,
       { operation: "get_analysis_status" },
     );

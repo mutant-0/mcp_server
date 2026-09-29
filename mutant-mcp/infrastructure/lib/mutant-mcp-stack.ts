@@ -43,7 +43,11 @@ export interface MutantMcpStackProps extends StackProps {
   maxRequestBytes?: number;
   /** When true, accepts dev-free/dev-paid tokens instead of validating against OIDC. */
   devMode?: boolean;
-  upgradeUrl?: string;
+  /**
+   * Approved informational plan page for the Free-plan notice's learn-more link.
+   * Defaults to the production `/plans` plan page.
+   */
+  planInfoUrl?: string;
   onboardingUrl?: string;
   logLevel?: string;
   reservedConcurrency?: number;
@@ -89,7 +93,7 @@ export class MutantMcpStack extends Stack {
         MUTANT_CORS_ORIGINS:
           props.corsOrigins ?? "https://chatgpt.com,https://chat.openai.com",
         MUTANT_DEV_MODE: props.devMode ? "true" : "false",
-        MUTANT_UPGRADE_URL: props.upgradeUrl ?? "https://mutantgenomics.com/upgrade",
+        MUTANT_PLAN_INFO_URL: props.planInfoUrl ?? "https://mutantgenomics.com/plans",
         MUTANT_ONBOARDING_URL: props.onboardingUrl ?? "https://mutantgenomics.com/onboarding",
         MUTANT_REQUEST_TIMEOUT_MS: String(props.requestTimeoutMs ?? 20000),
         MUTANT_MAX_RESPONSE_BYTES: String(props.maxResponseBytes ?? 512000),

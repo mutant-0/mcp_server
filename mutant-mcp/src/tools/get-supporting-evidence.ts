@@ -1,4 +1,4 @@
-import { withPublicUpgradeUrl } from "../presentation/upgrade.js";
+import { withValidatedPlanNotice } from "../presentation/plan-notice.js";
 import { getSupportingEvidenceInputSchema, supportingEvidenceOutputSchema } from "../schemas/index.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
@@ -21,7 +21,7 @@ export const getSupportingEvidenceTool: MutantToolDefinition = {
   annotations: readOnlyAnnotations,
   handler: async (args, runtime) =>
     respond(
-      withPublicUpgradeUrl(
+      withValidatedPlanNotice(
         await runtime.client.invoke(
           "get_supporting_evidence",
           args,

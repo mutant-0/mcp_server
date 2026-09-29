@@ -25,7 +25,17 @@ export const errorOutputSchema = z.looseObject({
   retryable: z.boolean(),
   next_action: nextActionSchema.optional(),
   required_plan: z.string().optional(),
-  upgrade_url: z.string().optional(),
+  plan_notice: z.optional(
+    z.looseObject({
+      text: z.string(),
+      learn_more: z.optional(
+        z.looseObject({
+          label: z.string(),
+          url: z.string(),
+        }),
+      ),
+    }),
+  ),
   retry_after_seconds: z.number().optional(),
   required_scope: z.string().optional(),
   app_code: z.string().optional(),
@@ -80,9 +90,18 @@ export const entitlementSchema = z.looseObject({
   access_expires_at: z.string().optional(),
 });
 
-export const upgradeOfferSchema = z.looseObject({
-  label: z.string(),
-  url: z.string(),
+export const planNoticeSchema = z.looseObject({
+  text: z
+    .string()
+    .describe("Factual, server-authored plan sentence. Never an upgrade CTA."),
+  learn_more: z
+    .optional(
+      z.looseObject({
+        label: z.string(),
+        url: z.string().describe("Informational plan page URL on the approved Mutant domain."),
+      }),
+    )
+    .describe("Optional neutral informational link; omitted when no approved URL is configured."),
 });
 
 export const promptSuggestionSchema = z.looseObject({
@@ -125,7 +144,6 @@ export const analysisStatusDataSchema = z.looseObject({
   capabilities: capabilitiesSchema,
   next_action: nextActionSchema.optional(),
   suggested_prompts: z.array(promptSuggestionSchema).optional(),
-  upgrade: upgradeOfferSchema.optional(),
 });
 
 const interpretationSchema = z.looseObject({
@@ -242,7 +260,7 @@ export const analysisContextDataSchema = z.looseObject({
   }),
   access: accessSummarySchema,
   preview: z.array(hypothesisSummarySchema),
-  upgrade: upgradeOfferSchema.optional(),
+  plan_notice: planNoticeSchema.optional(),
   suggested_prompts: z.array(promptSuggestionSchema),
 });
 
@@ -617,13 +635,16 @@ export const showAnalysisOverviewDataSchema = z.looseObject({
   has_more: z
     .boolean()
     .describe("True when more accessible findings exist beyond displayed_hypotheses."),
+  plan_notice: planNoticeSchema
+    .optional()
+    .describe("Factual Free-plan notice, present only when the card explains a real access limit."),
 });
 
 /**
  * The `show_analysis_followups` payload. The card is navigation only: a context
  * label, at most two actions bound to the displayed hypothesis ids and revision,
- * and - Free only - an upgrade offer. It never carries the generated answer, the
- * user's health history, or any evidence rows.
+ * and - Free only - a factual plan notice. It never carries the generated answer,
+ * the user's health history, or any evidence rows.
  */
 export const showAnalysisFollowupsDataSchema = z.looseObject({
   ui_rendered: z.literal(true),
@@ -644,6 +665,8 @@ export const showAnalysisFollowupsDataSchema = z.looseObject({
     }),
   ),
   actions: z.array(promptSuggestionSchema),
-  upgrade: upgradeOfferSchema.optional(),
+  plan_notice: planNoticeSchema
+    .optional()
+    .describe("Factual Free-plan notice, present only when the card explains a real access limit."),
   source: z.string().optional(),
 });

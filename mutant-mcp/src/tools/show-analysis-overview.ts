@@ -1,8 +1,10 @@
 import {
   CONTRACT_VERSION,
+  type PlanNotice,
   type ShowAnalysisOverviewData,
   type ToolResponse,
 } from "../contract.js";
+import { withValidatedPlanNotice } from "../presentation/plan-notice.js";
 import { showAnalysisOverviewOutputSchema } from "../schemas/index.js";
 import { DNA_IMPORT_UI_URI, dnaImportUiMeta } from "../ui/dna-import/resource.js";
 import { respond } from "./respond.js";
@@ -51,8 +53,8 @@ export const showAnalysisOverviewTool: MutantToolDefinition = {
       // structured error envelope rather than throwing. No UI descriptor is
       // attached, so a processing/locked/failed result can never mount the
       // overview card: the processing experience belongs to show_dna_import and
-      // poll_analysis_status.
-      return respond(response, runtime, {
+      // poll_analysis_status. Any legacy upgrade field is stripped.
+      return respond(withValidatedPlanNotice(response, runtime.config), runtime, {
         operation: "show_analysis_overview",
       });
     }
@@ -62,6 +64,7 @@ export const showAnalysisOverviewTool: MutantToolDefinition = {
       displayed_hypotheses?: ShowAnalysisOverviewData["displayed_hypotheses"];
       total_accessible_count?: number;
       has_more?: boolean;
+      plan_notice?: PlanNotice;
     };
     const displayedHypotheses = snapshot.displayed_hypotheses ?? [];
     const data: ShowAnalysisOverviewData = {
@@ -74,6 +77,7 @@ export const showAnalysisOverviewTool: MutantToolDefinition = {
       total_accessible_count: snapshot.total_accessible_count ?? displayedHypotheses.length,
       has_more: snapshot.has_more ?? false,
     };
+    if (snapshot.plan_notice) data.plan_notice = snapshot.plan_notice;
     const envelope: ToolResponse = {
       contract_version: CONTRACT_VERSION,
       analysis_version: response.analysis_version,
@@ -81,7 +85,9 @@ export const showAnalysisOverviewTool: MutantToolDefinition = {
       data: data as unknown as Record<string, unknown>,
       error: null,
     };
-    return respond(envelope, runtime, {
+    // The notice is validated (and its optional link checked) before it is sent
+    // to the host; legacy upgrade fields are stripped defensively.
+    return respond(withValidatedPlanNotice(envelope, runtime.config), runtime, {
       operation: "show_analysis_overview",
       meta: {
         ...dnaImportUiMeta(),

@@ -1,9 +1,11 @@
 import {
   CONTRACT_VERSION,
   RESOLVE_FOLLOWUPS_OPERATION,
+  type PlanNotice,
   type ShowAnalysisFollowupsData,
   type ToolResponse,
 } from "../contract.js";
+import { withValidatedPlanNotice } from "../presentation/plan-notice.js";
 import { showAnalysisFollowupsInputSchema, showAnalysisFollowupsOutputSchema } from "../schemas/index.js";
 import { ANALYSIS_FOLLOWUPS_UI_URI, analysisFollowupsUiMeta } from "../ui/analysis-followups/resource.js";
 import { respond } from "./respond.js";
@@ -75,8 +77,9 @@ export const showAnalysisFollowupsTool: MutantToolDefinition = {
       // A stale version, a locked id, or an unready analysis is an expected
       // application state: forward the structured error envelope rather than
       // throwing, and attach no UI descriptor, so a failed verification can
-      // never mount a card bound to the wrong finding.
-      return respond(response, runtime, {
+      // never mount a card bound to the wrong finding. Any legacy upgrade field
+      // is stripped before it can reach the host.
+      return respond(withValidatedPlanNotice(response, runtime.config), runtime, {
         operation: "show_analysis_followups",
       });
     }
@@ -88,7 +91,7 @@ export const showAnalysisFollowupsTool: MutantToolDefinition = {
       displayed_analysis_version?: string | null;
       displayed_hypotheses?: ShowAnalysisFollowupsData["displayed_hypotheses"];
       actions?: ShowAnalysisFollowupsData["actions"];
-      upgrade?: ShowAnalysisFollowupsData["upgrade"];
+      plan_notice?: PlanNotice;
       source?: string;
     };
 
@@ -101,7 +104,7 @@ export const showAnalysisFollowupsTool: MutantToolDefinition = {
       displayed_hypotheses: resolved.displayed_hypotheses ?? [],
       actions: resolved.actions ?? [],
     };
-    if (resolved.upgrade) data.upgrade = resolved.upgrade;
+    if (resolved.plan_notice) data.plan_notice = resolved.plan_notice;
     if (resolved.source) data.source = resolved.source;
 
     const envelope: ToolResponse = {
@@ -111,7 +114,7 @@ export const showAnalysisFollowupsTool: MutantToolDefinition = {
       data: data as unknown as Record<string, unknown>,
       error: null,
     };
-    return respond(envelope, runtime, {
+    return respond(withValidatedPlanNotice(envelope, runtime.config), runtime, {
       operation: "show_analysis_followups",
       meta: {
         ...analysisFollowupsUiMeta(),

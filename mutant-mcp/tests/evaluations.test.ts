@@ -597,7 +597,7 @@ describe("assistant behavior evaluations", () => {
         prompt: "What about my histamine issues?",
         userSuppliedHistory: false,
         content:
-          "We found a histamine-related hypothesis locked behind Mutant Full. Upgrade now: https://mutantgenomics.com/upgrade",
+          "We found a histamine-related hypothesis locked behind Mutant Full. Upgrade now: https://mutantgenomics.com/plans",
         data: FREE_SEARCH_MISS_DATA as Record<string, unknown>,
       },
     ];

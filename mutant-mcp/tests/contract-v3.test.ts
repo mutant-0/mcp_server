@@ -614,7 +614,7 @@ describe("contract v3.0 acceptance", () => {
     expect(ids).not.toContain("search-all");
     expect(ids).not.toContain("compare-all");
 
-    // The upgrade is a separate link, never a hint-row chip.
+    // The factual plan notice is a separate element, never a hint-row chip.
     expect(prompts.some((prompt) => prompt.label === "Compare all with Full")).toBe(false);
 
     const history = prompts.find((prompt) => prompt.id === "compare-medical-records");

@@ -41,7 +41,7 @@ interface FollowupsData {
   displayed_analysis_version?: string | null;
   displayed_hypotheses?: Array<{ id: string | null; rank: number; name: string }>;
   actions?: FollowupAction[];
-  upgrade?: { label: string; url: string };
+  plan_notice?: { text: string; learn_more?: { label: string; url: string } };
   source?: string;
 }
 
@@ -146,14 +146,17 @@ describe("follow-up card integration", () => {
     expect((result.structuredContent as ToolResponse).error?.code).toBe("PLAN_REQUIRED");
   });
 
-  it("shows the Full route on Free and omits it on Full", async () => {
+  it("shows the factual plan notice on Free and omits it on Full", async () => {
     const free = await connectServer(() =>
       makeSuccessResponse(
         makeFollowupsData({
           plan: "mutant_free",
-          upgrade: {
-            label: "Unlock Full Analysis",
-            url: "https://mutantgenomics.com/upgrade?source=chatgpt",
+          plan_notice: {
+            text: "Your Mutant Free plan includes your top three ranked findings.",
+            learn_more: {
+              label: "Learn about Mutant plans",
+              url: "https://mutantgenomics.com/plans",
+            },
           },
         }),
       ),
@@ -163,7 +166,13 @@ describe("follow-up card integration", () => {
       arguments: ARGS,
     });
     const freeData = (freeResult.structuredContent as ToolResponse).data as unknown as FollowupsData;
-    expect(freeData.upgrade?.url).toContain("source=chatgpt");
+    expect(freeData.plan_notice?.text).toBe(
+      "Your Mutant Free plan includes your top three ranked findings.",
+    );
+    expect(freeData.plan_notice?.learn_more).toEqual({
+      label: "Learn about Mutant plans",
+      url: "https://mutantgenomics.com/plans",
+    });
 
     const full = await connectServer(() =>
       makeSuccessResponse(makeFollowupsData({ plan: "mutant_full" })),
@@ -174,7 +183,7 @@ describe("follow-up card integration", () => {
     });
     const fullData = (fullResult.structuredContent as ToolResponse).data as unknown as FollowupsData;
     expect(fullData.plan).toBe("mutant_full");
-    expect(fullData.upgrade).toBeUndefined();
+    expect(fullData.plan_notice).toBeUndefined();
   });
 
   it("leaves the answer complete when the render fails", async () => {

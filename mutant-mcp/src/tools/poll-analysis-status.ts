@@ -1,6 +1,6 @@
 import type { ToolResponse } from "../contract.js";
 import { withoutPollingHints } from "../presentation/processing.js";
-import { withPublicUpgradeUrl } from "../presentation/upgrade.js";
+import { withValidatedPlanNotice } from "../presentation/plan-notice.js";
 import { analysisStatusOutputSchema } from "../schemas/index.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
@@ -39,7 +39,7 @@ export const pollAnalysisStatusTool: MutantToolDefinition = {
       runtime.requestId,
     );
     return respond(
-      withoutPollingHints(withPublicUpgradeUrl(response, runtime.config)),
+      withoutPollingHints(withValidatedPlanNotice(response, runtime.config)),
       runtime,
       { operation: "poll_analysis_status" },
     );

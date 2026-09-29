@@ -36,7 +36,7 @@ export function analysisFollowupsUiMeta(): Record<string, unknown> {
  *
  * The document is self-contained and its Content Security Policy is intentionally
  * empty: the card reaches the server only through the host bridge, and the
- * upgrade destination goes through `App.openLink`, so it needs no connect or
+ * plan-information destination goes through `App.openLink`, so it needs no connect or
  * resource domains.
  *
  * Read-only: this resource carries no account data, so it is the same document

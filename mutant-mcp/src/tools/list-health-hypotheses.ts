@@ -1,4 +1,4 @@
-import { withPublicUpgradeUrl } from "../presentation/upgrade.js";
+import { withValidatedPlanNotice } from "../presentation/plan-notice.js";
 import { hypothesisListOutputSchema, listHealthHypothesesInputSchema } from "../schemas/index.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
@@ -28,7 +28,7 @@ export const listHealthHypothesesTool: MutantToolDefinition = {
     "Full will find it. State the wider-search sentence only when broader_ranked_search_available is true; " +
     "a Full no_match_in_ranked_search_fields is limited to the catalog search fields (name, summary, " +
     "plain-language summary, and type), not every biological evidence layer. Do not compare unseen scores, " +
-    "invent gene or variant mechanisms, or pitch an upgrade; the entitlement boundary is a factual scope " +
+    "invent gene or variant mechanisms, or pitch a paid plan change; the entitlement boundary is a factual scope " +
     "statement, and follow-up questions about plan capabilities may be answered from search_scope.",
   scope: "analysis.read",
   inputSchema: listHealthHypothesesInputSchema,
@@ -36,7 +36,7 @@ export const listHealthHypothesesTool: MutantToolDefinition = {
   annotations: readOnlyAnnotations,
   handler: async (args, runtime) =>
     respond(
-      withPublicUpgradeUrl(
+      withValidatedPlanNotice(
         await runtime.client.invoke("list_health_hypotheses", args, runtime.user, runtime.requestId),
         runtime.config,
       ),

@@ -1,4 +1,4 @@
-# Mutant MCP contract (3.0.0)
+# Mutant MCP contract (3.1.0)
 
 This document describes the implemented contract between the MCP Lambda
 (`mutant-mcp`) and the report-generator backend (`report-generator/mcp`). The
@@ -6,13 +6,32 @@ backend is authoritative for every business rule and returns the typed `data`
 shapes; the Lambda is a thin, authenticated transport that adds only the
 MCP-facing presentation (`content`, `suggested_prompts`, widget `_meta`).
 
-Version 3.0.0 is a breaking revision with **no compatibility shims**. The
-removed 2.x fields (`analysis_status`, `regenerate`, `regeneration`,
-`current_results_usable`, `optional_actions`) no longer exist on the wire, and
-the detail tool is named **`explain_health_hypothesis`** (there is no
-`get_hypothesis_details` alias).
+Version 3.1.0 replaces the Free-plan upgrade offer surface. The public
+`upgrade: {label, url}` object and `error.upgrade_url` are gone, replaced by an
+optional, server-authored **`plan_notice`** — a factual sentence plus an optional
+informational link. 3.1.0 is otherwise the 3.0.0 contract, which was a breaking
+revision with **no compatibility shims**. The removed 2.x fields
+(`analysis_status`, `regenerate`, `regeneration`, `current_results_usable`,
+`optional_actions`) no longer exist on the wire, and the detail tool is named
+**`explain_health_hypothesis`** (there is no `get_hypothesis_details` alias).
 
-What changed from 2.0.0:
+What changed in 3.1.0:
+
+- The Free-plan notice is a server-authored `plan_notice`
+  (`{text, learn_more?}`). There is no upgrade CTA, no `/cart` link, and no
+  promotional copy anywhere in the contract.
+- `plan_notice` is attached only where the response explains a real access
+  limit: `show_analysis_overview`, `show_analysis_followups`, and the
+  `PLAN_REQUIRED` error. `get_analysis_status` carries no plan messaging.
+- The notice's optional link points at a reviewed informational page on the
+  approved Mutant domain. It is configured by `MUTANT_PLAN_INFO_URL` and
+  validated; an absent or invalid link is omitted, never substituted with a
+  checkout destination.
+- During the rollout window the MCP transport also strips any legacy 3.0.0
+  `upgrade` / `upgrade_url` field from every public response, so a mixed-version
+  pair can never expose the retired surface.
+
+What changed in 3.0.0:
 
 - One canonical `experience_state` enum plus authoritative `capabilities`,
   replacing the overlapping readiness flags the model had to combine.
@@ -72,7 +91,7 @@ error, or `ok: false` with data).
 
 ```json
 {
-  "contract_version": "3.0.0",
+  "contract_version": "3.1.0",
   "analysis_version": "rev42-v3.0.0",
   "ok": true,
   "data": { "…": "tool-specific" },
@@ -82,16 +101,22 @@ error, or `ok: false` with data).
 
 ```json
 {
-  "contract_version": "3.0.0",
+  "contract_version": "3.1.0",
   "analysis_version": null,
   "ok": false,
   "data": null,
   "error": {
     "code": "PLAN_REQUIRED",
-    "message": "This request is outside your Free top-three analysis.",
+    "message": "This request is outside the top three available with your Mutant Free plan.",
     "retryable": false,
     "required_plan": "mutant_full",
-    "upgrade_url": "https://mutantgenomics.com/upgrade?source=chatgpt",
+    "plan_notice": {
+      "text": "This request is outside the top three available with your Mutant Free plan.",
+      "learn_more": {
+        "label": "Learn about Mutant plans",
+        "url": "https://mutantgenomics.com/plans"
+      }
+    },
     "next_action": {
       "tool": "get_analysis_context",
       "reason": "Continue with the accessible top three."
@@ -110,6 +135,10 @@ error, or `ok: false` with data).
   thrown exception.
 - `error.reason` is present only for readiness diagnostics
   (`core.cache_identity.REASON_*`), never as free-form prose.
+- `error.plan_notice` is the factual Free-plan notice, present only on
+  `PLAN_REQUIRED`. Machine-readable access metadata (`required_plan`) stays
+  separate from the user-facing explanation. There is no `upgrade` object and no
+  `upgrade_url` field anywhere in the envelope.
 
 ### `content` is a deterministic summary, not a JSON mirror
 
@@ -367,8 +396,7 @@ Input: `{}`. A successful call even with no analysis.
     "reason": "Resubmit DNA to regenerate the analysis with the current scoring engine.",
     "arguments": { "mode": "regenerate" }
   },
-  "suggested_prompts": [ /* added by the Lambda, max 5 */ ],
-  "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/upgrade?source=chatgpt" }
+  "suggested_prompts": [ /* added by the Lambda, max 5 */ ]
 }
 ```
 
@@ -389,7 +417,10 @@ Input: `{}`. A successful call even with no analysis.
   `all_analyzed_markers` for Full. `access_expires_at` is present only when
   access is scheduled to end (never a renewal date).
 - `capabilities` mirrors the state model above.
-- `upgrade` is present only for a Free account with locked findings.
+- There is no plan messaging on this response: `plan_notice` never appears on
+  `get_analysis_status`. The factual notice belongs only to the responses that
+  explain an access limit (`show_analysis_overview`, `show_analysis_followups`,
+  `PLAN_REQUIRED`).
 - There is no `regenerate`, `regeneration`, `current_results_usable`,
   `optional_actions`, or `analysis_status` field. Readiness is expressed exactly
   once, by `experience_state`.
@@ -517,10 +548,13 @@ three hypotheses, and next-question prompts. It is not a listing tool.
     "returned": 3,
     "unlocked": 3,
     "locked": 9,
-    "scope_message": "Your top three ranked hypotheses are fully unlocked. Mutant Full can search 9 additional ranked hypotheses."
+    "scope_message": "Your top three ranked findings are available. 9 additional ranked findings are outside your plan's current scope."
   },
   "preview": [ /* up to three HypothesisSummary, rank order */ ],
-  "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/upgrade?source=chatgpt" },
+  "plan_notice": {
+    "text": "Your Mutant Free plan includes your top three ranked findings.",
+    "learn_more": { "label": "Learn about Mutant plans", "url": "https://mutantgenomics.com/plans" }
+  },
   "suggested_prompts": [ /* added by the Lambda, max 5 */ ]
 }
 ```
@@ -547,8 +581,11 @@ three hypotheses, and next-question prompts. It is not a listing tool.
   `unlocked` is the count of accessible hypotheses; `locked` is the count the
   current plan cannot reach (zero for Full). `scope_message` states the actual
   scope and never implies the three previews are the whole of a Full analysis.
-- `upgrade` is present only for a Free account whose analysis has `locked > 0`.
-  Full never receives upgrade messaging.
+- `plan_notice` is present only for a Free account whose analysis has
+  `locked > 0`. Full never receives plan messaging, and the notice never exposes
+  a locked identifier. Its optional `learn_more` link is validated to the
+  approved Mutant domain; when no approved URL is configured the `text` is still
+  present and `learn_more` is omitted.
 - Free never exposes locked hypothesis ids, names, scores, ranks, or tags.
 
 For Full, `scope_message` reads: "Your complete ranked analysis is available.
@@ -661,7 +698,7 @@ matches a locked finding is indistinguishable from one that matches nothing
 anywhere: locked names, ids, ranks, scores, and per-query matches are never
 searched or disclosed. The outcome is tied to the catalog search fields above,
 not to every biological evidence layer. This is a successful response within
-scope, not a `PLAN_REQUIRED` error, and it carries no `upgrade` offer.
+scope, not a `PLAN_REQUIRED` error, and it carries no plan notice.
 
 #### Model-facing `content`
 
@@ -1103,7 +1140,11 @@ analysis in the card. It calls the internal backend operation
   "displayed_analysis_version": "rev42-v3.0.0",
   "displayed_hypotheses": [{ "id": "RC_A", "rank": 1, "name": "Alpha" }],
   "total_accessible_count": 92,
-  "has_more": true
+  "has_more": true,
+  "plan_notice": {
+    "text": "Your Mutant Free plan includes your top three ranked findings.",
+    "learn_more": { "label": "Learn about Mutant plans", "url": "https://mutantgenomics.com/plans" }
+  }
 }
 ```
 
@@ -1114,7 +1155,9 @@ fixed top three, so `displayed_hypotheses` is exactly the list the card renders.
 `total_accessible_count` is how many ranked findings the account can reach and
 `has_more` is `total_accessible_count > len(displayed_hypotheses)`, letting the
 card say "top 10 of 92" and keep its **Search all findings** action without
-fetching or appending the rest. The complete ranked set remains reachable through
+fetching or appending the rest. `plan_notice` is attached only for a Free account
+whose analysis has additional locked findings; Full and a Free analysis with
+nothing locked omit it. The complete ranked set remains reachable through
 `list_health_hypotheses` search. If the analysis is not ready, the operation returns the
 same structured `ANALYSIS_PROCESSING` / `ANALYSIS_NOT_READY` / `DNA_NOT_AVAILABLE`
 envelope an analytical tool would, and `show_analysis_overview` forwards it
@@ -1140,8 +1183,8 @@ accepts:
 | `source` | Optional, `^[a-z0-9_]{1,32}$`. Non-personal diagnostic slug, never echoed to the user. |
 
 It returns the bound revision, the resolved `{id, rank, name}` set, the `intent`,
-the `plan`, **at most two** server-selected actions, and `upgrade` only when a
-Free account has locked hypotheses:
+the `plan`, **at most two** server-selected actions, and a factual `plan_notice`
+only when a Free account has locked hypotheses:
 
 ```json
 {
@@ -1162,7 +1205,10 @@ Free account has locked hypotheses:
       "action": { "analysis_version": "rev42-v3.0.0", "hypothesis_id": "RC_A", "intent": "explain" }
     }
   ],
-  "upgrade": { "label": "Unlock Full Analysis", "url": "https://mutantgenomics.com/upgrade?source=chatgpt" }
+  "plan_notice": {
+    "text": "Your Mutant Free plan includes your top three ranked findings.",
+    "learn_more": { "label": "Learn about Mutant plans", "url": "https://mutantgenomics.com/plans" }
+  }
 }
 ```
 
@@ -1236,7 +1282,7 @@ server-derived identity, and returns a narrowed response.
 Input: `{}`. Scope `analysis.read`. Calls `resolve_analysis_snapshot` and mounts
 the shared Apps SDK card. Its result is
 `{ ui_rendered: true, mode: "overview", displayed_analysis_version,
-displayed_hypotheses, total_accessible_count, has_more }` plus the UI descriptor
+displayed_hypotheses, total_accessible_count, has_more, plan_notice? }` plus the UI descriptor
 and widget-only `mutant.mode: "overview"`. `displayed_hypotheses` is capped at 10
 for Full and 3 for Free and is exactly what the card renders; the card shows a
 "top N of M" cue from `total_accessible_count` and keeps **Search all findings**
@@ -1255,7 +1301,7 @@ follow-up card. It is eligible only for an explicit finding explanation or a
 direct finding comparison, and only when the actions are relevant next steps
 (see [Tools](#tools)); the backend assumes eligibility and only verifies and binds
 the revision and ids. Its result is `{ ui_rendered: true, mode: "followups", intent,
-plan, displayed_analysis_version, displayed_hypotheses, actions, upgrade? }` plus
+plan, displayed_analysis_version, displayed_hypotheses, actions, plan_notice? }` plus
 the UI descriptor and widget-only `mutant.mode: "followups"`. The model-facing
 `content` is a single line (`Follow-up card displayed.`) that never repeats the
 answer. On any verification failure (stale version, locked or unknown id,
@@ -1414,9 +1460,10 @@ Two 3.0.0 behaviors on the completion view:
   the exact `prompt` prose through the same host follow-up path (once per click),
   and the chip's structured `action.analysis_version` travels with the follow-up
   so the answer binds to the displayed snapshot. The chip label is shown; the
-  prose is never rendered inside the card. Free accounts with an upgrade URL from
-  the status or context response also see an `Upgrade to Mutant Full` action that
-  asks the host to open that URL.
+  prose is never rendered inside the card. A Free account with locked findings
+  also sees the factual `plan_notice` text and, when an approved URL is
+  configured, a secondary `Learn about Mutant plans` link that asks the host to
+  open it. There is no upgrade action and no checkout link.
 - **Refresh banner.** When `experience_state` is `READY_REFRESH_AVAILABLE`, the
   card shows a refresh banner explaining that the current results remain usable
   and why resubmission is requested. The status result mounts this card directly
@@ -1440,14 +1487,15 @@ can be hosted and cached independently of the large bundle. Like the other
 resource its URI is stable and unversioned, it is served as a single
 self-contained `text/html;profile=mcp-app` document identical for every
 authenticated account, and its `_meta.ui.csp` is empty (the card reaches the
-server only through the host bridge, and the upgrade destination goes through
+server only through the host bridge, and the plan-information destination goes through
 `App.openLink`). `scripts/build-ui.mjs` bundles it as a third entry into
 `src/ui/analysis-followups/generated/html.ts`.
 
 The card reads the tool result from the host, renders a context label
 (`Explore this finding` for an explanation, `Keep exploring` for a comparison),
 at most two action buttons bound to the server-selected prompts and ids, and —
-Free only — a quiet `Explore all findings with Full` link. A Full account instead
+Free only, when the result carries one — the factual `plan_notice` text with an
+optional secondary `Learn about Mutant plans` link. A Full account instead
 sees a search-all discovery hint. It never renders the generated answer, the
 hypothesis prose, or any health context, and it renders nothing at all when the
 result is missing or an error.
@@ -1488,7 +1536,8 @@ add a `suggested_prompts` array to their `data`
   comparison chip as its visually primary action with the helper line `Uses only
   health history or records you share in this chat.`, and the card sends the
   server-selected prompt once per click; Free accounts with locked findings get no
-  Full-scope chip, only the separate `Upgrade to Mutant Full` link), and
+  Full-scope chip, and the separate element is the factual `Learn about Mutant
+  plans` link from the notice), and
   hypothesis detail (why ranked / evidence / confirmation /
   what changes it / clinician).
 - `prompt` is exact user-visible natural language. It must never contain an
@@ -1536,7 +1585,7 @@ states never reach a transport or MCP exception.
 | `ANALYSIS_NOT_FOUND`, `ANALYSIS_FAILED` | No report row / the run did not complete. |
 | `ANALYSIS_VERSION_CHANGED` | The caller pinned a revision that is no longer current, or a cursor is bound to another revision (`next_action`: `show_analysis_overview`). |
 | `REGENERATION_REQUIRED` | The saved analysis can never be served (engine change / empty) and only a regeneration clears it (`next_action`: `show_dna_import` with `{mode: "regenerate"}`). |
-| `PLAN_REQUIRED` | Free request outside the accessible scope (includes `required_plan` + `upgrade_url`). |
+| `PLAN_REQUIRED` | Free request outside the accessible scope (includes `required_plan` + `plan_notice`). |
 | `SCOPE_REQUIRED` | Free `get_genetic_context` without an accessible hypothesis. |
 | `HYPOTHESIS_NOT_FOUND`, `PATTERN_NOT_FOUND` | Unknown id within the accessible scope. |
 | `EVIDENCE_NOT_AVAILABLE` | The requested evidence category has no stored records for this hypothesis. |
@@ -1876,14 +1925,14 @@ The contract is covered by:
   processing with and without a usable active analysis, refresh completing
   between calls → `ANALYSIS_VERSION_CHANGED`), `capabilities`,
   `next_action`, and `can_query_analysis == active_analysis.usable`.
-- `report-generator/mcp/tests/test_mcp_handlers.py` — the 3.0.0 status model,
+- `report-generator/mcp/tests/test_mcp_handlers.py` — the 3.1.0 status model,
   `resolve_analysis_snapshot` and version-mismatch rejection,
   `resolve_analysis_followups` (bound actions, stale pin, locked/unknown id,
-  Free/Full upgrade visibility, argument validation, and that the card carries no
-  evidence or history), the context
+  Free/Full `plan_notice` visibility and gating, argument validation, and that the
+  card carries no evidence or history), the context
   interpretation-contract shape (version `2.6` incl. `evidence_explanation_rules`
-  and `evidence_model`), access-summary counts and Free/Full upgrade behavior,
-  locked-hypothesis non-leakage, `EVIDENCE_NOT_AVAILABLE`, `kind: "modules"` with
+  and `evidence_model`), access-summary counts and the neutral Free scope message,
+  the notice copy and its optional validated link, locked-hypothesis non-leakage, `EVIDENCE_NOT_AVAILABLE`, `kind: "modules"` with
   and without `include_context`, dual module/pattern roles on `kind: "variants"`,
   the legacy `unknown` fallback, genetic-context rsID dedupe with
   `pattern_memberships`, the renamed plan/scope codes, and that every lifecycle
@@ -1960,13 +2009,14 @@ The contract is covered by:
 - `mutant-mcp/tests/followups.test.ts` — follow-up card integration: one card per
   answer with every action pinned to the answer's revision and ids, a
   single-line model-facing text, `ANALYSIS_VERSION_CHANGED` / `PLAN_REQUIRED`
-  statuses instead of silent switches, Free vs Full upgrade visibility, and a
+  statuses instead of silent switches, Free vs Full plan-notice visibility, and a
   failed render that leaves the answer intact.
 - `mutant-mcp/tests/analysis-followups-ui.test.tsx` — the compact card renders at
   most two actions, sends the server-selected prompt (with its heading) on click,
   disables the clicked button while sending, shows and persists the `role="status"`
-  acknowledgment, blocks a stale click with the recovery path, opens the tagged
-  upgrade route, never repeats the answer or the full prompt, renders nothing on
+  acknowledgment, blocks a stale click with the recovery path, renders the factual
+  plan notice and its informational link (and the text alone when no approved URL
+  exists), never repeats the answer or the full prompt, renders nothing on
   an error result, and stays single-column at a narrow viewport.
 - `mutant-mcp/tests/ui-resource.test.ts` — both UI resource URIs (mime type,
   stable unversioned pointer, self-contained document, empty CSP, no portal auth

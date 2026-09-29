@@ -36,7 +36,7 @@ new MutantMcpStack(app, "MutantMcpStack", {
   maxRequestBytes: process.env.MUTANT_MAX_REQUEST_BYTES
     ? Number(process.env.MUTANT_MAX_REQUEST_BYTES)
     : undefined,
-  upgradeUrl: process.env.MUTANT_UPGRADE_URL || undefined,
+  planInfoUrl: process.env.MUTANT_PLAN_INFO_URL || undefined,
   devMode: process.env.MUTANT_DEV_MODE === "true",
 });
 

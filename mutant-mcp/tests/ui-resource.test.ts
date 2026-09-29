@@ -156,12 +156,16 @@ describe("analysis follow-up UI resource", () => {
     expect(html).toContain("ui/initialize");
     expect(html).toContain("tools/call");
     expect(html).toContain("postMessage");
-    // The two context labels and the Full route are the card's whole vocabulary.
+    // The two context labels, the factual plan notice, and its informational
+    // link label are the card's whole vocabulary.
     expect(html).toContain("Explore this finding");
     expect(html).toContain("Keep exploring");
-    expect(html).toContain("Explore all findings with Full");
+    expect(html).toContain("Learn about Mutant plans");
     // Navigation hint instead of a purchase prompt for Full accounts.
     expect(html).toContain("Search any ranked finding by topic");
+    // No legacy upgrade CTA survives anywhere in the served document.
+    expect(html).not.toContain("Upgrade to Mutant Full");
+    expect(html).not.toContain("Explore all findings with Full");
   });
 
   it("declares no CSP domains, because the card only uses the host bridge", async () => {

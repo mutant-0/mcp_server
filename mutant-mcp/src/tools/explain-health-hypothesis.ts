@@ -1,6 +1,6 @@
 import type { ToolResponse } from "../contract.js";
 import { withSuggestedPrompts } from "../presentation/prompts.js";
-import { withPublicUpgradeUrl } from "../presentation/upgrade.js";
+import { withValidatedPlanNotice } from "../presentation/plan-notice.js";
 import { explainHealthHypothesisInputSchema, explainHypothesisOutputSchema } from "../schemas/index.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
@@ -43,7 +43,7 @@ export const explainHealthHypothesisTool: MutantToolDefinition = {
       runtime.requestId,
     );
     return respond(
-      withSuggestedPrompts(withPublicUpgradeUrl(response, runtime.config), "explain_health_hypothesis"),
+      withSuggestedPrompts(withValidatedPlanNotice(response, runtime.config), "explain_health_hypothesis"),
       runtime,
       { operation: "explain_health_hypothesis" },
     );

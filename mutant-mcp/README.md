@@ -292,7 +292,7 @@ origin to fetch sibling assets from.
 | `MUTANT_OAUTH_SCOPE_DNA_IMPORT` | Scope required by `show_dna_import`, `get_snp_catalog`, and `create_report`. Empty (default) derives `<MUTANT_MCP_RESOURCE_URI>/dna.import`. |
 | `MUTANT_MCP_RESOURCE_URI` | Canonical RFC 9728 resource id (used in PRM + challenges, and as the scope's resource-server identifier). |
 | `MUTANT_CORS_ORIGINS` | Comma-separated browser origin allowlist. |
-| `MUTANT_UPGRADE_URL` | Upgrade URL returned to Free accounts (default `/upgrade`). |
+| `MUTANT_PLAN_INFO_URL` | Informational plan page for the Free-plan notice's learn-more link (default `/plans`; must be an https URL on `mutantgenomics.com`). |
 | `MUTANT_ONBOARDING_URL` | Onboarding URL. |
 | `MUTANT_REQUEST_TIMEOUT_MS` | Backend invocation deadline (default `20000`). |
 | `MUTANT_MAX_RESPONSE_BYTES` | Serialized response cap (default `512000`). |
@@ -348,7 +348,7 @@ Required GitHub **secrets**: `AWS_ROLE_ARN`, `MUTANT_SERVICE_LAMBDA_ARN`,
 `MUTANT_DEV_MODE`, `MUTANT_DOMAIN_NAME`, `MUTANT_API_MAPPING_KEY`.
 
 Required GitHub **variables**: `MUTANT_MCP_RESOURCE_URI`, `MUTANT_CORS_ORIGINS`,
-`MUTANT_UPGRADE_URL`, `MUTANT_REQUEST_TIMEOUT_MS`, `MUTANT_MAX_RESPONSE_BYTES`
+`MUTANT_PLAN_INFO_URL`, `MUTANT_REQUEST_TIMEOUT_MS`, `MUTANT_MAX_RESPONSE_BYTES`
 (optional: `MUTANT_SNP_CATALOG_MAX_BYTES`, `MUTANT_MAX_REQUEST_BYTES`).
 `MUTANT_OAUTH_SCOPE` and `MUTANT_OAUTH_SCOPE_DNA_IMPORT` are optional: leave them
 unset (or blank) to derive `<MUTANT_MCP_RESOURCE_URI>/analysis.read` and

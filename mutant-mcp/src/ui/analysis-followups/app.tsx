@@ -6,7 +6,7 @@
  * one identified finding or to compare findings. It
  * is navigation, not a summary: a context label, at most two action buttons
  * bound to the hypothesis ids and the analysis revision the answer already
- * covered, and - Free only - a quiet route to Mutant Full.
+ * covered, and - Free only - a factual notice explaining the top-three limit.
  *
  * The card never repeats the generated answer, never renders hypothesis prose,
  * and never asks for or displays health history. It talks to the host only
@@ -55,7 +55,11 @@ export interface FollowupsPayload {
   analysisVersion: string | null;
   hypotheses: Array<{ id: string | null; rank: number; name: string }>;
   actions: FollowupAction[];
-  upgradeUrl: string | null;
+  /**
+   * The server-authored factual Free-plan notice. Present only when the card
+   * explains a real access limit; the link is optional and validated.
+   */
+  planNotice: { text: string; learnMoreLabel: string | null; learnMoreUrl: string | null } | null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -72,7 +76,7 @@ function firstString(...values: unknown[]): string | null {
 }
 
 /** Only allow browser-safe destinations supplied by the analysis service. */
-function safeUpgradeUrl(value: string | null): string | null {
+function safePlanInfoUrl(value: string | null): string | null {
   if (!value) return null;
   try {
     const url = new URL(value);
@@ -80,6 +84,19 @@ function safeUpgradeUrl(value: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+/** Read the optional factual plan notice out of a payload. */
+function planNoticeFrom(value: unknown): FollowupsPayload["planNotice"] {
+  const row = asRecord(value);
+  const text = firstString(row?.text);
+  if (!text) return null;
+  const learnMore = asRecord(row?.learn_more);
+  return {
+    text,
+    learnMoreLabel: firstString(learnMore?.label),
+    learnMoreUrl: safePlanInfoUrl(firstString(learnMore?.url)),
+  };
 }
 
 /**
@@ -148,7 +165,6 @@ export function followupsFrom(data: unknown): FollowupsPayload | null {
     }
   }
 
-  const upgrade = asRecord(row.upgrade);
   return {
     mode: "followups",
     intent,
@@ -157,7 +173,7 @@ export function followupsFrom(data: unknown): FollowupsPayload | null {
     hypotheses,
     // The server selects at most two; the client never invents more.
     actions: actions.slice(0, 2),
-    upgradeUrl: safeUpgradeUrl(firstString(upgrade?.url)),
+    planNotice: planNoticeFrom(row.plan_notice),
   };
 }
 
@@ -209,9 +225,14 @@ const styles = {
     fontSize: 12,
     color: "var(--color-text-secondary, #6b7280)",
   } as CSSProperties,
-  upgradeLink: {
+  planNotice: {
+    margin: "12px 0 0",
+    fontSize: 13,
+    color: "var(--color-text-secondary, #4b5563)",
+  } as CSSProperties,
+  planNoticeLink: {
     display: "inline-block",
-    marginTop: 12,
+    marginTop: 4,
     fontSize: 13,
     color: "var(--color-text-secondary, #4b5563)",
     textDecoration: "underline",
@@ -339,14 +360,14 @@ export function AnalysisFollowupsApp() {
     });
   }, [runAction]);
 
-  const openUpgrade = useCallback(
+  const openPlanInfo = useCallback(
     (url: string) => {
       if (!app) return;
       void app.openLink({ url }).then(
         (result) => {
-          if (result.isError) setHandoffError("The upgrade page could not be opened.");
+          if (result.isError) setHandoffError("The plan information page could not be opened.");
         },
-        () => setHandoffError("The upgrade page could not be opened."),
+        () => setHandoffError("The plan information page could not be opened."),
       );
     },
     [app],
@@ -372,19 +393,24 @@ export function AnalysisFollowupsApp() {
           </button>
         ))}
       </div>
-      {payload.upgradeUrl ? (
-        <a
-          href={payload.upgradeUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={styles.upgradeLink}
-          onClick={(event) => {
-            event.preventDefault();
-            openUpgrade(payload.upgradeUrl as string);
-          }}
-        >
-          Explore all findings with Full
-        </a>
+      {payload.planNotice ? (
+        <div style={styles.planNotice}>
+          <p style={{ margin: 0 }}>{payload.planNotice.text}</p>
+          {payload.planNotice.learnMoreUrl ? (
+            <a
+              href={payload.planNotice.learnMoreUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={styles.planNoticeLink}
+              onClick={(event) => {
+                event.preventDefault();
+                openPlanInfo(payload.planNotice?.learnMoreUrl as string);
+              }}
+            >
+              {payload.planNotice.learnMoreLabel ?? "Learn about Mutant plans"}
+            </a>
+          ) : null}
+        </div>
       ) : payload.plan === "mutant_full" ? (
         <p style={styles.hint}>Search any ranked finding by topic to keep exploring.</p>
       ) : null}

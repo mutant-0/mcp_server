@@ -1,11 +1,15 @@
 /**
- * Shared Mutant MCP contract (version 3.0.0).
+ * Shared Mutant MCP contract (version 3.1.0).
  *
  * These constants, error codes, and envelope types mirror the backend
  * implementation in `report-generator/mcp/contract.py`. The backend owns all
  * business semantics; the MCP Lambda is a thin, authenticated transport.
  *
- * 3.0.0 is a clean break. The response contract is now:
+ * 3.1.0 replaces the Free-plan upgrade offer surface: the public
+ * `upgrade: {label, url}` object and `error.upgrade_url` are gone, replaced by an
+ * optional, server-authored `plan_notice` (a factual sentence plus an optional
+ * informational link). It is otherwise the 3.0.0 contract, which was a clean
+ * break from 2.0.0:
  *
  *  - every expected application failure is returned as `ok:false` with a
  *    structured `error.code` (never thrown through the MCP transport);
@@ -19,7 +23,7 @@
  * `regeneration`, `current_results_usable`, and `optional_actions`.
  */
 
-export const CONTRACT_VERSION = "3.0.0";
+export const CONTRACT_VERSION = "3.1.0";
 
 /**
  * Analysis tools. These require `analysis.read`.
@@ -134,7 +138,13 @@ export interface McpApplicationError {
 
   next_action?: McpNextAction;
   required_plan?: string;
-  upgrade_url?: string;
+  /**
+   * The factual Free-plan access notice, when this error explains a plan
+   * boundary. Machine-readable access metadata (`required_plan`) stays separate
+   * from this user-facing explanation; it never carries an upgrade CTA or a
+   * transactional URL.
+   */
+  plan_notice?: PlanNotice;
   retry_after_seconds?: number;
   /**
    * URI-form scope required by the tool that produced this error. Present on
@@ -320,8 +330,6 @@ export interface AnalysisStatusData {
   next_action?: McpNextAction;
 
   suggested_prompts?: PromptSuggestion[];
-
-  upgrade?: UpgradeOffer;
 }
 
 /** The `show_analysis_overview` payload, bound to one immutable snapshot. */
@@ -338,10 +346,17 @@ export interface ShowAnalysisOverviewData {
     rank: number;
     name: string;
   }>;
-  /** How many ranked findings the account can reach, whether displayed or not. */
+  /**
+   * How many ranked findings the account can reach, whether displayed or not.
+   */
   total_accessible_count: number;
   /** True when more accessible findings exist beyond `displayed_hypotheses`. */
   has_more: boolean;
+  /**
+   * The factual Free-plan access notice, present only when this card explains a
+   * real access limit (a ready Free analysis with locked findings).
+   */
+  plan_notice?: PlanNotice;
 }
 
 /**
@@ -362,7 +377,11 @@ export interface ShowAnalysisFollowupsData {
   }>;
   /** At most two server-selected actions, each bound to the revision and id. */
   actions: PromptSuggestion[];
-  upgrade?: UpgradeOffer;
+  /**
+   * The factual Free-plan access notice, present only when this card explains a
+   * real access limit (a ready Free analysis with locked findings).
+   */
+  plan_notice?: PlanNotice;
   /** Non-personal diagnostic slug; never shown to the user. */
   source?: string;
 }
@@ -698,9 +717,23 @@ export interface AnalysisCoverage {
   classification?: "limited" | "moderate" | "broad";
 }
 
-export interface UpgradeOffer {
+/**
+ * The factual Free-plan access notice. Server-authored; the MCP layer only
+ * validates the optional link, never rewrites the copy.
+ */
+export interface PlanNoticeLearnMore {
   label: string;
   url: string;
+}
+
+export interface PlanNotice {
+  /** The factual sentence, e.g. "Your Mutant Free plan includes your top three ranked findings." */
+  text: string;
+  /**
+   * The optional informational plan link. Omitted when no approved URL is
+   * configured; never a checkout/cart or upgrade CTA.
+   */
+  learn_more?: PlanNoticeLearnMore;
 }
 
 /**
@@ -712,7 +745,11 @@ export interface AnalysisContextData {
   coverage: AnalysisCoverage;
   access: AccessSummary;
   preview: HypothesisSummary[];
-  upgrade?: UpgradeOffer;
+  /**
+   * The factual Free-plan access notice, present only when this response
+   * explains a real access limit (a ready Free analysis with locked findings).
+   */
+  plan_notice?: PlanNotice;
   suggested_prompts: PromptSuggestion[];
 }
 
