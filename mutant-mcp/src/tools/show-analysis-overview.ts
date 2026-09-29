@@ -24,10 +24,12 @@ export const showAnalysisOverviewTool: MutantToolDefinition = {
     "Display the Mutant analysis card with accessible findings and suggested questions. " +
     'Call this for any broad opening question ("What are my top hypotheses?", "What did Mutant ' +
     'find?", "Show my results", or a general overview) and when a user opens Mutant: when ' +
-    "get_analysis_status reports experience_state READY (or a usable refresh) with " +
-    "can_show_overview true, call this tool in the same turn and let the card present the " +
-    "results. The card is the display route for the ranked findings; do not answer the same " +
-    "question with list_health_hypotheses and do not restate the card's list in prose. " +
+    "get_analysis_status reports experience_state READY, READY_REFRESH_AVAILABLE, or " +
+    "READY_REFRESH_PROCESSING with can_show_overview true, call this tool in the same turn and " +
+    "let the card present the results. The card is the display route for the ranked findings; " +
+    "in the two READY_REFRESH_* states it also shows the optional refresh banner while the " +
+    "current results stay usable. Do not answer the same question with list_health_hypotheses " +
+    "and do not restate the card's list in prose. " +
     "The card is bound to the analysis revision returned here; pass displayed_analysis_version " +
     "on follow-up analysis calls. For a specific question, use the analysis tools directly " +
     "instead of reopening the card.",

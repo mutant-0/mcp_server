@@ -128,6 +128,7 @@ function pendingProcessing(startedAt: string): Record<string, unknown> {
 function statusResponse(
   status: "not_started" | "processing" | "ready" | "failed",
   overrides: Record<string, unknown> = {},
+  analysisVersion = "analysis_1",
 ): ToolResponse {
   const generatedAt = new Date(Date.now() - 30_000).toISOString();
   const base: Record<string, unknown> = { ...FREE_PLAN, ...overrides };
@@ -137,7 +138,7 @@ function statusResponse(
       experience_state: "READY",
       active_analysis: {
         status: "ready",
-        analysis_version: "analysis_1",
+        analysis_version: analysisVersion,
         generated_at: generatedAt,
         scoring_engine_version: "v3",
         usable: true,
@@ -145,7 +146,7 @@ function statusResponse(
       pending_analysis: null,
       capabilities: READY_CAPABILITIES,
       ...base,
-    }, "analysis_1");
+    }, analysisVersion);
   }
   if (status === "processing") {
     return makeSuccessResponse({
@@ -192,6 +193,24 @@ function refreshAvailable(overrides: Record<string, unknown> = {}): ToolResponse
     capabilities: { ...READY_CAPABILITIES, can_refresh_analysis: true },
     ...overrides,
   });
+}
+
+/**
+ * A usable analysis whose refresh is still being generated. The active analysis
+ * stays queryable and the card shows the optional refresh control.
+ */
+function refreshProcessing(overrides: Record<string, unknown> = {}): ToolResponse {
+  return statusResponse("ready", {
+    experience_state: "READY_REFRESH_PROCESSING",
+    pending_analysis: pendingProcessing(new Date(Date.now() - 10_000).toISOString()),
+    capabilities: { ...READY_CAPABILITIES, can_refresh_analysis: true },
+    ...overrides,
+  });
+}
+
+/** A ready analysis bound to an explicit revision, so version pinning is observable. */
+function readyAt(version: string): ToolResponse {
+  return statusResponse("ready", {}, version);
 }
 
 const FINDINGS = makeSuccessResponse({  items: [
@@ -1046,6 +1065,51 @@ describe("DNA import component", () => {
     await screen.findByText(/Alpha finding/i);
     await screen.findByRole("button", { name: "Compare with my history" });
     expect(screen.getByRole("button", { name: /refresh analysis/i })).toBeDefined();
+  });
+
+  it("shows the refresh control inside the overview while a refresh is processing", async () => {
+    const bridge = renderWith({ poll_analysis_status: refreshProcessing() }, { mode: "overview" });
+
+    await screen.findByText(/Analysis ready/i);
+    // The bound findings are the usable current analysis, not the pending refresh.
+    await screen.findByText(/Alpha finding/i);
+    // The optional refresh control is present; the current results stay usable.
+    expect(screen.getByText(/refreshing is optional/i)).toBeDefined();
+    expect(screen.getByRole("button", { name: /refresh analysis/i })).toBeDefined();
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
+  });
+
+  it("keeps the bound overview revision for follow-up actions after a status read", async () => {
+    const bridge = renderWith({
+      // The mount status reports one revision; the verification read the card
+      // makes before a follow-up reports the revision the overview pinned.
+      poll_analysis_status: (_args, call) => (call === 1 ? readyAt("analysis_2") : readyAt("analysis_1")),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+
+    // The host mounts the card from `show_analysis_overview`, which pins revision
+    // "analysis_1" and its findings.
+    bridge.sendToolResult(
+      makeSuccessResponse(
+        {
+          ui_rendered: true,
+          mode: "overview",
+          displayed_analysis_version: "analysis_1",
+          displayed_hypotheses: [{ id: "HYP_A", rank: 1, name: "Alpha finding" }],
+        },
+        "analysis_1",
+      ),
+      { mutant: { mode: "overview" } },
+    );
+    await screen.findByText(/Alpha finding/i);
+
+    // The follow-up resolves against the pinned revision, so it sends instead of
+    // being treated as a different analysis, and the displayed findings stay put.
+    fireEvent.click(screen.getByRole("button", { name: /explain finding #1/i }));
+    await waitFor(() => expect(bridge.messages).toHaveLength(1));
+    expect(screen.queryByText(/These results have changed/i)).toBeNull();
+    expect(screen.getByText(/Alpha finding/i)).toBeDefined();
   });
 
   it("opens the resubmission flow when the host selected a refresh", async () => {

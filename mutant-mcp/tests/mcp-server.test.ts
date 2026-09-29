@@ -177,17 +177,41 @@ describe("MCP server integration", () => {
     );
   });
 
-  it("mounts the refresh card from a ready status with an available update", async () => {
+  it("keeps the status tool card-free for a ready analysis with an available update", async () => {
     const { client } = await connectServer(() =>
       makeSuccessResponse(makeStatusData({ experience_state: "READY_REFRESH_AVAILABLE" })),
     );
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
-    const meta = result._meta as { ui?: { resourceUri?: string }; mutant?: { mode?: string } };
-    expect(meta.ui?.resourceUri).toBe("ui://mutant/dna-import/v1.html");
-    expect(meta.mutant?.mode).toBe("overview");
+    // Status is a routing read, never a UI response: no UI descriptor is carried
+    // even when a refresh is available, so a status-only path cannot imply a card.
+    const meta = result._meta as
+      | { ui?: unknown; mutant?: unknown; "openai/outputTemplate"?: unknown }
+      | undefined;
+    expect(meta?.ui).toBeUndefined();
+    expect(meta?.mutant).toBeUndefined();
+    expect(meta?.["openai/outputTemplate"]).toBeUndefined();
     expect((result.content as Array<{ text: string }>)[0]?.text).toContain(
       "refreshing is optional and your current results remain usable",
     );
+    expect((result.content as Array<{ text: string }>)[0]?.text).toContain("show_analysis_overview");
+  });
+
+  it("advertises the overview UI descriptor on the display tool", async () => {
+    const { client } = await connectServer(() => makeSuccessResponse(makeStatusData()));
+    const tools = await client.listTools();
+    const overview = tools.tools.find((tool) => tool.name === "show_analysis_overview");
+    const meta = overview?._meta as
+      | { ui?: { resourceUri?: string }; "openai/outputTemplate"?: string }
+      | undefined;
+    expect(meta?.ui?.resourceUri).toBe("ui://mutant/dna-import/v1.html");
+    expect(meta?.["openai/outputTemplate"]).toBe("ui://mutant/dna-import/v1.html");
+    // The general-purpose status tool declares no UI resource at all.
+    const status = tools.tools.find((tool) => tool.name === "get_analysis_status");
+    const statusMeta = status?._meta as
+      | { ui?: unknown; "openai/outputTemplate"?: unknown }
+      | undefined;
+    expect(statusMeta?.ui).toBeUndefined();
+    expect(statusMeta?.["openai/outputTemplate"]).toBeUndefined();
   });
 
   it("relays a structured error envelope and sets isError", async () => {

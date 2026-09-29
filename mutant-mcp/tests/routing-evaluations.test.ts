@@ -240,6 +240,61 @@ describe("routing evaluations", () => {
     });
   }
 
+  for (const state of ["READY_REFRESH_AVAILABLE", "READY_REFRESH_PROCESSING"] as const) {
+    it(`"Show my current Mutant findings." in ${state} routes status to one overview card`, async () => {
+      const status = makeStatusData({
+        experience_state: state,
+        capabilities: {
+          can_query_analysis: true,
+          can_show_overview: true,
+          can_refresh_analysis: true,
+          can_search_hypotheses: true,
+          can_explore_genetic_context: true,
+        },
+      });
+      const calls = await runScenario(
+        [{ name: "get_analysis_status" }, { name: "show_analysis_overview" }],
+        (operation) =>
+          operation === "get_analysis_status"
+            ? makeSuccessResponse(status)
+            : makeToolResponse(operation),
+      );
+
+      expect(calls.map((call) => call.name)).toEqual([
+        "get_analysis_status",
+        "show_analysis_overview",
+      ]);
+      // Status is a routing read: it never mounts a card, even when a refresh is
+      // available. The overview is the only UI-bearing call.
+      expect(carriesUi(callTo(calls, "get_analysis_status"))).toBe(false);
+
+      const overview = callTo(calls, "show_analysis_overview");
+      expect(overview?.isError).toBe(false);
+      expect(carriesUi(overview)).toBe(true);
+      expect(overview?.meta.ui?.resourceUri).toBe(DNA_IMPORT_UI_URI);
+      expect(overview?.meta.mutant?.mode).toBe("overview");
+      // The broad prompt is never answered with a duplicate prose list.
+      expect(calls.some((call) => call.name === "list_health_hypotheses")).toBe(false);
+    });
+  }
+
+  it.each([
+    "READY",
+    "READY_REFRESH_AVAILABLE",
+    "READY_REFRESH_PROCESSING",
+    "PROCESSING_INITIAL",
+    "REFRESH_PROCESSING_NO_USABLE_ANALYSIS",
+  ])("get_analysis_status advertises no UI resource in %s", async (experience) => {
+    const calls = await runScenario([{ name: "get_analysis_status" }], (operation) =>
+      operation === "get_analysis_status"
+        ? makeSuccessResponse(makeStatusData({ experience_state: experience }))
+        : makeToolResponse(operation),
+    );
+    expect(calls[0]?.meta.ui).toBeUndefined();
+    expect(calls[0]?.meta.mutant).toBeUndefined();
+    expect(calls[0]?.meta["openai/outputTemplate"]).toBeUndefined();
+  });
+
   it("never answers a broad opening question with list_health_hypotheses", async () => {
     // The non-compliant route: a prose list, or a list render, would carry no
     // overview descriptor at all. Asserting that is what makes this a real gate.

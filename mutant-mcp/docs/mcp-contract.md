@@ -135,10 +135,13 @@ UI descriptor, the security schemes, and widget hydration state (`mutant.mode`,
 and `mutant.displayed_analysis_version` for the overview card; the follow-up card
 adds `mutant.intent`). No tool data,
 genotypes, or account state is placed in `_meta`.
-When `experience_state` is `READY_REFRESH_AVAILABLE` or
-`READY_REFRESH_PROCESSING`, the `get_analysis_status` result also carries the
-shared UI descriptor and widget-only `mutant.mode: "overview"`, so the refresh
-card opens with findings and hints without a second tool call.
+The UI descriptor is declared on the display tools only
+(`show_analysis_overview`, `show_dna_import`, `show_analysis_followups`).
+`get_analysis_status` is a routing read: it advertises no UI resource and its
+result carries no UI descriptor in any state, including
+`READY_REFRESH_AVAILABLE` and `READY_REFRESH_PROCESSING`. In those ready refresh
+states the model routes to `show_analysis_overview` in the same turn, and that
+card opens with findings, hints, and the optional refresh control.
 
 ## Experience state model
 
@@ -238,7 +241,7 @@ Each tool maps to a distinct user goal. The routing contract is:
 
 | Tool | Responsibility |
 |---|---|
-| `get_analysis_status` | Establish connection, DNA readiness, the canonical `experience_state`, entitlement, capabilities, and the single next action. Model-facing. |
+| `get_analysis_status` | Establish connection, DNA readiness, the canonical `experience_state`, entitlement, capabilities, and the single next action. Model-facing. A routing read only: it declares no UI resource and mounts no card in any state. |
 | `poll_analysis_status` | App-only (`app` visibility) status read used by the DNA import component while it owns the processing experience. Same payload as `get_analysis_status`, minus polling hints and suggested prompts. |
 | `show_analysis_overview` | Resolve one immutable analysis snapshot and open the ready-analysis Apps SDK card bound to it. Model-facing; the deliberate render tool for broad opening questions. |
 | `show_analysis_followups` | Verify and open the compact Apps SDK follow-up card for an explicit finding explanation or a direct finding comparison, bound to the same revision and hypothesis ids. Model-facing; the only render tool for the follow-up card. |
@@ -252,9 +255,12 @@ Call `get_analysis_status` first. Read its `experience_state` and `capabilities`
 instead of inferring readiness. When `experience_state` is `NO_DNA`, call
 `show_dna_import` in the same turn. For any broad opening question ("What are my
 top hypotheses?", "What did Mutant find?", "Show my results", or a general
-overview), when `capabilities.can_show_overview` is true, call
+overview), when `experience_state` is `READY`, `READY_REFRESH_AVAILABLE`, or
+`READY_REFRESH_PROCESSING` and `capabilities.can_show_overview` is true, call
 `show_analysis_overview` in the same turn and let the card present the ranked
-findings and hints. A broad opening question is **never** answered with
+findings and hints. In the two `READY_REFRESH_*` states that card also shows the
+optional refresh control while the current results stay usable. The status read
+itself never mounts a card. A broad opening question is **never** answered with
 `list_health_hypotheses` and never with a prose list of the same findings. For a
 specific question, call `get_analysis_context` first, then use
 `list_health_hypotheses` for subsequent browsing, searching, sorting,
@@ -1905,24 +1911,32 @@ The contract is covered by:
 - `mutant-mcp/tests/routing-evaluations.test.ts` — runnable routing fixtures for
   broad opening questions and specific requests: broad prompts route
   `get_analysis_status` → `show_analysis_overview` and mount exactly one bound
-  overview card; specific prompts never mount the overview, and only an explicit
+  overview card, including in `READY_REFRESH_AVAILABLE` and
+  `READY_REFRESH_PROCESSING` where the status read itself mounts no card;
+  specific prompts never mount the overview, and only an explicit
   finding explanation ("Explain #1", "Explain the B12 finding") or a direct
   finding comparison ("Compare my top three") mounts one follow-up card, while
   topical/symptom questions ("What can you say about my thyroid issues?", a
   histamine topic search), a Free no-match answer, and a "fits my history"
   request mount none — even when the answer called `explain_health_hypothesis`. A
-  stale follow-up pin is a structured status with no card, and a processing state
-  mounts nothing. It also covers the three pre-message entry prompts across
-  `NO_DNA`, `READY` Free, `READY` Full, and processing, asserting status-first,
-  the state-appropriate card, that the ready comparison prompt mounts no compact
-  card (its history action would repeat the request), and that no history prose
-  reaches a catalog search.
+  stale follow-up pin is a structured status with no card, a processing state
+  mounts nothing, and `get_analysis_status` advertises no UI resource in any
+  ready, refresh, or processing state. It also covers the three pre-message entry
+  prompts across `NO_DNA`, `READY` Free, `READY` Full, and processing, asserting
+  status-first, the state-appropriate card, that the ready comparison prompt
+  mounts no compact card (its history action would repeat the request), and that
+  no history prose reaches a catalog search.
 - `mutant-mcp/tests/evaluations.test.ts` — assistant behavior evaluations,
   including a Free topic miss ("What about my histamine issues?"): the answer must
   name the searched top three, say the remaining ranked set was not checked,
   never echo the query or claim a finding exists or does not exist beyond that
-  scope, invent no mechanism, and carry no transactional or checkout link. Every
-  grader group has a negative control.
+  scope, invent no mechanism, and carry no transactional or checkout link. It also
+  covers a status-only trace answering "Why did you show the card? Was there an
+  error?": the model-facing content states the ready-and-refresh facts and routes
+  to the display tool without claiming a card rendered, and a compliant reply
+  offers to open the current findings without asserting a rendering or backend
+  failure, blaming itself, or exposing implementation fields. Every grader group
+  has a negative control.
 - `mutant-mcp/tests/golden-prompt-routing.test.ts` — replays the observed
   model-selected tool traces in `golden-prompt-routing-traces.json` (the three
   entry prompts plus the explicit-intent and topical prompts) through the real
@@ -1951,8 +1965,11 @@ The contract is covered by:
   the two target states omit `suggested_prompts` and (on the component path)
   `next_action` while returning the exact short content.
 - `mutant-mcp/tests/dna-import-ui.test.tsx` — prompt chips and the refresh
-  banner driven by `experience_state`, the card polling to a terminal state
-  (ready or failed) with no `next_action` or `suggested_prompts`, and the
+  banner driven by `experience_state` (including the refresh control inside the
+  overview for both `READY_REFRESH_AVAILABLE` and `READY_REFRESH_PROCESSING`), the
+  card polling to a terminal state (ready or failed) with no `next_action` or
+  `suggested_prompts`, the bound overview revision surviving a later status read
+  for follow-up actions, and the
   card-follow-up handoff: heading-prefixed prompts, the per-button `Sending…`
   state, the `Question sent: <label>` acknowledgment, no prompt echo, and the
   stale-card guard.

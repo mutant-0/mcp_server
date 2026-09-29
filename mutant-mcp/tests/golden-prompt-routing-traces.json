@@ -80,6 +80,39 @@
     },
     {
       "prompt": "Show my current Mutant findings.",
+      "state": "READY_REFRESH_AVAILABLE",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "expect": { "overview": true, "import": false, "followups": false },
+      "toolCalls": [
+        { "name": "get_analysis_status", "arguments": {} },
+        { "name": "show_analysis_overview", "arguments": {} }
+      ]
+    },
+    {
+      "prompt": "Show my current Mutant findings.",
+      "state": "READY_REFRESH_PROCESSING",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "expect": { "overview": true, "import": false, "followups": false },
+      "toolCalls": [
+        { "name": "get_analysis_status", "arguments": {} },
+        { "name": "show_analysis_overview", "arguments": {} }
+      ]
+    },
+    {
+      "prompt": "What are my top hypotheses?",
+      "state": "READY_REFRESH_AVAILABLE",
+      "provenance": "pending-manual-capture",
+      "capturedAt": null,
+      "expect": { "overview": true, "import": false, "followups": false },
+      "toolCalls": [
+        { "name": "get_analysis_status", "arguments": {} },
+        { "name": "show_analysis_overview", "arguments": {} }
+      ]
+    },
+    {
+      "prompt": "Show my current Mutant findings.",
       "state": "PROCESSING",
       "provenance": "pending-manual-capture",
       "capturedAt": null,

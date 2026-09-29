@@ -92,8 +92,14 @@ function statusContent(data: JsonObject): string {
       "DNA data is on file, but no analysis is available yet.",
   );
 
-  if (experience === "READY" || experience === "READY_REFRESH_AVAILABLE") {
-    parts.push("For an overview, open the analysis card with show_analysis_overview.");
+  if (
+    experience === "READY" ||
+    experience === "READY_REFRESH_AVAILABLE" ||
+    experience === "READY_REFRESH_PROCESSING"
+  ) {
+    parts.push(
+      "For an overview, call show_analysis_overview; this status check mounts no card by itself.",
+    );
   } else {
     const nextAction = asRecord(data.next_action);
     const nextTool = nextAction ? asText(nextAction.tool) : null;

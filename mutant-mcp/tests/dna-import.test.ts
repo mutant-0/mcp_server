@@ -544,15 +544,20 @@ describe("get_analysis_status", () => {
     expect(prompts.some((prompt) => prompt.id === "why-refresh")).toBe(true);
   });
 
-  it("mounts the refresh card only for a usable analysis with a pending refresh", async () => {
+  it("mounts no card for a usable analysis with a pending refresh", async () => {
     const { client } = await connect({
       responder: () =>
         ok({ data: makeStatusData({ experience_state: "READY_REFRESH_AVAILABLE" }) }),
     });
     const result = await client.callTool({ name: "get_analysis_status", arguments: {} });
-    const meta = result._meta as { ui?: { resourceUri?: string }; mutant?: { mode?: string } };
-    expect(meta.ui?.resourceUri).toBe(DNA_IMPORT_UI_URI);
-    expect(meta.mutant?.mode).toBe("overview");
+    // Ready refresh states are routed through show_analysis_overview; the status
+    // read itself carries no UI descriptor.
+    const meta = result._meta as
+      | { ui?: unknown; mutant?: unknown; "openai/outputTemplate"?: unknown }
+      | undefined;
+    expect(meta?.ui).toBeUndefined();
+    expect(meta?.mutant).toBeUndefined();
+    expect(meta?.["openai/outputTemplate"]).toBeUndefined();
   });
 
   it("does not mount the refresh card for a plain ready analysis", async () => {

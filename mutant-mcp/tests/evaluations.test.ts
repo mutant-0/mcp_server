@@ -26,6 +26,7 @@ import {
   makeCapturingLogger,
   makeConfig,
   makeDetailsData,
+  makeStatusData,
   makeSuccessResponse,
   makeUser,
 } from "./helpers.js";
@@ -115,6 +116,8 @@ interface EvalContext {
   content: string;
   data: Record<string, unknown>;
   evidence?: Record<string, unknown>;
+  /** A simulated user-facing assistant reply; defaults to the raw content. */
+  reply?: string;
 }
 
 interface Grader {
@@ -273,6 +276,87 @@ const GRADERS: Record<string, Grader[]> = {
       },
     },
   ],
+  "card-claim": [
+    {
+      name: "states the verified ready and refresh facts",
+      check: ({ content }) => {
+        if (!/analysis is ready/i.test(content)) return "did not state that the analysis is ready";
+        if (!/refresh/i.test(content)) return "did not mention the available refresh";
+        return null;
+      },
+    },
+    {
+      name: "routes to the display tool without claiming a card rendered",
+      check: ({ content }) => {
+        if (
+          /card (?:is|was|has been) (?:shown|displayed|rendered|mounted)|the Mutant card|the card above|a card appeared|the card is above/i.test(
+            content,
+          )
+        ) {
+          return "the status read implied a card already rendered";
+        }
+        if (!content.includes("show_analysis_overview")) {
+          return "did not direct the overview tool call";
+        }
+        return null;
+      },
+    },
+    {
+      name: "claims no unverified rendering, backend, or plugin failure",
+      check: ({ content }) => {
+        if (
+          /rendering error|failed to render|could not render|couldn't render|backend error|plugin error|Apps SDK error|my fault|I let you down|I'm sorry/i.test(
+            content,
+          )
+        ) {
+          return "asserted an unverified failure or self-blame";
+        }
+        return null;
+      },
+    },
+  ],
+  "card-claim-reply": [
+    {
+      name: "answers with the verified facts and an offer to show findings",
+      check: ({ reply }) => {
+        const text = reply ?? "";
+        if (!/ready/i.test(text)) return "did not say the analysis is ready";
+        if (!/refresh/i.test(text)) return "did not mention the available refresh";
+        if (!/current findings|show you|open your findings/i.test(text)) {
+          return "did not offer to show the current findings";
+        }
+        return null;
+      },
+    },
+    {
+      name: "asserts no rendering failure and no self-blame",
+      check: ({ reply }) => {
+        const text = reply ?? "";
+        if (
+          /rendering error|failed to render|could not render|couldn't render|backend error|plugin error|Apps SDK error|my fault|I let you down|I'm sorry/i.test(
+            text,
+          )
+        ) {
+          return "asserted an unverified failure or self-blame";
+        }
+        return null;
+      },
+    },
+    {
+      name: "exposes no implementation fields, tool names, or card claims",
+      check: ({ reply }) => {
+        const text = reply ?? "";
+        if (
+          /experience_state|contract_version|\bok\b|show_analysis_overview|poll_analysis_status|get_analysis_status|the Mutant card|the card above/i.test(
+            text,
+          )
+        ) {
+          return "exposed an implementation field, tool name, or card claim";
+        }
+        return null;
+      },
+    },
+  ],
 };
 
 /** Free with locked findings, for the "What about my histamine issues?" fixture. */
@@ -293,6 +377,7 @@ function defaultDataFor(
   operation: BackendOperation,
   details: Record<string, unknown>,
   listData?: Record<string, unknown>,
+  statusData?: Record<string, unknown>,
 ): Record<string, unknown> {
   switch (operation) {
     case "explain_health_hypothesis":
@@ -301,6 +386,9 @@ function defaultDataFor(
       return TESTS_EVIDENCE;
     case "list_health_hypotheses":
       return listData ?? { items: [{ id: "HYP_A", rank: 1, name: "Alpha finding" }] };
+    case "get_analysis_status":
+    case "poll_analysis_status":
+      return statusData ?? makeStatusData();
     default:
       return makeSuccessResponse(details).data as Record<string, unknown>;
   }
@@ -312,9 +400,10 @@ async function runScenario(
   tools: Array<{ name: string; arguments: Record<string, unknown> }>,
   userSuppliedHistory: boolean,
   listData?: Record<string, unknown>,
+  statusData?: Record<string, unknown>,
 ): Promise<EvalContext> {
   const responder = (operation: BackendOperation): ToolResponse =>
-    makeSuccessResponse(defaultDataFor(operation, details, listData));
+    makeSuccessResponse(defaultDataFor(operation, details, listData, statusData));
   const backendClient = new StubBackendClient(responder);
   const { logger } = makeCapturingLogger();
   const server = createMcpServer(
@@ -426,6 +515,41 @@ describe("assistant behavior evaluations", () => {
     expect(ctx.data).toBeDefined();
     expect(ctx.content).toContain("Mutant Full allows searching the complete ranked set");
     expect(ctx.content).not.toMatch(/upgrade|https?:\/\//i);
+  });
+
+  it("explains a status-only trace without inventing a rendering error", async () => {
+    const ctx = await runScenario(
+      "Why did you show the card? Was there an error?",
+      makeDetailsData(),
+      [{ name: "get_analysis_status", arguments: {} }],
+      false,
+      undefined,
+      makeStatusData({ experience_state: "READY_REFRESH_AVAILABLE" }),
+    );
+
+    // Model-facing content states the verified facts and routes to the display
+    // tool; it never claims that status already rendered a card.
+    const contentResults = grade(["card-claim"], ctx);
+    expect(contentResults.every((r) => r.failure === null), JSON.stringify(contentResults)).toBe(
+      true,
+    );
+
+    // A compliant user-facing reply keeps the verified facts, offers to show the
+    // findings, and exposes no implementation detail.
+    const replyResults = grade(["card-claim-reply"], {
+      ...ctx,
+      reply: "Your analysis is ready and a refresh is available. I can open your current findings.",
+    });
+    expect(replyResults.every((r) => r.failure === null), JSON.stringify(replyResults)).toBe(true);
+
+    // Negative control: a reply that asserts an unverified rendering failure and
+    // blames itself must fail the grader.
+    const bad = grade(["card-claim-reply"], {
+      ...ctx,
+      reply:
+        "An Apps SDK rendering error stopped the Mutant card from displaying, show_analysis_overview was fine, and it's my fault.",
+    });
+    expect(bad.every((result) => result.failure !== null)).toBe(true);
   });
 
   it.each([true, false])(

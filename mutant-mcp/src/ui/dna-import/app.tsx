@@ -893,6 +893,9 @@ export function DnaImportApp({
         // hypotheses it resolved and pin follow-ups to that revision.
         const snapshot = overviewSnapshotFrom(result);
         if (snapshot) {
+          // A bound snapshot is authoritative for the displayed revision: pin it
+          // so later status polls cannot silently swap the findings or version.
+          pinnedSnapshotRef.current = true;
           if (snapshot.version) displayedVersionRef.current = snapshot.version;
           if (snapshot.items.length > 0) {
             findingsRef.current = { status: "loaded", items: snapshot.items };
@@ -923,6 +926,13 @@ export function DnaImportApp({
    * calls so the backend answers the same revision the user is looking at.
    */
   const displayedVersionRef = useRef<string | null>(null);
+  /**
+   * True once a bound `show_analysis_overview` snapshot has pinned the displayed
+   * revision. A later status poll (mount or refresh loop) must not overwrite it:
+   * the card keeps showing the findings and analysis version the model was told
+   * about, even while a refresh runs behind them.
+   */
+  const pinnedSnapshotRef = useRef(false);
   /**
    * The state-aware chips load once per analysis. The overview route and the
    * ranked-list fallback both want them, but each must not fetch them twice.
@@ -996,7 +1006,9 @@ export function DnaImportApp({
       }
 
       const info = statusOf(envelope);
-      if (envelope.analysis_version) displayedVersionRef.current = envelope.analysis_version;
+      if (envelope.analysis_version && !pinnedSnapshotRef.current) {
+        displayedVersionRef.current = envelope.analysis_version;
+      }
       setAnalysis((previous) => analysisFromStatus(previous, info));
       if (info.createdAt) {
         const startedAt = Date.parse(info.createdAt);
@@ -1074,6 +1086,10 @@ export function DnaImportApp({
     setProgress(0);
     setPoll(INITIAL_POLL);
     promptsLoadedRef.current = false;
+    // A new import is a new analysis: drop the pinned overview revision so the
+    // next status read (and the resulting card) can bind the new version.
+    pinnedSnapshotRef.current = false;
+    displayedVersionRef.current = null;
     setFindingsState({ status: "idle" });
     setStage("waiting_for_file");
   }, [setFindingsState]);
@@ -1231,6 +1247,9 @@ export function DnaImportApp({
         // attempt, so a dna.import-only connection stays on the ChatGPT hint.
         setPoll((previous) => ({ ...INITIAL_POLL, scopeBlocked: previous.scopeBlocked }));
         promptsLoadedRef.current = false;
+        // The submitted analysis is brand new: unpin the previous overview revision.
+        pinnedSnapshotRef.current = false;
+        displayedVersionRef.current = null;
         setFindingsState({ status: "idle" });
         setAnalysis((previous) => ({
           ...(previous ?? {
@@ -1331,7 +1350,9 @@ export function DnaImportApp({
 
         failures = 0;
         const info = statusOf(envelope);
-        if (envelope.analysis_version) displayedVersionRef.current = envelope.analysis_version;
+        if (envelope.analysis_version && !pinnedSnapshotRef.current) {
+          displayedVersionRef.current = envelope.analysis_version;
+        }
         if (info.createdAt) {
           const startedAt = Date.parse(info.createdAt);
           if (Number.isFinite(startedAt)) startedAtRef.current = startedAt;

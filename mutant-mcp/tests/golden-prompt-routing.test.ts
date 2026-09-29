@@ -98,6 +98,31 @@ const STATUS_BY_STATE: Record<string, Record<string, unknown>> = {
     },
   }),
   READY_FULL: makeStatusData(),
+  READY_REFRESH_AVAILABLE: makeStatusData({
+    experience_state: "READY_REFRESH_AVAILABLE",
+    capabilities: {
+      can_query_analysis: true,
+      can_show_overview: true,
+      can_refresh_analysis: true,
+      can_search_hypotheses: true,
+      can_explore_genetic_context: true,
+    },
+  }),
+  READY_REFRESH_PROCESSING: makeStatusData({
+    experience_state: "READY_REFRESH_PROCESSING",
+    pending_analysis: {
+      status: "processing",
+      reason: "platform_refresh",
+      target_scoring_engine_version: "v3.1.0",
+    },
+    capabilities: {
+      can_query_analysis: true,
+      can_show_overview: true,
+      can_refresh_analysis: true,
+      can_search_hypotheses: true,
+      can_explore_genetic_context: true,
+    },
+  }),
   PROCESSING: makeStatusData({
     dna_status: "available",
     experience_state: "PROCESSING_INITIAL",

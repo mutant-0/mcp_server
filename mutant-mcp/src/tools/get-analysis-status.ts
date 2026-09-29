@@ -2,7 +2,6 @@ import type { ToolResponse } from "../contract.js";
 import { withSuggestedPrompts } from "../presentation/prompts.js";
 import { withPublicUpgradeUrl } from "../presentation/upgrade.js";
 import { analysisStatusOutputSchema, getAnalysisStatusInputSchema } from "../schemas/index.js";
-import { dnaImportUiMeta } from "../ui/dna-import/resource.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
 
@@ -11,8 +10,13 @@ import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
  *
  * The backend owns every routing fact (`dna_status`, `experience_state`,
  * `active_analysis`, `pending_analysis`, `capabilities`, `next_action`); this
- * handler only adds the deterministic model-facing text, the state-aware
- * suggested prompts, and the refresh card.
+ * handler only adds the deterministic model-facing text and the state-aware
+ * suggested prompts.
+ *
+ * This is a routing read, not a UI response: it deliberately mounts no Apps SDK
+ * component, so a status check can never produce a card (or prose about one).
+ * Every usable ready state renders through `show_analysis_overview`, the single
+ * tool whose descriptor declares the UI resource.
  */
 export const getAnalysisStatusTool: MutantToolDefinition = {
   name: "get_analysis_status",
@@ -30,15 +34,16 @@ export const getAnalysisStatusTool: MutantToolDefinition = {
     "health-history prose. For the add-DNA prompt, call show_dna_import.\n\n" +
     'If the result has experience_state="NO_DNA", do not answer with import instructions: call ' +
     "show_dna_import in the same turn so the DNA import UI is rendered.\n\n" +
-    'If experience_state="READY" and the user is opening Mutant or asking a broad opening ' +
+    'When experience_state is "READY", "READY_REFRESH_AVAILABLE", or ' +
+    '"READY_REFRESH_PROCESSING" and the user is opening Mutant or asking a broad opening ' +
     'question ("What are my top hypotheses?", "What did Mutant find?", "Show my results", or a ' +
-    "general overview), call show_analysis_overview in the same turn. Its card shows the ranked " +
-    "findings and hints; do not answer a broad opening question with list_health_hypotheses and " +
-    "do not write a duplicate prose list of the same findings.\n\n" +
-    'When experience_state is "READY_REFRESH_AVAILABLE" or "READY_REFRESH_PROCESSING", this ' +
-    "tool result mounts the Apps SDK card with a refresh action. Let the card present the " +
-    "update option instead of asking which finding to explore in prose. The current results " +
-    "remain usable until the user selects refresh.\n\n" +
+    "general overview), call show_analysis_overview in the same turn whenever " +
+    "capabilities.can_show_overview is true. This status tool mounts no card by itself: only " +
+    "show_analysis_overview renders one. Its card shows the ranked findings and hints, and in " +
+    'the two "READY_REFRESH_*" states it also shows the optional refresh banner while the ' +
+    "current results stay usable. Do not answer a broad opening question with " +
+    "list_health_hypotheses, do not write a duplicate prose list of the same findings, and do " +
+    "not ask which finding to explore in prose.\n\n" +
     'When experience_state is "PROCESSING_INITIAL" or ' +
     '"REFRESH_PROCESSING_NO_USABLE_ANALYSIS":\n' +
     "- Do not call analysis, overview, hypothesis, evidence, or genetic-context tools while no " +
@@ -71,22 +76,10 @@ export const getAnalysisStatusTool: MutantToolDefinition = {
       runtime.user,
       runtime.requestId,
     );
-    const data = response.data;
-    const experience =
-      typeof data?.experience_state === "string" ? data.experience_state : null;
-    const showRefreshCard =
-      response.ok &&
-      (experience === "READY_REFRESH_AVAILABLE" ||
-        experience === "READY_REFRESH_PROCESSING");
     return respond(
       withSuggestedPrompts(withPublicUpgradeUrl(response, runtime.config), "get_analysis_status"),
       runtime,
-      {
-        operation: "get_analysis_status",
-        ...(showRefreshCard
-          ? { meta: { ...dnaImportUiMeta(), mutant: { mode: "overview" } } }
-          : {}),
-      },
+      { operation: "get_analysis_status" },
     );
   },
 };
