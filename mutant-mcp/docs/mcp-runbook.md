@@ -233,9 +233,10 @@ Enter this copy when creating or editing the connector:
 Character limits (OpenAI plugin submission reference): display name ≤ 30; short
 description ≤ 240 for package validation and ≤ 30 for the final directory
 subtitle; long description ≤ 4,000; `defaultPrompt` ≤ 3 entries of ≤ 128
-characters each. `Mutant Genomics` fits. The caller-visible short description is
-kept in full in `plugin.json` (package cap); the final directory submission needs
-a ≤ 30-character subtitle (for example `Compare DNA to health history`).
+characters each. `Mutant Genomics` fits. `shortDescription` in `plugin.json` is
+the final directory subtitle (`Compare DNA to health history`, 29 characters), so
+it satisfies both the package cap and the submission cap; the longer
+caller-visible copy lives in `description`.
 
 `mutant-mcp/plugin.json` carries the packaged-plugin interface copy and the three
 starter prompts with comparison first. It only takes effect once the Mutant plugin

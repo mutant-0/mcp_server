@@ -7,7 +7,7 @@
     "com.openai": {
       "interface": {
         "displayName": "Mutant Genomics",
-        "shortDescription": "Compare your DNA findings with health history you share, explore results, or add DNA data.",
+        "shortDescription": "Compare DNA to health history",
         "longDescription": "Ask which Mutant findings best fit the health history or records you share in this ChatGPT conversation. You can also explore findings or add DNA data. Mutant does not automatically access your medical records; genetic findings are hypotheses, not diagnoses.",
         "developerName": "Mutant Genomics",
         "category": "Health",
