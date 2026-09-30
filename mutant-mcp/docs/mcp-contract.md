@@ -1158,7 +1158,7 @@ analysis: Full displays the first 10 accessible ranked findings and Free its
 fixed top three, so `displayed_hypotheses` is exactly the list the card renders.
 `total_accessible_count` is how many ranked findings the account can reach and
 `has_more` is `total_accessible_count > len(displayed_hypotheses)`, letting the
-card say "top 10 of 92" and keep its **Search all findings** action without
+card say "top 10 of 92" and keep its **Connect my findings** action without
 fetching or appending the rest. `plan_notice` is attached only for a Free account
 whose analysis has additional locked findings; Full and a Free analysis with
 nothing locked omit it. The complete ranked set remains reachable through
@@ -1289,7 +1289,7 @@ the shared Apps SDK card. Its result is
 displayed_hypotheses, total_accessible_count, has_more, plan_notice? }` plus the UI descriptor
 and widget-only `mutant.mode: "overview"`. `displayed_hypotheses` is capped at 10
 for Full and 3 for Free and is exactly what the card renders; the card shows a
-"top N of M" cue from `total_accessible_count` and keeps **Search all findings**
+"top N of M" cue from `total_accessible_count` and keeps **Connect my findings**
 for the rest rather than fetching the full ranked set on mount. The card renders
 that bound snapshot and loads accessible hints from it; the model should let the
 card present these results rather than repeating the context preview in prose. On failure
@@ -1536,7 +1536,8 @@ add a `suggested_prompts` array to their `data`
   processing states (**none** — the component owns those states), `PROCESSING_FAILED`
   (regenerate), analysis context
   (compare with the health history shared in the chat **first**, then explain #1
-  and compare top three, plus compare-all for Full; the ready card renders the
+  and compare top three, plus connect-findings and compare-all for Full; the ready
+  card renders the
   comparison chip as its visually primary action with the helper line `Uses only
   health history or records you share in this chat.`, and the card sends the
   server-selected prompt once per click; Free accounts with locked findings get no
@@ -1544,6 +1545,12 @@ add a `suggested_prompts` array to their `data`
   plans` link from the notice), and
   hypothesis detail (why ranked / evidence / confirmation /
   what changes it / clinician).
+- Full's `connect-findings` chip ("Connect my findings") is the topic-free
+  cross-finding action: it needs no topic, symptom, or history to answer, and it
+  asks for up to three shared-module/pattern/variant connections with reused vs.
+  distinct evidence separated, contextual evidence kept apart, the scope actually
+  examined stated, and an explicit "cannot be verified" / no-connection answer
+  when nothing is supported. Topic search stays available through normal chat.
 - `prompt` is exact user-visible natural language. It must never contain an
   internal command, a tool name, or a raw hypothesis id. `explain_health_hypothesis`
   suggestions may carry a `hypothesis_id` **field** for the host's convenience,

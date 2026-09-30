@@ -557,13 +557,42 @@ describe("contract v3.0 acceptance", () => {
     const { client } = await connect();
     const result = await client.callTool({ name: "get_analysis_context", arguments: {} });
     const data = envelopeOf(result).data as {
-      suggested_prompts?: Array<{ id: string; prompt: string }>;
+      suggested_prompts?: Array<{
+        id: string;
+        label: string;
+        prompt: string;
+        heading?: string;
+        action?: { analysis_version?: string; intent?: string };
+      }>;
     };
     const ids = (data.suggested_prompts ?? []).map((prompt) => prompt.id);
     expect(ids).toContain("explain-first");
-    expect(ids).toContain("search-all");
+    expect(ids).toContain("connect-findings");
     expect(ids).toContain("compare-all");
     expect(ids).not.toContain("full-scope");
+    expect(ids).not.toContain("search-all");
+
+    // The connection chip is topic-free: it needs no query, symptom, or history
+    // to be answerable, and it carries the same revision pin as the other chips.
+    const connectChip = data.suggested_prompts?.find((prompt) => prompt.id === "connect-findings");
+    expect(connectChip?.label).toBe("Connect my findings");
+    expect(connectChip?.heading).toBe("Mutant follow-up: Connect my findings");
+    expect(connectChip?.action?.analysis_version).toBe("rev42-v3.0.0");
+    expect(connectChip?.action?.intent).toBe("evidence");
+    expect(connectChip?.action).not.toHaveProperty("hypothesis_id");
+    expect(connectChip?.prompt).not.toMatch(/topic|symptom|history/i);
+    // The prompt is the whole behavior contract: real connections require shared
+    // evidence, reused and distinct support are separated, contextual evidence is
+    // kept apart, and the no-connection / unverifiable cases are required.
+    expect(connectChip?.prompt).toMatch(/shared contributing modules/i);
+    expect(connectChip?.prompt).toMatch(/reused across the findings from additional, distinct/i);
+    expect(connectChip?.prompt).toMatch(/contextual or non-contributing/i);
+    expect(connectChip?.prompt).toMatch(/statistically independent/i);
+    expect(connectChip?.prompt).toMatch(/up to three/i);
+    expect(connectChip?.prompt).toMatch(/common cause or a diagnosis/i);
+    expect(connectChip?.prompt).toMatch(/cannot be verified/i);
+    expect(connectChip?.prompt).toMatch(/no meaningful connection/i);
+    expect(connectChip?.prompt).toMatch(/State the scope you actually examined/i);
 
     // Prompt chips carry a structured action bound to the displayed snapshot.
     const explain = data.suggested_prompts?.find((prompt) => prompt.id === "explain-first") as
@@ -611,7 +640,7 @@ describe("contract v3.0 acceptance", () => {
     expect(ids).toContain("compare-top-three");
     expect(ids).toContain("compare-medical-records");
     expect(ids).not.toContain("full-scope");
-    expect(ids).not.toContain("search-all");
+    expect(ids).not.toContain("connect-findings");
     expect(ids).not.toContain("compare-all");
 
     // The factual plan notice is a separate element, never a hint-row chip.

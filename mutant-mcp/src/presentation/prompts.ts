@@ -213,13 +213,17 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
   ];
 
   if (isFull) {
+    // Cross-finding synthesis rather than a topic search: it needs no topic,
+    // symptom, or history to produce a useful answer, and it stays bound to the
+    // analysis revision the card was rendered from.
     out.push({
-      id: "search-all",
-      label: "Search all findings",
-      prompt: "Search my complete analysis for findings by topic.",
-      heading: "Mutant follow-up: Search all findings",
-      intent: "overview",
-      action: action("overview", analysisVersion),
+      id: "connect-findings",
+      label: "Connect my findings",
+      prompt:
+        "Look across the findings I can access in this analysis and tell me whether several of them are telling parts of the same biological story. Start from the accessible findings, then retrieve only the supporting detail needed to check each candidate connection - contributing modules, retained patterns, and supporting variants - and respect retrieval limits and pagination instead of fetching every evidence layer for every finding. Similar names or summaries are only leads: a real connection needs shared contributing modules, shared retained patterns, or shared supporting variants. Separate evidence that is reused across the findings from additional, distinct supporting evidence, and keep contextual or non-contributing evidence separate from what actually supports the findings. A connection does not require distinct markers to be statistically independent evidence; only say a marker is independent when the returned data establishes that. Present up to three well-supported connections, strongest first, and do not force a connection when none is supported. For each, use a short descriptive heading and the findings' accessible names, and cover the shared theme in plain language, which findings it connects, the actual evidence with references to those findings, whether it mostly reflects reused evidence or adds distinct support, and what remains uncertain. Say when a shared theme does not establish a common cause or a diagnosis, and tie that qualification to the specific evidence rather than a generic disclaimer. Do not invent mechanisms, rerank findings, change scores, or imply access to clinical records I have not shared. State the scope you actually examined and do not claim to have reviewed the complete analysis. If the available detail is too thin to verify a connection, say the connection cannot be verified; if no meaningful connection is supported, say so plainly.",
+      heading: "Mutant follow-up: Connect my findings",
+      intent: "evidence",
+      action: action("evidence", analysisVersion),
     });
     out.push({
       id: "compare-all",

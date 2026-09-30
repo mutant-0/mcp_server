@@ -1981,7 +1981,7 @@ export function DnaImportApp({
     const loaded = loadedState ? loadedState.items : null;
     // The card renders only the bound `displayed_hypotheses`; when the backend
     // reports the account can reach more, it shows a count cue and leaves the
-    // rest to the existing "Search all findings" action. It never fetches the
+    // rest to the existing "Connect my findings" action. It never fetches the
     // full ranked set to expand this inline overview.
     const totalAccessible =
       loadedState && typeof loadedState.totalAccessible === "number"

@@ -315,14 +315,15 @@ function boundFullOverview(version = "analysis_1"): ToolResponse {
   );
 }
 
-/** The Full-only discovery chip the overview card keeps for the rest of the set. */
-const SEARCH_ALL_CHIP = {
-  id: "search-all",
-  label: "Search all findings",
-  prompt: "Search my complete analysis for findings by topic.",
-  heading: "Mutant follow-up: Search all findings",
-  intent: "overview",
-  action: { analysis_version: "analysis_1", intent: "overview" },
+/** The Full-only cross-finding chip the overview card keeps for the rest of the set. */
+const CONNECT_FINDINGS_CHIP = {
+  id: "connect-findings",
+  label: "Connect my findings",
+  prompt:
+    "Look across the findings I can access in this analysis and tell me whether several of them are telling parts of the same biological story.",
+  heading: "Mutant follow-up: Connect my findings",
+  intent: "evidence",
+  action: { analysis_version: "analysis_1", intent: "evidence" },
 };
 
 /** The Full entitlement the ready status must report for the capped card. */
@@ -1057,7 +1058,7 @@ describe("DNA import component", () => {
     const bridge = renderWith({
       poll_analysis_status: statusResponse("ready", FULL_PLAN),
       get_analysis_context: makeSuccessResponse(
-        makeContextData({ suggested_prompts: [SEARCH_ALL_CHIP] }),
+        makeContextData({ suggested_prompts: [CONNECT_FINDINGS_CHIP] }),
       ),
       // Any list read would return the whole 92-item set; the card must not ask.
       list_health_hypotheses: makeSuccessResponse({
@@ -1077,9 +1078,52 @@ describe("DNA import component", () => {
     await screen.findByText(/Showing your top 10 of 92 findings/i);
     expect(screen.getAllByRole("button", { name: /Explain finding #/ })).toHaveLength(10);
     expect(screen.queryByText(/Finding 11/)).toBeNull();
-    // The rest stays behind the deliberate search action, not an auto-expansion.
-    await screen.findByRole("button", { name: "Search all findings" });
+    // The rest stays behind the deliberate cross-finding action, not an auto-expansion.
+    await screen.findByRole("button", { name: "Connect my findings" });
     expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(0);
+  });
+
+  it("sends a topic-free Connect my findings request bound to the displayed version", async () => {
+    const bridge = renderWith({
+      poll_analysis_status: statusResponse("ready", FULL_PLAN),
+      get_analysis_context: makeSuccessResponse(
+        makeContextData({ suggested_prompts: [CONNECT_FINDINGS_CHIP] }),
+      ),
+      list_health_hypotheses: makeSuccessResponse({
+        items: Array.from({ length: 92 }, (_, index) => ({
+          id: `HYP_${String(index + 1).padStart(2, "0")}`,
+          rank: index + 1,
+          name: `Finding ${String(index + 1).padStart(2, "0")}`,
+        })),
+        next_cursor: null,
+      }),
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    bridge.sendToolResult(boundFullOverview(), { mutant: { mode: "overview" } });
+
+    const chip = await screen.findByRole("button", { name: "Connect my findings" });
+    fireEvent.click(chip);
+    await waitFor(() => expect(bridge.messages).toHaveLength(1));
+
+    const params = bridge.messages[0]?.params as {
+      role?: string;
+      content?: Array<{ text?: string }>;
+    };
+    const sent = params.content?.map((block) => block.text ?? "").join("") ?? "";
+    // The heading instruction precedes the untouched server-authored prompt.
+    expect(params.role).toBe("user");
+    expect(sent).toContain('Mutant follow-up: Connect my findings');
+    expect(sent).toContain(
+      "Look across the findings I can access in this analysis and tell me whether several of them are telling parts of the same biological story.",
+    );
+    // No topic, symptom, or history is required to answer it.
+    expect(sent).not.toMatch(/query=|topic|symptom|health history/i);
+    // The click never expanded the card into the full ranked set.
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(0);
+    // The version guard re-read the bound revision before sending.
+    expect(bridge.callsTo("poll_analysis_status").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/These results have changed/i)).toBeNull();
   });
 
   it("surfaces an unmatched analysis error instead of the transient outage copy", async () => {
