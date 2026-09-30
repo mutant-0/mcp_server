@@ -13,7 +13,7 @@ is `Open`.
 | P2 | Intended age eligibility (reconcile with platform audience rules) | Policy wording, listing | Open | PRIV-09 |
 | P3 | Supportable active-data retention, deletion turnaround, backup expiry, minimum security/consent evidence retention | Retention + deletion commitments | Open | PRIV-06, PRIV-07, PRIV-09 |
 | P4 | Mutant operating relationships and covered-entity facts beyond DTC-only | Classification, policy language | Open | PRIV-09, PRIV-10 |
-| P5 | Whether free-text catalog search remains necessary or is replaced by catalog topic selection | Search design + residual-risk acceptance | Open | PRIV-03 |
+| P5 | Whether free-text catalog search remains necessary or is replaced by catalog topic selection | Search design + residual-risk acceptance | Interim (2026-09-30): free text retained for PRIV-03 with documented residual risk (`data-boundaries.md` §3) | PRIV-03 residual-risk acceptance; catalog-topic-ID design remains an available follow-up |
 
 These need not delay the PRIV-02 logging change, the deployment inventory, or the
 response-field work (backlog note).
@@ -62,6 +62,6 @@ and the item stays `Open`.
 | I1 | No TTL/lifecycle on raw-file + SNP/derived stores | infra/backend | PRIV-06 |
 | I2 | No consent records exist (collection/sharing proceed on UI state + OAuth scope) | backend/auth | PRIV-04 |
 | I3 | Deletion scope excludes logs, backups, consent evidence, ChatGPT copies | backend/portal | PRIV-07 |
-| I4 | Filename treated as non-sensitive but persisted | MCP/backend | PRIV-03 |
-| I5 | WGS records accept arbitrary properties | MCP/backend | PRIV-03 |
-| I6 | Derived findings may encode inferred context | backend | PRIV-03 |
+| I4 | Filename treated as non-sensitive but persisted | MCP/backend | PRIV-03 (**closed for the plugin path:** `file_name` optional in schema, stripped before transport; still persisted for legacy/portal callers — portal retirement is PRIV-05/PRIV-09) |
+| I5 | WGS records accept arbitrary properties | MCP/backend | PRIV-03 (**closed:** allowlist projection at both the MCP and backend contract boundaries) |
+| I6 | Derived findings may encode inferred context | backend | PRIV-03 (**mitigated:** every response projected onto its declared output schema; `genotype` only on marker-detail tools) |

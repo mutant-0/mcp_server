@@ -248,13 +248,37 @@ const wgsVariantCallsSchema = z
   })
   .describe("Optional, additive map of non-SNV capture targets to their VCF records.");
 
+/**
+ * Non-identifying import provenance. The original filename is deliberately not
+ * part of the plugin contract: it is retained locally for the user's own review
+ * and never needed server-side. `file_name` stays accepted (optional) only so a
+ * legacy or portal caller does not break; the MCP handler projects it out before
+ * transport, so the backend never receives it from this path.
+ */
 const uploadMetaSchema = z
   .object({
     provider: z.string().min(1).max(64).describe("Detected source, e.g. '23andMe' or 'WGS'."),
-    file_name: z.string().min(1).max(512).describe("Original file name, for the user's records."),
+    file_name: z
+      .string()
+      .min(1)
+      .max(512)
+      .optional()
+      .describe("Legacy original filename; retained locally, never forwarded by the plugin."),
     file_size_bytes: z.number().int().nonnegative(),
+    source_format: z
+      .string()
+      .min(1)
+      .max(32)
+      .optional()
+      .describe("Input format, e.g. 'vcf' or 'array'. Non-identifying provenance."),
+    genome_build: z
+      .string()
+      .min(1)
+      .max(32)
+      .optional()
+      .describe("Detected reference build, e.g. 'GRCh38'. Non-identifying provenance."),
   })
-  .describe("Non-sensitive provenance for the import; never includes file contents.");
+  .describe("Non-sensitive provenance for the import; never includes file contents or a filename.");
 
 /**
  * Optional, request-only sex-chromosome context inferred locally from the raw

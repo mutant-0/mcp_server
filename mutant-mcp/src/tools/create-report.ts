@@ -1,6 +1,7 @@
 import { byteLength, payloadTooLarge } from "../clients/mutant-lambda-client.js";
 import { APP_ERROR_CODES, ErrorCode, type ToolResponse } from "../contract.js";
 import { createReportInputSchema, createReportOutputSchema } from "../schemas/index.js";
+import { sanitizeCreateReportArgs } from "./dna-payload.js";
 import { respond } from "./respond.js";
 import { dnaImportWriteAnnotations, type MutantToolDefinition } from "./types.js";
 
@@ -65,11 +66,16 @@ export function describeDnaPayload(args: Record<string, unknown>): {
   payloadBytes: number;
   inputSizeBytes: number | null;
   provider: string | null;
+  sourceFormat: string | null;
   genomeBuild: string | null;
 } {
   const snps = (args.snps ?? {}) as Record<string, unknown>;
   const wgs = (args.wgs_variant_calls ?? {}) as Record<string, { records?: unknown[] }>;
-  const upload = (args.upload_meta ?? {}) as { provider?: unknown; file_size_bytes?: unknown };
+  const upload = (args.upload_meta ?? {}) as {
+    provider?: unknown;
+    source_format?: unknown;
+    file_size_bytes?: unknown;
+  };
 
   let wgsRecordCount = 0;
   for (const call of Object.values(wgs)) {
@@ -77,10 +83,14 @@ export function describeDnaPayload(args: Record<string, unknown>): {
   }
 
   const builds = new Set<string>();
+  const formats = new Set<string>();
   for (const call of Object.values(wgs)) {
     const build = (call as { genome_build?: unknown } | null)?.genome_build;
     if (typeof build === "string") builds.add(build);
+    const format = (call as { source_format?: unknown } | null)?.source_format;
+    if (typeof format === "string") formats.add(format);
   }
+  if (typeof upload.source_format === "string") formats.add(upload.source_format);
 
   return {
     snpCount: Object.keys(snps).length,
@@ -89,6 +99,7 @@ export function describeDnaPayload(args: Record<string, unknown>): {
     payloadBytes: byteLength(JSON.stringify(args ?? {})),
     inputSizeBytes: typeof upload.file_size_bytes === "number" ? upload.file_size_bytes : null,
     provider: typeof upload.provider === "string" ? upload.provider : null,
+    sourceFormat: formats.size === 1 ? [...formats][0]! : null,
     genomeBuild: builds.size === 1 ? [...builds][0]! : null,
   };
 }
@@ -121,7 +132,11 @@ export const createReportTool: MutantToolDefinition = {
     const startedAt = Date.now();
     const importRequestId =
       typeof args.import_request_id === "string" ? args.import_request_id : null;
-    const metrics = describeDnaPayload(args);
+    // Project the two free-form containers onto the approved input boundary
+    // before measuring or forwarding: only allowlisted VCF fields and
+    // non-identifying provenance leave the process.
+    const forwarded = sanitizeCreateReportArgs(args);
+    const metrics = describeDnaPayload(forwarded);
 
     // Enforce the transport cap here as well as in the client, so the guard does
     // not depend on which backend client is wired in.
@@ -146,7 +161,7 @@ export const createReportTool: MutantToolDefinition = {
 
     const upstream = await runtime.client.invoke(
       "create_report",
-      args,
+      forwarded,
       runtime.user,
       runtime.requestId,
     );

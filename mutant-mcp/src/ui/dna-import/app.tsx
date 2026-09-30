@@ -1387,9 +1387,13 @@ export function DnaImportApp({
 
       const args: Record<string, unknown> = {
         snps: parsed.snps,
+        // Provenance only. The original filename stays in this iframe (it is
+        // shown on the review screen) and is never sent: it is not needed
+        // server-side and can carry the person's name.
         upload_meta: {
           provider: parsed.provider,
-          file_name: parsed.fileName,
+          source_format: parsed.providerLabel === "WGS" ? "vcf" : "array",
+          ...(parsed.genomeBuild ? { genome_build: parsed.genomeBuild } : {}),
           file_size_bytes: parsed.fileSizeBytes,
         },
         import_request_id: importRequestId,

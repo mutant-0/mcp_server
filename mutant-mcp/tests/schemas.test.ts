@@ -336,6 +336,28 @@ describe("DNA import tool input schemas", () => {
     ).toBe(true);
   });
 
+  it("accepts upload_meta without a filename and with non-identifying provenance", () => {
+    // The plugin no longer sends the original filename; `file_name` stays
+    // accepted for legacy callers but is never required.
+    expect(
+      createReportInputSchema.safeParse({
+        ...validImport,
+        upload_meta: {
+          provider: "WGS",
+          source_format: "vcf",
+          genome_build: "GRCh38",
+          file_size_bytes: 1234,
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      createReportInputSchema.safeParse({
+        ...validImport,
+        upload_meta: { provider: "23andMe", file_size_bytes: 0 },
+      }).success,
+    ).toBe(true);
+  });
+
   it("rejects client-supplied identity, because identity comes from the token", () => {
     for (const injected of [
       { account_id: "acc-1" },

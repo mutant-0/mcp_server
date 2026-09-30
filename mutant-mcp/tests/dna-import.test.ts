@@ -327,6 +327,76 @@ describe("create_report", () => {
     expect(JSON.stringify(result)).not.toContain("GG");
   });
 
+  it("projects WGS records and upload metadata onto the approved input boundary", async () => {
+    const { client, backendClient } = await connect({});
+    const result = await client.callTool({
+      name: "create_report",
+      arguments: {
+        snps: { rs4680: "GG" },
+        import_request_id: "12345678-abcd-4ef0-9876-1234567890ab",
+        upload_meta: {
+          provider: "WGS",
+          file_name: "Jane_Doe_genome.vcf",
+          source_format: "vcf",
+          genome_build: "GRCh38",
+          file_size_bytes: 999,
+          // Not a declared field; the transport schema strips it.
+          internal_batch: "batch-7",
+        },
+        wgs_variant_calls: {
+          rs28362491: {
+            schema_version: 1,
+            source_format: "vcf",
+            genome_build: "GRCh38",
+            records: [
+              {
+                chromosome: "16",
+                position: 50729867,
+                ref: "G",
+                alts: ["GC"],
+                gt: "0/1",
+                filter: "PASS",
+                // Unapproved VCF columns and free-form metadata must not travel.
+                qual: 99,
+                gq: 40,
+                dp: 30,
+                ad: [12, 15],
+                sample_label: "Jane Doe",
+                info: "AF=0.1;SAMPLE=Jane",
+                phased: true,
+                vcf_id: "rs28362491",
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(result.isError).toBe(false);
+
+    const forwarded = backendClient.calls[0]?.arguments as Record<string, unknown>;
+    expect(forwarded.upload_meta).toEqual({
+      provider: "WGS",
+      file_size_bytes: 999,
+      source_format: "vcf",
+      genome_build: "GRCh38",
+    });
+    const records = (
+      (forwarded.wgs_variant_calls as Record<string, { records: Array<Record<string, unknown>> }>)
+        .rs28362491?.records ?? []
+    );
+    expect(records).toHaveLength(1);
+    expect(Object.keys(records[0]!).sort()).toEqual([
+      "alts",
+      "chromosome",
+      "filter",
+      "gt",
+      "position",
+      "ref",
+    ]);
+    expect(JSON.stringify(forwarded)).not.toContain("Jane Doe");
+    expect(JSON.stringify(forwarded)).not.toContain("Jane_Doe");
+  });
+
   it("maps upstream failures to the DNA import error vocabulary", async () => {
     const cases: Array<[string, string]> = [
       ["SERVICE_UNAVAILABLE", "REPORT_GENERATION_FAILED"],

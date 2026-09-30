@@ -696,7 +696,7 @@ describe("DNA import component", () => {
     expect(submit?.arguments.snps).toEqual({ rs328: "AA" });
     expect(submit?.arguments.upload_meta).toEqual({
       provider: "23andMe",
-      file_name: "23andme.txt",
+      source_format: "array",
       file_size_bytes: MICROARRAY_BODY.length,
     });
     // Identity is derived server-side from the token; the component must not

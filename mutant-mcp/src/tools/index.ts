@@ -5,6 +5,7 @@ import {
   type MutantBackendClient,
 } from "../clients/mutant-lambda-client.js";
 import { scopeFor, type AppConfig } from "../config.js";
+import { projectToolResult } from "../responses/projections.js";
 import {
   auditToolCall,
   classifyThrownError,
@@ -136,7 +137,7 @@ export function registerTools(
             }),
             "tool call denied",
           );
-          return respond(denied, runtime);
+          return projectToolResult(respond(denied, runtime), definition.outputSchema);
         }
 
         try {
@@ -150,7 +151,10 @@ export function registerTools(
             }),
             "tool call",
           );
-          return result;
+          // Project the payload onto the tool's declared contract. This is the
+          // single choke point for the response boundary: unknown, debug, or
+          // account-identifying fields the backend returned cannot cross it.
+          return projectToolResult(result, definition.outputSchema);
         } catch (error) {
           // Log a classified code, never the exception object: its message and
           // stack can carry data from an SDK or a nested backend failure.

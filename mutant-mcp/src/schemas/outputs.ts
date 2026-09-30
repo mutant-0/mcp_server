@@ -564,6 +564,12 @@ const testEvidenceSchema = z.looseObject({
   purpose: z.string().nullable().optional(),
   interpretation_notes: z.array(z.string()).optional(),
   limitations: z.array(z.string()).optional(),
+  // Detailed assay guidance. Declared (not left to the loose object) because the
+  // response projection keeps only declared fields, and `get_supporting_evidence`
+  // is the one surface intentionally allowed to carry it.
+  assay_method: z.string().optional(),
+  reference_range: z.string().optional(),
+  guidance: z.string().optional(),
 });
 
 const sourceEvidenceSchema = z.looseObject({
@@ -610,8 +616,12 @@ export const snpCatalogDataSchema = z.looseObject({
   version: z.union([z.number(), z.string()]).optional(),
   snp_count: z.number().optional(),
   snps: z.record(z.string(), z.unknown()),
-  // The catalog carries additional backend-maintained metadata (aliases,
-  // reference alleles, provenance) that the component passes through untouched.
+  // Application data the DNA import component consumes locally. Declared here
+  // (rather than left to a loose schema) because the response projection keeps
+  // only declared fields: aliases and per-build reference alleles are required
+  // for alias resolution and genotype directionality during the local parse.
+  aliases: z.record(z.string(), z.unknown()).optional(),
+  reference_alleles: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const createReportDataSchema = z.looseObject({
