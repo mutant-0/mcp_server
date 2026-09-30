@@ -290,8 +290,15 @@ conversation and confirm on each supported surface:
 
   ```powershell
   npm run record:trace -- --prompt "<the entry prompt>" --state READY_FREE `
-    --calls <log-export.json> --user <sub> --from <iso> --to <iso> --write
+    --calls <log-export.json> --capture <id> --from <iso> --to <iso> --write
   ```
+
+  Ordinary production logs withhold every argument value, so the routing capture
+  must come from a designated synthetic session: run the deployment with
+  `MUTANT_TRACE_CAPTURE=1` (and `MUTANT_TRACE_CAPTURE_ID=<id>`) in a controlled
+  environment, then export those records. A log without `capture: "synthetic"`
+  records is refused rather than turned into a trace with silently missing
+  arguments.
 
   The export may be NDJSON, a CloudWatch Logs event array, or a bare
   `[{ name, arguments }]` list. A `query` the audit log withheld (the model sent

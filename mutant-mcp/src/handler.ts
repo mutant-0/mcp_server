@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { loadConfig, analysisReadScope, dnaImportScope, resourceUri } from "./config.js";
+import { classifyThrownError, safeErrorName } from "./error-classification.js";
 import { createHttpHandler } from "./http-handler.js";
 import { createLogger } from "./logger.js";
 import { SERVER_NAME } from "./server.js";
@@ -27,7 +28,10 @@ async function start(): Promise<void> {
   const server = createServer(handler);
 
   server.on("error", (error) => {
-    logger.fatal({ err: error }, "server error");
+    logger.fatal(
+      { errorCode: classifyThrownError(error), errorName: safeErrorName(error) },
+      "server error",
+    );
     process.exit(1);
   });
 

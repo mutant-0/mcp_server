@@ -85,7 +85,7 @@ export const getSnpCatalogTool: MutantToolDefinition = {
       runtime.logger.info(
         {
           tool: "get_snp_catalog",
-          userId: runtime.user.userId,
+          requestId: runtime.requestId,
           catalogVersion: typeof catalogMeta.version === "number" ? catalogMeta.version : null,
           snpCount,
           catalogBytes: bytes,
@@ -97,7 +97,7 @@ export const getSnpCatalogTool: MutantToolDefinition = {
       runtime.logger.warn(
         {
           tool: "get_snp_catalog",
-          userId: runtime.user.userId,
+          requestId: runtime.requestId,
           code: response.error?.code,
           durationMs: Date.now() - startedAt,
         },

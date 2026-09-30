@@ -38,6 +38,8 @@ new MutantMcpStack(app, "MutantMcpStack", {
     : undefined,
   planInfoUrl: process.env.MUTANT_PLAN_INFO_URL || undefined,
   devMode: process.env.MUTANT_DEV_MODE === "true",
+  traceCapture: process.env.MUTANT_TRACE_CAPTURE === "true",
+  traceCaptureId: process.env.MUTANT_TRACE_CAPTURE_ID || undefined,
   adoptLogGroup: process.env.MUTANT_ADOPT_LOG_GROUP === "true",
 });
 

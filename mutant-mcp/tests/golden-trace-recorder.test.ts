@@ -2,10 +2,11 @@
  * Golden-prompt trace recorder.
  *
  * The recorder is the bridge between a real capture and the release gate: it
- * turns the deployment's tool-call audit records into a fixture entry. The
- * fixture is hand-maintained JSON, so the properties that matter here are that
- * the parse accepts what the deployment actually emits, and that writing an
- * entry back does not reflow the entries around it.
+ * turns a designated synthetic-capture's tool-call audit records into a fixture
+ * entry. The fixture is hand-maintained JSON, so the properties that matter here
+ * are that the parse accepts what the deployment actually emits, that ordinary
+ * records (which withhold every value) stay visibly incomplete, and that writing
+ * an entry back does not reflow the entries around it.
  */
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -25,6 +26,8 @@ import {
 import { OBSERVED_PROVENANCE, traceEntryIssues } from "./golden-trace-contract.js";
 
 const TRACES_PATH = path.join(process.cwd(), "tests", "golden-prompt-routing-traces.json");
+
+/** A record from a designated synthetic capture: argument values are present. */
 const AUDIT = (tool: string, args: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
   JSON.stringify({
     level: 30,
@@ -32,8 +35,9 @@ const AUDIT = (tool: string, args: Record<string, unknown>, extra: Record<string
     event: "tool_call",
     tool,
     requestId: "req-1",
-    userId: "user-9",
-    argKeys: Object.keys(args).sort(),
+    capture: "synthetic",
+    captureId: "cap-1",
+    argNames: Object.keys(args).sort(),
     args,
     status: "ok",
     durationMs: 12,
@@ -41,8 +45,26 @@ const AUDIT = (tool: string, args: Record<string, unknown>, extra: Record<string
     ...extra,
   });
 
+/** An ordinary production record: safe schema, no argument values, no capture. */
+const ORDINARY = (
+  tool: string,
+  extra: Record<string, unknown> = {},
+) =>
+  JSON.stringify({
+    level: 30,
+    time: 1759100000000,
+    event: "tool_call",
+    tool,
+    requestId: "req-1",
+    argNames: ["query"],
+    status: "ok",
+    durationMs: 12,
+    msg: "tool call",
+    ...extra,
+  });
+
 describe("audit log parsing", () => {
-  it("reads newline-delimited audit records in call order and ignores other lines", () => {
+  it("reads synthetic-capture records in call order and ignores other lines", () => {
     const text = [
       AUDIT("get_analysis_status", {}, { time: 1759100000001 }),
       '{"level":30,"time":1759100000002,"tool":"create_report","msg":"dna import submitted"}',
@@ -50,9 +72,17 @@ describe("audit log parsing", () => {
     ].join("\n");
 
     const calls = auditedCalls(parseAuditRecords(text));
-    expect(calls).toEqual([
+    expect(calls.map((call) => ({ name: call.name, arguments: call.arguments }))).toEqual([
       { name: "get_analysis_status", arguments: {} },
       { name: "list_health_hypotheses", arguments: { query: "b12", limit: 3 } },
+    ]);
+    expect(calls.every((call) => call.captured === true)).toBe(true);
+  });
+
+  it("withholds argument values from an ordinary record and flags it incomplete", () => {
+    const records = parseAuditRecords(ORDINARY("list_health_hypotheses"));
+    expect(auditedCalls(records)).toEqual([
+      { name: "list_health_hypotheses", arguments: {}, captured: false },
     ]);
   });
 
@@ -62,23 +92,28 @@ describe("audit log parsing", () => {
       { timestamp: 1759100000002, message: "not json" },
       { timestamp: 1759100000003, message: AUDIT("show_dna_import", { mode: "initial" }) },
     ]);
-    expect(auditedCalls(parseAuditRecords(envelope))).toEqual([
+    expect(
+      auditedCalls(parseAuditRecords(envelope)).map((call) => ({
+        name: call.name,
+        arguments: call.arguments,
+      })),
+    ).toEqual([
       { name: "get_analysis_status", arguments: {} },
       { name: "show_dna_import", arguments: { mode: "initial" } },
     ]);
 
     expect(parseCallList('[{"name":"get_analysis_status","arguments":{}}]')).toEqual([
-      { name: "get_analysis_status", arguments: {} },
+      { name: "get_analysis_status", arguments: {}, captured: true },
     ]);
     expect(parseCallList(AUDIT("get_analysis_status", {}))).toBeNull();
   });
 
-  it("filters by account and time, and keeps untimed records in input order", () => {
+  it("filters by capture session and time, and keeps untimed records in input order", () => {
     const records = parseAuditRecords(
       [
         AUDIT("get_analysis_status", {}, { time: 1759100000003 }),
         AUDIT("show_dna_import", { mode: "initial" }, { time: 1759100000001 }),
-        AUDIT("get_snp_catalog", {}, { time: 1759100000002, userId: "someone-else" }),
+        AUDIT("get_snp_catalog", {}, { time: 1759100000002, captureId: "other" }),
       ].join("\n"),
     );
 
@@ -88,7 +123,7 @@ describe("audit log parsing", () => {
       "get_snp_catalog",
       "get_analysis_status",
     ]);
-    expect(auditedCalls(records, { userId: "user-9" }).map((call) => call.name)).toEqual([
+    expect(auditedCalls(records, { captureId: "cap-1" }).map((call) => call.name)).toEqual([
       "show_dna_import",
       "get_analysis_status",
     ]);
@@ -128,6 +163,17 @@ describe("building a fixture entry", () => {
     expect(entry.provenance).toBe(OBSERVED_PROVENANCE);
     expect(entry.expect).toEqual({ overview: true, import: false, followups: false });
     expect(traceEntryIssues(entry, "capture")).toEqual([]);
+  });
+
+  it("refuses an uncaptured call rather than filling missing arguments", () => {
+    expect(() =>
+      toTraceEntry({
+        prompt: "Show my current Mutant findings.",
+        state: "READY_FREE",
+        calls: [{ name: "get_analysis_status", arguments: {}, captured: false }],
+        capturedAt: "2026-09-29T23:10:00.000Z",
+      }),
+    ).toThrow(/no argument values/);
   });
 
   it("refuses a trace whose sequence contradicts the card mounts", () => {

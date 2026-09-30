@@ -44,6 +44,15 @@ export interface MutantMcpStackProps extends StackProps {
   /** When true, accepts dev-free/dev-paid tokens instead of validating against OIDC. */
   devMode?: boolean;
   /**
+   * Designated synthetic-capture switch. When true the tool-call audit record
+   * additionally carries routing-relevant argument values (see
+   * `src/tools/audit.ts`). Leave false in production; enable only in a
+   * controlled environment while recording a golden routing trace.
+   */
+  traceCapture?: boolean;
+  /** Opaque id correlating one controlled synthetic capture session. */
+  traceCaptureId?: string;
+  /**
    * Approved informational plan page for the Free-plan notice's learn-more link.
    * Defaults to the production `/plans` plan page.
    */
@@ -104,6 +113,10 @@ export class MutantMcpStack extends Stack {
         MUTANT_CORS_ORIGINS:
           props.corsOrigins ?? "https://chatgpt.com,https://chat.openai.com",
         MUTANT_DEV_MODE: props.devMode ? "true" : "false",
+        // Synthetic routing-trace capture. Off by default: an ordinary log must
+        // never carry an argument value.
+        MUTANT_TRACE_CAPTURE: props.traceCapture ? "true" : "false",
+        MUTANT_TRACE_CAPTURE_ID: props.traceCaptureId ?? "",
         MUTANT_PLAN_INFO_URL: props.planInfoUrl ?? "https://mutantgenomics.com/plans",
         MUTANT_ONBOARDING_URL: props.onboardingUrl ?? "https://mutantgenomics.com/onboarding",
         MUTANT_REQUEST_TIMEOUT_MS: String(props.requestTimeoutMs ?? 20000),

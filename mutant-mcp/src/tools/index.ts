@@ -5,7 +5,12 @@ import {
   type MutantBackendClient,
 } from "../clients/mutant-lambda-client.js";
 import { scopeFor, type AppConfig } from "../config.js";
-import { auditToolCall, type ToolCallStatus } from "./audit.js";
+import {
+  auditToolCall,
+  classifyThrownError,
+  responseErrorCode,
+  type AuditContext,
+} from "./audit.js";
 import { createReportTool } from "./create-report.js";
 import { getAnalysisContextTool } from "./get-analysis-context.js";
 import { getAnalysisStatusTool } from "./get-analysis-status.js";
@@ -86,7 +91,9 @@ export function toolMeta(
  *
  * The same wrapper writes the tool-call audit record every call needs to be
  * reconstructable from the logs (see `./audit.ts`); because it sits here rather
- * than in each handler, a new tool is audited by construction.
+ * than in each handler, a new tool is audited by construction. The record is a
+ * fixed safe schema: no argument value and no caller-supplied key is persisted
+ * unless the process is a designated synthetic capture.
  */
 export function registerTools(
   server: McpServer,
@@ -97,6 +104,11 @@ export function registerTools(
   logger: ToolRuntime["logger"],
 ): void {
   const runtime: ToolRuntime = { user: ctx, config, client, requestId, logger };
+  const auditContext: AuditContext = {
+    requestId,
+    capture: config.MUTANT_TRACE_CAPTURE,
+    captureId: config.MUTANT_TRACE_CAPTURE_ID,
+  };
   for (const definition of TOOL_DEFINITIONS) {
     server.registerTool(
       definition.name,
@@ -111,28 +123,45 @@ export function registerTools(
       async (args: Record<string, unknown> | undefined) => {
         const callArgs = (args ?? {}) as Record<string, unknown>;
         const startedAt = Date.now();
-        const audit = (status: ToolCallStatus) =>
-          auditToolCall(
-            definition.name,
-            callArgs,
-            { requestId: runtime.requestId, userId: runtime.user.userId },
-            { status, startedAt },
-          );
 
         const denied = enforceScope(definition, runtime);
         if (denied) {
           // A denial is a routing fact worth having in a trace: it is what a
           // token missing a scope looks like from the server's side.
-          runtime.logger.warn(audit("scope_denied"), "tool call denied");
+          runtime.logger.warn(
+            auditToolCall(definition.name, callArgs, auditContext, {
+              status: "scope_denied",
+              startedAt,
+              errorCode: denied.error?.code,
+            }),
+            "tool call denied",
+          );
           return respond(denied, runtime);
         }
 
         try {
           const result = await definition.handler(callArgs, runtime);
-          runtime.logger.info(audit(result.isError === true ? "error" : "ok"), "tool call");
+          const failed = result.isError === true;
+          runtime.logger.info(
+            auditToolCall(definition.name, callArgs, auditContext, {
+              status: failed ? "error" : "ok",
+              startedAt,
+              errorCode: failed ? responseErrorCode(result) : undefined,
+            }),
+            "tool call",
+          );
           return result;
         } catch (error) {
-          runtime.logger.error({ ...audit("error"), err: error }, "tool call failed");
+          // Log a classified code, never the exception object: its message and
+          // stack can carry data from an SDK or a nested backend failure.
+          runtime.logger.error(
+            auditToolCall(definition.name, callArgs, auditContext, {
+              status: "error",
+              startedAt,
+              errorCode: classifyThrownError(error),
+            }),
+            "tool call failed",
+          );
           throw error;
         }
       },

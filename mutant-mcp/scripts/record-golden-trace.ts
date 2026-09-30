@@ -4,16 +4,18 @@
  *
  * Usage (from `mutant-mcp/`):
  *   npm run record:trace -- --prompt "<entry prompt>" --state READY_FREE \
- *     --calls captured-logs.json [--user <sub>] [--from <iso>] [--to <iso>] \
+ *     --calls captured-logs.json [--capture <id>] [--from <iso>] [--to <iso>] \
  *     [--query <keyword> ...] [--captured-at <iso>] [--write]
  *
  * Without `--write` the entry is printed; the fixture is only touched with
  * `--write`, which replaces the entry for the same prompt and state (or appends
  * it) and marks it `observed`, which is what the release gate checks.
  *
- * The log is the deployment's own output: every tool call emits an
- * `event: "tool_call"` record (see src/tools/audit.ts) with the audited
- * arguments, so a sequence is captured as the model actually selected it.
+ * The log must come from a designated synthetic-capture session: ordinary
+ * production logs withhold every argument value (see src/tools/audit.ts), so a
+ * capture is taken with `MUTANT_TRACE_CAPTURE=1` in a controlled environment and
+ * its records carry `capture: "synthetic"`. A log without that marker is
+ * refused rather than turned into a trace with silently missing arguments.
  */
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -38,7 +40,7 @@ interface Args {
   prompt?: string;
   state?: string;
   calls?: string;
-  user?: string;
+  capture?: string;
   from?: string;
   to?: string;
   capturedAt?: string;
@@ -47,14 +49,14 @@ interface Args {
   help: boolean;
 }
 
-const USAGE = `Record a golden-prompt routing trace from an observed tool-call log.
+const USAGE = `Record a golden-prompt routing trace from a designated synthetic-capture log.
 
   --prompt <text>        The entry prompt the conversation started with (required)
   --state <STATE>        The account state the capture was taken against (required)
                          one of: ${TRACE_STATES.join(", ")}
-  --calls <file>         Tool-call log to read (required): the audit records from the
-                         deployment logs, or a bare [{ name, arguments }] list
-  --user <sub>           Only records for this account
+  --calls <file>         Synthetic-capture log to read (required): audit records with
+                         \`capture: "synthetic"\`, or a bare [{ name, arguments }] list
+  --capture <id>         Only records from this capture session (MUTANT_TRACE_CAPTURE_ID)
   --from <iso>           Only records at or after this time
   --to <iso>             Only records at or before this time
   --query <keyword>      Value for a query the audit log withheld, in call order
@@ -82,8 +84,8 @@ function parseArgs(argv: readonly string[]): Args {
       case "--calls":
         args.calls = value();
         break;
-      case "--user":
-        args.user = value();
+      case "--capture":
+        args.capture = value();
         break;
       case "--from":
         args.from = value();
@@ -124,9 +126,19 @@ async function readCalls(file: string, args: Args): Promise<CapturedCall[]> {
       `${file} contains no tool-call audit records (event: "tool_call"); is this the right log?`,
     );
   }
-  const calls = auditedCalls(records, { userId: args.user, from: args.from, to: args.to });
+  const calls = auditedCalls(records, {
+    captureId: args.capture,
+    from: args.from,
+    to: args.to,
+  });
   if (calls.length === 0) {
     throw new Error(`${file} has ${records.length} audit record(s) but none matched the filter`);
+  }
+  if (calls.every((call) => call.captured === false)) {
+    throw new Error(
+      `${file} holds only ordinary production records, which withhold every argument value. ` +
+        "Record the capture from a designated synthetic session with MUTANT_TRACE_CAPTURE=1 and re-export.",
+    );
   }
   return calls;
 }

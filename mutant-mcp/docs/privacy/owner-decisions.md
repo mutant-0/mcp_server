@@ -32,6 +32,8 @@ response-field work (backlog note).
 | D8 | Backend log-group retention | All four report-generator/store groups have `retentionInDays = None` (never expire) | infra | PRIV-06 |
 | D9 | Whether the MCP log group is adopted (retention not applied) vs created | Both `mutant-mcp-dev`/`prod` show 30 days; confirm adopted vs created per env | infra | PRIV-06 |
 | D10 | Whether the portal upload route (Route B) writes raw files today | S3 `mutantbt-genetic-data` exists with `users/` prefix behavior in code; live usage not enumerated | backend/portal | PRIV-03, PRIV-07 |
+| D11 | Backend log interpolation of exception messages | `core/persistence.py` interpolates `{renew_err}`-style SDK errors into warnings (lines ~343, 400, 465, 578, 690, 758, 829, 891); replace with a classified code (PRIV-02 pattern) | backend | PRIV-06, PRIV-07 |
+| D12 | Backend log retention + restricted-correlation purpose | report-generator log groups never expire (D8); truncated `user_id` still linkable; needs retention + a documented restricted channel for subject correlation | infra/backend | PRIV-06, PRIV-07 |
 
 ## 3. Consent-route decision input (PRIV-01 step 2)
 

@@ -35,6 +35,13 @@ const EnvSchema = z.object({
   MUTANT_SNP_CATALOG_MAX_BYTES: z.coerce.number().int().positive().default(2000000),
   MUTANT_MAX_REQUEST_BYTES: z.coerce.number().int().positive().default(DEFAULT_MAX_REQUEST_BYTES),
   MUTANT_DEV_MODE: z.string().trim().default("false"),
+  // Designated synthetic-capture switch. When true the tool-call audit record
+  // additionally carries the routing-relevant argument values a golden trace
+  // needs (see src/tools/audit.ts). Ordinary production logs must leave this
+  // false so no query, genotype, filename, id, or context value is persisted.
+  MUTANT_TRACE_CAPTURE: z.string().trim().default("false"),
+  // Opaque id correlating one controlled synthetic capture session.
+  MUTANT_TRACE_CAPTURE_ID: z.string().trim().default(""),
   LOG_LEVEL: z
     .enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"])
     .default("info"),
@@ -56,6 +63,8 @@ export interface AppConfig {
   MUTANT_SNP_CATALOG_MAX_BYTES: number;
   MUTANT_MAX_REQUEST_BYTES: number;
   MUTANT_DEV_MODE: boolean;
+  MUTANT_TRACE_CAPTURE: boolean;
+  MUTANT_TRACE_CAPTURE_ID: string;
   LOG_LEVEL: string;
 }
 
@@ -147,5 +156,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     ...parsed,
     MUTANT_DEV_MODE: parsed.MUTANT_DEV_MODE === "true",
+    MUTANT_TRACE_CAPTURE: parsed.MUTANT_TRACE_CAPTURE === "true",
   };
 }

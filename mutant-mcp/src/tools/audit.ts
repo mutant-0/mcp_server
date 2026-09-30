@@ -1,127 +1,197 @@
 import type { ToolName } from "../contract.js";
 
+export { classifyThrownError } from "../error-classification.js";
+
 /**
- * Tool-call audit log.
+ * Tool-call audit log: a safe operational record, not an argument dump.
  *
- * Every tool call writes exactly one record carrying `event: "tool_call"`, in
- * call order, so a conversation's model-selected tool calls can be
- * reconstructed from the deployment's logs. That is the capture path for the
- * golden-prompt routing fixture: `scripts/record-golden-trace.ts` reads these
- * records and writes `tests/golden-prompt-routing-traces.json`, which is why
- * the record carries the arguments the evaluation asserts on.
+ * Every tool call writes exactly one record carrying `event: "tool_call"`. The
+ * record is deliberately built from a fixed schema so that no argument *value*
+ * (a search query, a genotype, a filename, a gene/finding id, a cursor, the
+ * transient chromosome context) and no caller-supplied key can become part of
+ * the ordinary production log. Any subject correlation that is genuinely
+ * required belongs in a restricted security channel with its own purpose and
+ * retention; the tool-call log is not that channel.
  *
- * Argument values are limited to the fields a routing trace needs. Genotype
- * payloads (`snps`, `wgs_variant_calls`), the request-only `analysis_context`,
- * `upload_meta`, and rsID lists are recorded by key only: they are either
- * deliberately never logged (see `create_report`) or already summarized by the
- * tool's own log record. A `query` value is recorded only when it looks like the
- * catalog-topic keyword the tool description asks for; anything longer or
- * sentence-shaped is written as `[redacted]`, so the audit trail cannot become a
- * store of the user's health prose.
+ * Routing reconstruction is a separate, explicit concern. Ordinary  records
+ * carry the tool name and argument *names* only. When, and only when, the
+ * process is a designated synthetic capture (`MUTANT_TRACE_CAPTURE`), the record
+ * additionally carries `capture: "synthetic"` and the routing-relevant argument
+ * values needed to record a golden trace. That flag is set only in a controlled
+ * environment, so a production log can never carry user data through this path.
  */
 export const TOOL_CALL_EVENT = "tool_call";
 
-export const REDACTED_ARGUMENT = "[redacted]";
+/** Marks a record written from a designated synthetic capture session. */
+export const SYNTHETIC_CAPTURE = "synthetic";
+
+export type ToolCallStatus = "ok" | "error" | "scope_denied";
 
 /**
- * Audited argument names per tool. A name absent here still appears in the
- * record's `argKeys`, so a withheld value is visible as withheld rather than
- * silently missing.
+ * The complete set of argument names each tool's schema accepts. A record's
+ * `argNames` is this list intersected with the arguments actually supplied, so
+ * a sender-invented key is never persisted. Values are never recorded here.
  */
-const AUDITED_ARGUMENTS: Record<ToolName, readonly string[]> = {
+const KNOWN_ARGUMENTS: Record<ToolName, readonly string[]> = {
   get_analysis_status: [],
   poll_analysis_status: [],
   show_analysis_overview: [],
-  show_analysis_followups: ["intent", "analysis_version", "hypothesis_ids", "source"],
+  show_analysis_followups: ["analysis_version", "hypothesis_ids", "intent", "source"],
   get_analysis_context: [],
-  list_health_hypotheses: ["query", "limit", "cursor", "analysis_version"],
-  explain_health_hypothesis: ["hypothesis_id", "analysis_version"],
+  list_health_hypotheses: ["analysis_version", "cursor", "limit", "query"],
+  explain_health_hypothesis: ["analysis_version", "hypothesis_id"],
   get_supporting_evidence: [
-    "hypothesis_id",
-    "kind",
-    "pattern_id",
-    "include_context",
-    "limit",
-    "cursor",
     "analysis_version",
+    "cursor",
+    "hypothesis_id",
+    "include_context",
+    "kind",
+    "limit",
+    "pattern_id",
   ],
   get_genetic_context: [
-    "hypothesis_id",
-    "module_id",
+    "analysis_version",
+    "cursor",
     "gene",
+    "hypothesis_id",
     "include_modules",
     "limit",
-    "cursor",
-    "analysis_version",
+    "module_id",
+    "rsids",
   ],
   show_dna_import: ["mode"],
   get_snp_catalog: [],
-  create_report: ["report_id", "import_request_id"],
+  create_report: [
+    "analysis_context",
+    "import_request_id",
+    "report_id",
+    "snps",
+    "upload_meta",
+    "wgs_variant_calls",
+  ],
 };
 
 /**
- * The shape of a catalog-topic search query: words, digits, and the punctuation
- * that appears inside catalog names, with no commas or sentence structure. The
- * input schema allows 120 characters; the routing evaluation asserts `query` is
- * at most 64 characters and never the health-history prose the user typed, so
- * anything outside that bound is withheld rather than logged.
+ * The routing-relevant argument values a golden trace needs, per tool. These are
+ * emitted only in a designated synthetic capture; `snps`, `wgs_variant_calls`,
+ * `upload_meta`, and `analysis_context` are never routed to a trace, so even a
+ * capture cannot persist genotypes, filenames, or the transient context.
  */
-const CATALOG_KEYWORD = /^[\p{L}\p{N}][\p{L}\p{N} .'+#_-]*$/u;
-const AUDITED_QUERY_MAX_CHARS = 64;
-
-export type ToolCallStatus = "ok" | "error" | "scope_denied";
+const ROUTING_ARGUMENTS: Record<ToolName, readonly string[]> = {
+  get_analysis_status: [],
+  poll_analysis_status: [],
+  show_analysis_overview: [],
+  show_analysis_followups: ["analysis_version", "hypothesis_ids", "intent", "source"],
+  get_analysis_context: [],
+  list_health_hypotheses: ["analysis_version", "cursor", "limit", "query"],
+  explain_health_hypothesis: ["analysis_version", "hypothesis_id"],
+  get_supporting_evidence: [
+    "analysis_version",
+    "cursor",
+    "hypothesis_id",
+    "include_context",
+    "kind",
+    "limit",
+    "pattern_id",
+  ],
+  get_genetic_context: [
+    "analysis_version",
+    "cursor",
+    "gene",
+    "hypothesis_id",
+    "include_modules",
+    "limit",
+    "module_id",
+    "rsids",
+  ],
+  show_dna_import: ["mode"],
+  get_snp_catalog: [],
+  create_report: ["import_request_id", "report_id"],
+};
 
 export interface ToolCallAudit {
   event: typeof TOOL_CALL_EVENT;
   tool: ToolName;
+  /** Opaque per-request correlation id; never an account identifier. */
   requestId: string;
-  userId: string;
-  /** Every argument name the caller sent, audited or not, sorted. */
-  argKeys: string[];
-  /** The audited subset of the arguments, with withheld values redacted. */
-  args: Record<string, unknown>;
   status: ToolCallStatus;
   durationMs: number;
+  /** Known argument names present, sorted. Names only; never values. */
+  argNames: string[];
+  /** Classified failure code (a contract error code or a bounded classifier). */
+  errorCode?: string;
+  /** Set only on a record written from a designated synthetic capture. */
+  capture?: typeof SYNTHETIC_CAPTURE;
+  /** Opaque capture-session id for correlating a synthetic capture. */
+  captureId?: string;
+  /** Routing-relevant values, present only on a synthetic-capture record. */
+  args?: Record<string, unknown>;
 }
 
-/** True when a search query is short and word-shaped enough to be a catalog topic. */
-export function isCatalogKeyword(value: string): boolean {
-  return value.length > 0 && value.length <= AUDITED_QUERY_MAX_CHARS && CATALOG_KEYWORD.test(value);
+export interface AuditContext {
+  requestId: string;
+  /** True only in a designated synthetic-capture environment. */
+  capture?: boolean;
+  /** Opaque capture-session id, recorded only when `capture` is set. */
+  captureId?: string;
 }
 
-function auditedValue(tool: ToolName, key: string, value: unknown): unknown {
-  if (tool === "list_health_hypotheses" && key === "query") {
-    return typeof value === "string" && isCatalogKeyword(value) ? value : REDACTED_ARGUMENT;
-  }
-  return value;
+export interface AuditOutcome {
+  status: ToolCallStatus;
+  startedAt: number;
+  errorCode?: string;
 }
 
-export function auditedArguments(
+/** The known argument names present, drawn from the tool's schema keys. */
+export function knownArgumentNames(
+  tool: ToolName,
+  args: Record<string, unknown>,
+): string[] {
+  return KNOWN_ARGUMENTS[tool].filter((key) => key in args).sort();
+}
+
+/** Routing-relevant values only, and only for a designated synthetic capture. */
+function capturedArguments(
   tool: ToolName,
   args: Record<string, unknown>,
 ): Record<string, unknown> {
-  const audited: Record<string, unknown> = {};
-  for (const key of AUDITED_ARGUMENTS[tool]) {
-    if (!(key in args)) continue;
-    audited[key] = auditedValue(tool, key, args[key]);
+  const captured: Record<string, unknown> = {};
+  for (const key of ROUTING_ARGUMENTS[tool]) {
+    if (key in args) captured[key] = args[key];
   }
-  return audited;
+  return captured;
+}
+
+/**
+ * Extract a classified contract error code from a tool result, rejecting any
+ * value that is not a bounded code (so a message can never be promoted to a
+ * code).
+ */
+export function responseErrorCode(result: unknown): string | undefined {
+  const structured = (result as { structuredContent?: unknown } | null)?.structuredContent;
+  const code = (structured as { error?: { code?: unknown } } | null)?.error?.code;
+  return typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : undefined;
 }
 
 export function auditToolCall(
   tool: ToolName,
   args: Record<string, unknown>,
-  context: { requestId: string; userId: string },
-  outcome: { status: ToolCallStatus; startedAt: number },
+  context: AuditContext,
+  outcome: AuditOutcome,
 ): ToolCallAudit {
-  return {
+  const record: ToolCallAudit = {
     event: TOOL_CALL_EVENT,
     tool,
     requestId: context.requestId,
-    userId: context.userId,
-    argKeys: Object.keys(args).sort(),
-    args: auditedArguments(tool, args),
     status: outcome.status,
     durationMs: Date.now() - outcome.startedAt,
+    argNames: knownArgumentNames(tool, args),
   };
+  if (outcome.errorCode) record.errorCode = outcome.errorCode;
+  if (context.capture) {
+    record.capture = SYNTHETIC_CAPTURE;
+    if (context.captureId) record.captureId = context.captureId;
+    record.args = capturedArguments(tool, args);
+  }
+  return record;
 }

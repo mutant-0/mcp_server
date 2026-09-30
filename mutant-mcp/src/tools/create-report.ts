@@ -156,7 +156,6 @@ export const createReportTool: MutantToolDefinition = {
     const log = {
       tool: "create_report",
       requestId: runtime.requestId,
-      userId: runtime.user.userId,
       importRequestId,
       ...metrics,
       analysisId: typeof data.analysis_id === "string" ? data.analysis_id : null,

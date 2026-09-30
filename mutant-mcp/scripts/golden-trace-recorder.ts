@@ -14,6 +14,7 @@
  * `tests/golden-trace-recorder.test.ts`).
  */
 import type { ToolName } from "../src/contract.js";
+import { SYNTHETIC_CAPTURE } from "../src/tools/audit.js";
 import {
   cardMountsFrom,
   traceEntryIssues,
@@ -32,15 +33,25 @@ export interface AuditRecord {
   tool?: unknown;
   time?: unknown;
   timestamp?: unknown;
-  userId?: unknown;
+  capture?: unknown;
+  captureId?: unknown;
   args?: unknown;
-  argKeys?: unknown;
+  argNames?: unknown;
   status?: unknown;
+  errorCode?: unknown;
 }
 
 export interface CapturedCall {
   name: string;
   arguments: Record<string, unknown>;
+  /**
+   * True when the call's argument values came from a designated synthetic
+   * capture. Ordinary records leave this false (arguments are withheld), so a
+   * trace built from them is visibly incomplete rather than silently filled.
+   */
+  captured?: boolean;
+  /** Opaque synthetic-capture session id, when the record carries one. */
+  captureId?: string;
 }
 
 export interface CaptureOptions {
@@ -127,10 +138,14 @@ export function parseAuditRecords(text: string): AuditRecord[] {
 /**
  * The tool-call audit records in call order. Records without a timestamp keep
  * their input order, so a manually assembled list still replays in order.
+ *
+ * Argument values are read only from records written by a designated synthetic
+ * capture (`capture: "synthetic"`); an ordinary production record carries no
+ * values, so its `arguments` is empty and `captured` is false.
  */
 export function auditedCalls(
   records: readonly AuditRecord[],
-  filter: { userId?: string; from?: string; to?: string } = {},
+  filter: { captureId?: string; from?: string; to?: string } = {},
 ): CapturedCall[] {
   const from = filter.from === undefined ? null : Date.parse(filter.from);
   const to = filter.to === undefined ? null : Date.parse(filter.to);
@@ -138,7 +153,7 @@ export function auditedCalls(
   return records
     .map((record, index) => ({ record, index, time: asTime(record.time) }))
     .filter(({ record, time }) => {
-      if (filter.userId !== undefined && record.userId !== filter.userId) return false;
+      if (filter.captureId !== undefined && record.captureId !== filter.captureId) return false;
       if (from !== null && (time === null || time < from)) return false;
       if (to !== null && (time === null || time > to)) return false;
       return true;
@@ -147,15 +162,21 @@ export function auditedCalls(
       if (a.time === null || b.time === null) return a.index - b.index;
       return a.time - b.time || a.index - b.index;
     })
-    .map(({ record }) => ({
-      name: record.tool as string,
-      arguments: asRecord(record.args) ?? {},
-    }));
+    .map(({ record }) => {
+      const captured = record.capture === SYNTHETIC_CAPTURE;
+      return {
+        name: record.tool as string,
+        arguments: captured ? asRecord(record.args) ?? {} : {},
+        captured,
+        ...(typeof record.captureId === "string" ? { captureId: record.captureId } : {}),
+      };
+    });
 }
 
 /**
  * A bare `[{ name, arguments }]` list, as an alternative to a log export for a
- * capture that was transcribed from the host's tool-call detail view.
+ * capture that was transcribed from the host's tool-call detail view. A
+ * transcribed list is treated as captured: the operator supplied the values.
  */
 export function parseCallList(text: string): CapturedCall[] | null {
   const trimmed = text.trim();
@@ -167,7 +188,7 @@ export function parseCallList(text: string): CapturedCall[] | null {
     if (!call) throw new Error("each captured call must be an object");
     const name = call.name ?? call.tool;
     if (typeof name !== "string") throw new Error("each captured call needs a name");
-    return { name, arguments: asRecord(call.arguments ?? call.args) ?? {} };
+    return { name, arguments: asRecord(call.arguments ?? call.args) ?? {}, captured: true };
   });
 }
 
@@ -196,7 +217,16 @@ export function toTraceEntry(options: CaptureOptions): GoldenTrace {
   const calls = fillRedactedQueries(options.calls, options.redactedQueries ?? []);
   if (calls.length === 0) {
     throw new Error(
-      "no tool calls found; check --user / --from / --to and that the log holds tool-call audit records",
+      "no tool calls found; check --capture / --from / --to and that the log holds tool-call audit records",
+    );
+  }
+
+  const uncaptured = calls.filter((call) => call.captured === false);
+  if (uncaptured.length > 0) {
+    throw new Error(
+      `${uncaptured.length} call(s) carry no argument values: the log is an ordinary production record, ` +
+        "which withholds them. Record the capture from a designated synthetic session with " +
+        "MUTANT_TRACE_CAPTURE=1 and re-export; do not hand-fill the missing arguments.",
     );
   }
 
@@ -345,7 +375,7 @@ export async function writeTraceEntry(
 }
 
 /** The fixture's capture instructions, so the recorded fields stay documented. */
-export const CAPTURE_INSTRUCTIONS = `Recorded with \`npm run record:trace\` from the deployment's tool-call audit records (\`event: "tool_call"\`; see src/tools/audit.ts), or by hand for the fields the audit log withholds. For each entry: start a NEW ChatGPT conversation with the Mutant connection (or installed plugin) enabled, send \`prompt\` on an account in \`state\`, and record the tool calls and arguments in order in \`toolCalls\`. An entry is authoritative only once \`provenance\` is "${OBSERVED_PROVENANCE}" with a \`capturedAt\` timestamp; entries left as "${PENDING_PROVENANCE}" are placeholders that the release gate (GOLDEN_TRACES_REQUIRED=1) rejects.`;
+export const CAPTURE_INSTRUCTIONS = `Recorded with \`npm run record:trace\` from a designated synthetic-capture session. Ordinary production logs carry no argument values (see src/tools/audit.ts); the deployment must run with MUTANT_TRACE_CAPTURE=1 in a controlled environment so the captured records carry \`capture: "synthetic"\`. For each entry: start a NEW ChatGPT conversation with the Mutant connection (or installed plugin) enabled, send \`prompt\` on a synthetic account in \`state\`, and record the tool calls and arguments in order in \`toolCalls\`. An entry is authoritative only once \`provenance\` is "${OBSERVED_PROVENANCE}" with a \`capturedAt\` timestamp; entries left as "${PENDING_PROVENANCE}" are placeholders that the release gate (GOLDEN_TRACES_REQUIRED=1) rejects.`;
 
 /**
  * Replace one top-level string value in place, so a document whose layout is

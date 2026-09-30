@@ -10,6 +10,7 @@ import {
 } from "./auth/token-validator.js";
 import type { MutantBackendClient } from "./clients/mutant-lambda-client.js";
 import { corsOrigins, analysisReadScope, dnaImportScope, supportedScopes, resourceUri, type AppConfig } from "./config.js";
+import { classifyThrownError, safeErrorName } from "./error-classification.js";
 import type { AppLogger } from "./logger.js";
 import {
   authenticationError,
@@ -201,7 +202,10 @@ async function handleRequest(
         );
         return;
       }
-      requestLogger.error({ err: error }, "token validation failed unexpectedly");
+      requestLogger.error(
+        { errorCode: classifyThrownError(error), errorName: safeErrorName(error) },
+        "token validation failed unexpectedly",
+      );
       challenge(res, config, "invalid_token", "Invalid or expired token");
       sendJson(res, 401, invalidTokenError());
       return;
@@ -225,7 +229,10 @@ async function handleRequest(
       }
     }
   } catch (error) {
-    requestLogger.error({ err: error }, "unhandled error while processing request");
+    requestLogger.error(
+      { errorCode: classifyThrownError(error), errorName: safeErrorName(error) },
+      "unhandled error while processing request",
+    );
     if (!res.headersSent) {
       sendJson(
         res,

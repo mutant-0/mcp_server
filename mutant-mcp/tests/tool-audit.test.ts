@@ -1,19 +1,21 @@
 /**
  * Tool-call audit log.
  *
- * The audit record is what makes the golden-prompt routing fixture recordable
- * from real traffic: one `event: "tool_call"` per call, in order, carrying the
- * arguments the routing evaluation asserts on and nothing else. These tests pin
- * both halves — that every registered tool is audited by construction, and that
- * the record cannot become a place where genotypes, the transient
- * sex-chromosome context, or the user's health prose end up in CloudWatch.
+ * The audit record must be a bounded, safe operational schema: tool, status,
+ * timing, an opaque request id, and argument *names* derived from the tool's own
+ * schema. It must never carry an argument *value*, an account identifier, or a
+ * caller-supplied key — that was the previous design's flaw, where a
+ * short-string heuristic let health-history prose (and a user id) into
+ * CloudWatch. These tests serialize the whole log for the success, scope-denial,
+ * and thrown-error paths and assert that sentinel data is absent while useful
+ * routing/ops signal remains.
  */
 import { describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { TOOL_NAMES, type ToolResponse } from "../src/contract.js";
 import { createMcpServer } from "../src/server.js";
-import { REDACTED_ARGUMENT, isCatalogKeyword } from "../src/tools/audit.js";
+import { auditToolCall, classifyThrownError, knownArgumentNames } from "../src/tools/audit.js";
 import {
   ANALYSIS_SCOPE,
   StubBackendClient,
@@ -25,12 +27,12 @@ import {
 
 const CATALOG_MATCHED_IMPORT = {
   snps: { rs4680: "GG", rs328: "CG" },
-  upload_meta: { provider: "23andMe", file_name: "raw.txt", file_size_bytes: 1234 },
+  upload_meta: { provider: "23andMe", file_name: "Jane_Doe_raw.txt", file_size_bytes: 1234 },
   import_request_id: "12345678-abcd-4ef0-9876-1234567890ab",
 };
 
-const SHARED_HISTORY =
-  "I have had fatigue and brain fog for months and my B12 was low in March 2024.";
+/** The review's example of health-history prose that reached the audit log. */
+const SHARED_HISTORY = "I have a rare desease";
 
 /** One valid call per registered tool, so the audit wrapper is exercised for all. */
 const CALLS: Array<{ name: string; arguments: Record<string, unknown> }> = [
@@ -58,6 +60,7 @@ const CALLS: Array<{ name: string; arguments: Record<string, unknown> }> = [
 async function connect(
   options: {
     scopes?: string[];
+    capture?: boolean;
     responder?: (operation: Parameters<typeof makeToolResponse>[0]) => ToolResponse;
   } = {},
 ) {
@@ -67,7 +70,9 @@ async function connect(
   );
   const server = createMcpServer(
     makeUser(options.scopes ? { scopes: options.scopes } : {}),
-    makeConfig(),
+    makeConfig(
+      options.capture ? { MUTANT_TRACE_CAPTURE: true, MUTANT_TRACE_CAPTURE_ID: "cap-1" } : {},
+    ),
     "req-audit",
     backendClient,
     capture.logger,
@@ -80,12 +85,13 @@ async function connect(
     client,
     backendClient,
     records: capture.records,
+    text: capture.text,
     audits: () => capture.records().filter((record) => record.event === "tool_call"),
   };
 }
 
 describe("tool-call audit records", () => {
-  it("records one ordered record per call, with the audited arguments", async () => {
+  it("records one ordered record per call with argument names but no values", async () => {
     const { client, audits } = await connect();
     await client.callTool({ name: "get_analysis_status", arguments: {} });
     await client.callTool({
@@ -101,16 +107,16 @@ describe("tool-call audit records", () => {
     expect(records[0]).toMatchObject({
       event: "tool_call",
       status: "ok",
-      argKeys: [],
-      args: {},
-      userId: "user-1",
+      argNames: [],
       requestId: "req-audit",
     });
     expect(records[1]).toMatchObject({
       status: "ok",
-      argKeys: ["limit", "query"],
-      args: { query: "b12", limit: 3 },
+      argNames: ["limit", "query"],
     });
+    // No account identifier and no argument value ever reach the record.
+    expect(records[1]).not.toHaveProperty("args");
+    expect(records[1]).not.toHaveProperty("userId");
     expect(typeof records[1]?.durationMs).toBe("number");
   });
 
@@ -125,21 +131,13 @@ describe("tool-call audit records", () => {
     expect(audits().every((record) => record.status === "ok")).toBe(true);
   });
 
-  it("withholds a search query that is not a catalog keyword", async () => {
-    const { client, audits } = await connect();
+  it("keeps health-history prose, filenames, genotypes, tokens, and context out of the full log", async () => {
+    const { client, text } = await connect();
+    await client.callTool({ name: "list_health_hypotheses", arguments: { query: SHARED_HISTORY } });
     await client.callTool({
       name: "list_health_hypotheses",
-      arguments: { query: SHARED_HISTORY },
+      arguments: { query: "Bearer sk-live-TOKEN-123" },
     });
-
-    const record = audits()[0];
-    expect(record?.args).toEqual({ query: REDACTED_ARGUMENT });
-    // The key is still visible, so a withheld value is visibly withheld.
-    expect(record?.argKeys).toEqual(["query"]);
-  });
-
-  it("keeps genotypes, upload metadata, and the transient context out of the record", async () => {
-    const { client, audits } = await connect();
     await client.callTool({
       name: "create_report",
       arguments: {
@@ -148,30 +146,24 @@ describe("tool-call audit records", () => {
       },
     });
 
-    const record = audits()[0];
-    expect(record?.tool).toBe("create_report");
-    expect(record?.args).toEqual({
-      import_request_id: CATALOG_MATCHED_IMPORT.import_request_id,
-    });
-    // The withheld values are recorded by key only.
-    expect(record?.argKeys).toEqual(
-      ["analysis_context", "import_request_id", "snps", "upload_meta"].sort(),
-    );
+    const serialized = text();
+    for (const sentinel of [
+      SHARED_HISTORY,
+      "rare desease",
+      "sk-live-TOKEN-123",
+      "Jane_Doe_raw.txt",
+      "raw.txt",
+      "rs4680",
+      "GG",
+      "sex_chromosome_pattern",
+      "sex_chromosome_confidence",
+      "user-1",
+    ]) {
+      expect(serialized, `log must not contain ${JSON.stringify(sentinel)}`).not.toContain(sentinel);
+    }
   });
 
-  it("records an rsID lookup by key, not by value", async () => {
-    const { client, audits } = await connect();
-    await client.callTool({
-      name: "get_genetic_context",
-      arguments: { rsids: ["rs4680"], limit: 5 },
-    });
-
-    const record = audits()[0];
-    expect(record?.args).toEqual({ limit: 5 });
-    expect(record?.argKeys).toEqual(["limit", "rsids"]);
-  });
-
-  it("records a scope denial as a routing fact instead of a call", async () => {
+  it("records a scope denial as a routing fact with a classified code", async () => {
     const { client, audits, backendClient } = await connect({ scopes: [ANALYSIS_SCOPE] });
     const result = await client.callTool({
       name: "show_dna_import",
@@ -184,7 +176,64 @@ describe("tool-call audit records", () => {
     expect(audits()[0]).toMatchObject({
       tool: "show_dna_import",
       status: "scope_denied",
-      args: { mode: "initial" },
+      errorCode: "INSUFFICIENT_SCOPE",
+      argNames: ["mode"],
+    });
+    expect(audits()[0]).not.toHaveProperty("args");
+  });
+
+  it("classifies a thrown error without copying its message or stack", async () => {
+    const boom = new Error("Jane_Doe_raw.txt contained rs4680 GG for user-1");
+    boom.name = "RangeError";
+    const { client, audits, text } = await connect({
+      responder: () => {
+        throw boom;
+      },
+    });
+
+    await client.callTool({ name: "get_analysis_status", arguments: {} }).catch(() => undefined);
+
+    expect(audits()).toHaveLength(1);
+    expect(audits()[0]).toMatchObject({ status: "error", errorCode: "RANGE_ERROR" });
+    expect(text()).not.toContain("Jane_Doe_raw.txt");
+    expect(text()).not.toContain("rs4680");
+    expect(text()).not.toContain("user-1");
+  });
+
+  it("derives argument names from the tool schema and drops unknown keys", () => {
+    const record = auditToolCall(
+      "list_health_hypotheses",
+      { bogus: "x", query: SHARED_HISTORY, limit: 2 },
+      { requestId: "req-1" },
+      { status: "ok", startedAt: Date.now() },
+    );
+    expect(record.argNames).toEqual(["limit", "query"]);
+    expect(record).not.toHaveProperty("args");
+    expect(knownArgumentNames("list_health_hypotheses", { bogus: "x" })).toEqual([]);
+  });
+
+  it("classifies thrown errors to a bounded code", () => {
+    expect(classifyThrownError(new Error("x"))).toBe("UNEXPECTED_ERROR");
+    const timeout = new Error("x");
+    timeout.name = "AbortError";
+    expect(classifyThrownError(timeout)).toBe("ABORTED");
+    expect(classifyThrownError("a string")).toBe("UNEXPECTED_ERROR");
+  });
+
+  it("captures routing values only in a designated synthetic capture", async () => {
+    const { client, audits } = await connect({ capture: true });
+    await client.callTool({ name: "list_health_hypotheses", arguments: { query: "b12", limit: 2 } });
+    await client.callTool({ name: "create_report", arguments: CATALOG_MATCHED_IMPORT });
+
+    const captured = audits();
+    expect(captured[0]).toMatchObject({
+      capture: "synthetic",
+      captureId: "cap-1",
+      args: { query: "b12", limit: 2 },
+    });
+    // Even a capture never routes genotypes, filenames, or the transient context.
+    expect(captured[1]?.args).toEqual({
+      import_request_id: CATALOG_MATCHED_IMPORT.import_request_id,
     });
   });
 
@@ -198,14 +247,5 @@ describe("tool-call audit records", () => {
     // The tool's own records describe the import (a submission and a completion)
     // and carry no `event`, so log assertions can address them separately.
     expect(forCreateReport.length).toBeGreaterThan(audit.length);
-  });
-
-  it("classifies keyword-shaped queries only", () => {
-    for (const keyword of ["b12", "thyroid", "histamine intolerance", "COMT"]) {
-      expect(isCatalogKeyword(keyword)).toBe(true);
-    }
-    for (const prose of [SHARED_HISTORY, "", "x".repeat(65), "what about my thyroid issues?"]) {
-      expect(isCatalogKeyword(prose)).toBe(false);
-    }
   });
 });

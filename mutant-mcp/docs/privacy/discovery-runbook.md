@@ -91,11 +91,16 @@ the actual tool/argument sequence.
 
 ```powershell
 npm run record:trace -- --prompt "<entry prompt>" --state READY_FREE `
-  --calls <log-export.json> --user <sub> --from <iso> --to <iso> --write
+  --calls <log-export.json> --capture <id> --from <iso> --to <iso> --write
 $env:GOLDEN_TRACES_REQUIRED = '1'
 npm exec -- vitest run tests/golden-prompt-routing.test.ts
 Remove-Item Env:\GOLDEN_TRACES_REQUIRED
 ```
+
+Run the deployment with `MUTANT_TRACE_CAPTURE=1` (and an opaque
+`MUTANT_TRACE_CAPTURE_ID`) for the synthetic session: ordinary production logs
+withhold every argument value, so a log without `capture: "synthetic"` records is
+refused rather than turned into a trace with silently missing arguments.
 
 Missing evidence must remain incomplete. Withheld `query` values are refused with
 an explanation rather than imported; that is a routing finding, not a capture.

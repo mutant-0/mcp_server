@@ -34,9 +34,9 @@ PRIV-05; this inventory is based on backend routes and the MCP client.
 | Import idempotency key (`import_request_id`) | `create_report` (`app.tsx:1393`) | De-duplicate retries | same | `Results` row `result_type = dna_import#<id>` (`mcp/wiring.py:313-370`) | Backend | Indefinite | `_purge_user_report_data` (Results prefix) / TTL none | backend |
 | Derived findings | read tools over backend | Hypotheses/evidence to ChatGPT | same | `Results` (`causes_response`, `modules#`, `patterns#`), `Assessments`, `Recommendations`, `Status`, `UserGenomics` report doc | **ChatGPT (structuredContent)** via `tool-result.ts:41` | Indefinite | same | backend -> MCP |
 | Per-marker genotypes | genotype-detail tools | Documented marker-detail task | same | Read from `UserGenomics`/genotype map; returned in `structuredContent` (`outputs.ts:460`) | **ChatGPT** | derived from stored calls | same | backend -> MCP |
-| Tool-call audit record | every tool call (`audit.ts`) | Routing evidence / ops | `userId` attached (`audit.ts:120`) | CloudWatch `/aws/lambda/mutant-mcp-<env>` JSON `event: "tool_call"`; `argKeys`, audited `args` (query may be redacted) | Internal ops | 30 days | log-group retention only | MCP |
-| Exception/error logs | handler failures (`logger.ts`) | Ops | may carry context | CloudWatch MCP log group; redaction list covers tokens + `snps`/`wgs_variant_calls` (`logger.ts:22-35`) | Internal ops | 30 days | retention only | MCP |
-| Backend request/response logs | import/result/deletion | Ops | `user_id` (truncated in messages) | backend log groups (`/aws/lambda/mutant-report-generator`, `dev-…`) | Internal ops | **None (never expire)** | none | backend |
+| Tool-call audit record | every tool call (`audit.ts`) | Routing evidence / ops | none (opaque `requestId`; no account id) | CloudWatch `/aws/lambda/mutant-mcp-<env>` JSON `event: "tool_call"`: tool, status, `errorCode`, `durationMs`, `requestId`, `argNames` (names only). Argument values only under `MUTANT_TRACE_CAPTURE` in a designated synthetic session (`capture: "synthetic"`) | Internal ops | 30 days | log-group retention only | MCP |
+| Exception/error logs | handler failures (`logger.ts`) | Ops | classified only | CloudWatch MCP log group. Thrown errors log a bounded `errorCode` + error name, never the message/stack (`error-classification.ts`); redaction covers tokens + `snps`/`wgs_variant_calls`/`analysis_context`/`upload_meta`/`file_name` as defence in depth | Internal ops | 30 days | retention only | MCP |
+| Backend request/response logs | import/result/deletion | Ops | `user_id` truncated to 8 chars in messages | backend log groups (`/aws/lambda/mutant-report-generator`, `dev-…`) | Internal ops | **None (never expire)** | none | backend |
 
 ### Route B — portal web upload
 
@@ -58,8 +58,8 @@ PRIV-05; this inventory is based on backend routes and the MCP client.
 | `Recommendations` | recommendations | `user_id` | TTL disabled | Yes (report prefix) |
 | `Status` | report status | `user_id` | TTL disabled | Yes |
 | `CacheVersions` | cache revision clock | `user_id` | **TTL enabled** (`ttl`) | Not a data store; not purged |
-| MCP CloudWatch log group | tool-call audit incl. `userId` | `userId` field | 30 days | No (retention only) |
-| Backend CloudWatch log groups | request/import/deletion logs | `user_id` in messages | none | No |
+| MCP CloudWatch log group | tool-call audit (no account id) | `requestId` | 30 days | No (retention only) |
+| Backend CloudWatch log groups | request/import/deletion logs | `user_id` truncated to 8 chars in messages | none | No |
 
 ## 3. Recipients
 
@@ -89,3 +89,40 @@ PRIV-05; this inventory is based on backend routes and the MCP client.
   will need a row added for it.
 - **Derived findings can encode context**: genotypes and inferred context can be
   reflected in derived results. Verify with PRIV-03 output projections.
+
+## 5. Historical log inventory and treatment (PRIV-02 step 6)
+
+Observed stores and their current treatment. "Purge" is deliberately **not**
+performed by the PRIV-02 code change; erasing audit evidence silently is out of
+scope, and any purge needs an owner decision and a documented retention rule.
+
+| Log group | What it may already contain | Access today | Retention today | PRIV-02 treatment |
+|---|---|---|---|---|
+| `/aws/lambda/mutant-mcp-<env>` | Pre-change `event: "tool_call"` records with `userId` and withheld/audited argument values (including short health prose that the removed keyword heuristic used to pass through) | Internal ops (CloudWatch); no separate role scoping observed | 30 days | Leave in place to age out under the 30-day retention. Records written after this change carry the safe schema (no account id, no values outside a designated synthetic capture). |
+| `/aws/lambda/mutant-report-generator`, `dev-mutant-report-generator` | Import/result/deletion logs with `user_id` truncated to 8 chars, cache/report keys, and some interpolated exception messages (`core/persistence.py`) | Internal ops | **none — never expires** | Retention is PRIV-06. Do not purge now. Backend error interpolation is a follow-up below. |
+| `/aws/lambda/mutant-mcp-dev` (and `-prod`) | Same as prod/dev MCP rows | Internal ops | 30 days | Same as above. |
+
+Any future subject correlation that is genuinely required (for example, abusing
+to a security incident) must live in a **restricted** channel with a written
+purpose and retention; a user id or a hash of one is still linkable data. The
+tool-call audit record is not that channel.
+
+### Backend logging inspection (PRIV-02, Files note)
+
+Inspected `report-generator/mcp/handlers.py` and `report-generator/core/persistence.py`:
+
+- `mcp/handlers.py:236` (`[MCP][COLD_CACHE]`) logs `str(user_id)[:8]` + report id +
+  reason on every cold-cache rejection. The truncation reduces but does not remove
+  linkability.
+- `core/persistence.py` cache/serve/delete paths log `str(user_id)[:8]`, cache
+  key, report id, and interpolated exception text (e.g. `{renew_err}` at
+  `persistence.py:343-346`, and similar `logger.warning(... {err})` sites around
+  lines 400, 465, 578, 690, 758, 829, 891). An interpolated SDK/DynamoDB error
+  message can carry values and should be replaced by a classified code.
+- Deletion paths (`_purge_user_report_data`, `_delete_response_cache_chunks`,
+  `delete_patterns_cache_chunks`, `delete_precomputed_causes`) log counts, not
+  payloads — good — but still attach the truncated user id.
+
+Follow-ups: **D11** (backend error interpolation -> classified codes) and
+**D12** (backend log retention + restricted-channel purpose) in
+`owner-decisions.md`.

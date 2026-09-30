@@ -9,10 +9,13 @@ export interface LogSink {
 
 /**
  * Structured JSON logger. Redacts bearer tokens and any authorization headers so
- * no credentials or health/genetic data can leak into CloudWatch logs.
+ * no credentials leak, and redacts the sensitive tool-argument fields as
+ * defence in depth.
  *
- * Genotype payloads are never logged by the tools themselves; the redaction list
- * is the second line of defence for anything that logs a raw request object.
+ * The privacy boundary is the audit schema in `./audit.ts`, which never records
+ * an argument value; this list is a second line of defence for anything that logs
+ * a raw request or backend object. A finite redaction list cannot make an
+ * arbitrary object safe, so it is not relied on as the boundary.
  */
 export function createLogger(level: string, sink?: LogSink): AppLogger {
   const options = {
@@ -32,6 +35,12 @@ export function createLogger(level: string, sink?: LogSink): AppLogger {
         "*.snps",
         "wgs_variant_calls",
         "*.wgs_variant_calls",
+        "analysis_context",
+        "*.analysis_context",
+        "upload_meta",
+        "*.upload_meta",
+        "file_name",
+        "*.file_name",
       ],
       censor: "[REDACTED]",
     },
