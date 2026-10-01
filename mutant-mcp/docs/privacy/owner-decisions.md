@@ -60,7 +60,7 @@ and the item stays `Open`.
 | # | Gap | Owner | Blocks |
 |---|---|---|---|
 | I1 | No TTL/lifecycle on raw-file + SNP/derived stores | infra/backend | PRIV-06 |
-| I2 | No consent records exist (collection/sharing proceed on UI state + OAuth scope) | backend/auth | PRIV-04 |
+| I2 | No consent records exist (collection/sharing proceed on UI state + OAuth scope) | backend/auth | **Addressed by PRIV-04:** durable `ConsentRecords` state + backend enforcement (`consent-model.md`); remains open until D3/D5/C1 and consent-evidence retention (PRIV-06) are resolved |
 | I3 | Deletion scope excludes logs, backups, consent evidence, ChatGPT copies | backend/portal | PRIV-07 |
 | I4 | Filename treated as non-sensitive but persisted | MCP/backend | PRIV-03 (**closed for the plugin path:** `file_name` optional in schema, stripped before transport; still persisted for legacy/portal callers — portal retirement is PRIV-05/PRIV-09) |
 | I5 | WGS records accept arbitrary properties | MCP/backend | PRIV-03 (**closed:** allowlist projection at both the MCP and backend contract boundaries) |

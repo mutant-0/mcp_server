@@ -1,15 +1,17 @@
 /**
- * Shared Mutant MCP contract (version 3.1.0).
+ * Shared Mutant MCP contract (version 3.2.0).
  *
  * These constants, error codes, and envelope types mirror the backend
  * implementation in `report-generator/mcp/contract.py`. The backend owns all
  * business semantics; the MCP Lambda is a thin, authenticated transport.
  *
- * 3.1.0 replaces the Free-plan upgrade offer surface: the public
- * `upgrade: {label, url}` object and `error.upgrade_url` are gone, replaced by an
- * optional, server-authored `plan_notice` (a factual sentence plus an optional
- * informational link). It is otherwise the 3.0.0 contract, which was a clean
- * break from 2.0.0:
+ * 3.2.0 adds server-side consent enforcement: a new `CONSENT_REQUIRED` error
+ * code and an optional `identity.client_id` on the internal request. It is
+ * otherwise the 3.1.0 contract, which replaced the Free-plan upgrade offer
+ * surface (the public `upgrade: {label, url}` object and `error.upgrade_url` are
+ * gone, replaced by an optional, server-authored `plan_notice` -- a factual
+ * sentence plus an optional informational link) and is otherwise the 3.0.0
+ * contract, which was a clean break from 2.0.0:
  *
  *  - every expected application failure is returned as `ok:false` with a
  *    structured `error.code` (never thrown through the MCP transport);
@@ -23,7 +25,7 @@
  * `regeneration`, `current_results_usable`, and `optional_actions`.
  */
 
-export const CONTRACT_VERSION = "3.1.0";
+export const CONTRACT_VERSION = "3.2.0";
 
 /**
  * Analysis tools. These require `analysis.read`.
@@ -117,6 +119,14 @@ export const ErrorCode = {
   UNSUPPORTED_GENOME_BUILD: "UNSUPPORTED_GENOME_BUILD",
   REPORT_GENERATION_FAILED: "REPORT_GENERATION_FAILED",
   PAYLOAD_TOO_LARGE: "PAYLOAD_TOO_LARGE",
+  /**
+   * The account has not granted (or has withdrawn) consent for the purpose this
+   * operation requires. Enforced at the authoritative backend resource
+   * boundary, so a valid OAuth token alone cannot reach sensitive collection or
+   * result retrieval. Not an authentication/scope failure: the host routes the
+   * user through the consent flow rather than re-running OAuth.
+   */
+  CONSENT_REQUIRED: "CONSENT_REQUIRED",
 } as const;
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -983,6 +993,8 @@ export const APP_ERROR_CODES = {
   report_generation_failed: "report_generation_failed",
   payload_too_large: "payload_too_large",
   service_unavailable: "service_unavailable",
+  /** The account must complete the consent flow before this sensitive operation. */
+  consent_required: "consent_required",
   // Derived by the DNA import component from the analysis lifecycle rather than
   // returned by a tool: `analysis_failed` when the analysis reaches a failed
   // state, `analysis_timeout` when polling stops without a terminal state. They
@@ -1015,6 +1027,8 @@ export function appErrorCode(code: string): AppErrorCode {
     case ErrorCode.PAYLOAD_TOO_LARGE:
     case ErrorCode.RESPONSE_TOO_LARGE:
       return APP_ERROR_CODES.payload_too_large;
+    case ErrorCode.CONSENT_REQUIRED:
+      return APP_ERROR_CODES.consent_required;
     default:
       return APP_ERROR_CODES.service_unavailable;
   }

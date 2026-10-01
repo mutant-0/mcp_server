@@ -18,7 +18,12 @@ export interface MutantBackendEvent {
   source: "mutant-mcp";
   contract_version: typeof CONTRACT_VERSION;
   operation: BackendOperation;
-  identity: { user_id: string };
+  /**
+   * Verified identity. `client_id` is the OAuth client the token was issued to
+   * (connector vs. portal) and is used only to partition consent state; it is
+   * derived from the verified token, never from tool arguments.
+   */
+  identity: { user_id: string; client_id?: string };
   arguments: Record<string, unknown>;
   request_context: { request_id: string };
 }
@@ -42,7 +47,7 @@ export function buildBackendEvent(
     source: "mutant-mcp",
     contract_version: CONTRACT_VERSION,
     operation,
-    identity: { user_id: ctx.userId },
+    identity: { user_id: ctx.userId, ...(ctx.clientId ? { client_id: ctx.clientId } : {}) },
     arguments: args,
     request_context: { request_id: requestId },
   };

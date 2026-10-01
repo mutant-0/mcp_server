@@ -907,4 +907,38 @@ describe("contract v3.0 acceptance", () => {
     expect(envelope.error?.code).toBe("ANALYSIS_VERSION_CHANGED");
     expect(envelope.error?.next_action?.tool).toBe("show_analysis_overview");
   });
+
+  it("surfaces CONSENT_REQUIRED without an OAuth challenge", async () => {
+    const { client } = await connect(() =>
+      makeErrorResponse("CONSENT_REQUIRED", "Consent is required.", {
+        app_code: "consent_required",
+      }),
+    );
+    const result = (await client.callTool({
+      name: "create_report",
+      arguments: MINIMAL_ARGS.create_report,
+    })) as { isError?: boolean; _meta?: Record<string, unknown> };
+
+    expect(result.isError).toBe(true);
+    const envelope = envelopeOf(result);
+    expect(envelope.error?.code).toBe("CONSENT_REQUIRED");
+    expect(envelope.error?.app_code).toBe("consent_required");
+    // Consent is not an authorization failure: the host must not be told to
+    // re-run OAuth.
+    expect(result._meta?.["mcp/www_authenticate"]).toBeUndefined();
+  });
+
+  it("still challenges a genuine scope failure", async () => {
+    const { client } = await connect(() =>
+      makeErrorResponse("INSUFFICIENT_SCOPE", "Missing scope.", {
+        required_scope: ANALYSIS_SCOPE,
+      }),
+    );
+    const result = (await client.callTool({
+      name: "get_analysis_context",
+      arguments: {},
+    })) as { _meta?: Record<string, unknown> };
+
+    expect(result._meta?.["mcp/www_authenticate"]).toBeDefined();
+  });
 });

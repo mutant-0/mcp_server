@@ -1,4 +1,4 @@
-# Mutant MCP contract (3.1.0)
+# Mutant MCP contract (3.2.0)
 
 This document describes the implemented contract between the MCP Lambda
 (`mutant-mcp`) and the report-generator backend (`report-generator/mcp`). The
@@ -6,14 +6,34 @@ backend is authoritative for every business rule and returns the typed `data`
 shapes; the Lambda is a thin, authenticated transport that adds only the
 MCP-facing presentation (`content`, `suggested_prompts`, widget `_meta`).
 
-Version 3.1.0 replaces the Free-plan upgrade offer surface. The public
+Version 3.2.0 adds server-side consent enforcement. A new `CONSENT_REQUIRED`
+error code is returned by the authoritative backend before sensitive collection
+(`create_report`) and before sensitive result retrieval, and the internal request
+identity may now carry an optional `client_id` (the OAuth client the verified
+token was issued to) so consent state is partitioned per integration. It is
+otherwise the 3.1.0 contract, which replaced the Free-plan upgrade offer surface.
+
+What changed in 3.2.0:
+
+- New `CONSENT_REQUIRED` error code and matching `error.app_code`
+  (`consent_required`). It is **not** an authentication/scope failure: the host
+  routes the user through the consent flow instead of re-running OAuth, and no
+  `mcp/www_authenticate` challenge is emitted.
+- `identity.client_id` is an optional, bounded field on the internal request.
+  It is derived by the MCP Lambda from the verified token (never from tool
+  arguments) and used only to key consent state.
+- Consent is enforced at the backend resource boundary, so an otherwise-valid
+  OAuth token cannot reach sensitive collection or result retrieval without a
+  current grant.
+
+Version 3.1.0 replaced the Free-plan upgrade offer surface. The public
 `upgrade: {label, url}` object and `error.upgrade_url` are gone, replaced by an
 optional, server-authored **`plan_notice`** — a factual sentence plus an optional
-informational link. 3.1.0 is otherwise the 3.0.0 contract, which was a breaking
-revision with **no compatibility shims**. The removed 2.x fields
-(`analysis_status`, `regenerate`, `regeneration`, `current_results_usable`,
-`optional_actions`) no longer exist on the wire, and the detail tool is named
-**`explain_health_hypothesis`** (there is no `get_hypothesis_details` alias).
+informational link. 3.0.0 is a breaking revision with **no compatibility shims**.
+The removed 2.x fields (`analysis_status`, `regenerate`, `regeneration`,
+`current_results_usable`, `optional_actions`) no longer exist on the wire, and
+the detail tool is named **`explain_health_hypothesis`** (there is no
+`get_hypothesis_details` alias).
 
 What changed in 3.1.0:
 
@@ -91,7 +111,7 @@ error, or `ok: false` with data).
 
 ```json
 {
-  "contract_version": "3.1.0",
+  "contract_version": "3.2.0",
   "analysis_version": "rev42-v3.0.0",
   "ok": true,
   "data": { "…": "tool-specific" },
@@ -101,7 +121,7 @@ error, or `ok: false` with data).
 
 ```json
 {
-  "contract_version": "3.1.0",
+  "contract_version": "3.2.0",
   "analysis_version": null,
   "ok": false,
   "data": null,
@@ -1597,6 +1617,7 @@ states never reach a transport or MCP exception.
 | Code | Meaning |
 |---|---|
 | `AUTHENTICATION_REQUIRED` / `INSUFFICIENT_SCOPE` | Transport-level OAuth failures (`INSUFFICIENT_SCOPE` carries `required_scope`). |
+| `CONSENT_REQUIRED` | The account has not granted (or has withdrawn) consent for this operation's purpose. Enforced at the backend before any side effect or sensitive retrieval; carries `app_code: "consent_required"` and a `show_dna_import` `next_action`. Never a `mcp/www_authenticate` challenge. |
 | `ACCOUNT_NOT_AVAILABLE` | The connected account cannot be served. |
 | `DNA_NOT_AVAILABLE` | No DNA has been imported, so no analysis can exist (`next_action`: `show_dna_import`). |
 | `ANALYSIS_PROCESSING` | A generation is in flight; retryable (`retry_after_seconds`, `next_action`: `get_analysis_status`). |
@@ -1624,8 +1645,8 @@ they are now `PLAN_REQUIRED` and `SCOPE_REQUIRED`.
 The component-facing codes (`error.app_code`, from `APP_ERROR_CODES`) map onto
 these with stable lowercase names: `unauthorized`, `insufficient_scope`,
 `payload_too_large`, `catalog_unavailable`, `invalid_dna_payload`,
-`unsupported_format`, `unsupported_genome_build`, `report_generation_failed`, and
-`service_unavailable` (the fallback).
+`unsupported_format`, `unsupported_genome_build`, `report_generation_failed`,
+`consent_required`, and `service_unavailable` (the fallback).
 
 `ANALYSIS_NOT_READY` additionally carries `error.reason`, because one code covers
 two conditions with opposite remedies. A regeneration bumps the account revision

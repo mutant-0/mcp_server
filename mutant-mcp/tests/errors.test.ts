@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { APP_ERROR_CODES, ErrorCode, appErrorCode } from "../src/contract.js";
 import { protectedResourceMetadataUrl, wwwAuthenticateHeader } from "../src/responses/errors.js";
+
+describe("consent error code", () => {
+  it("maps CONSENT_REQUIRED to the component-facing app code", () => {
+    expect(ErrorCode.CONSENT_REQUIRED).toBe("CONSENT_REQUIRED");
+    expect(appErrorCode(ErrorCode.CONSENT_REQUIRED)).toBe(APP_ERROR_CODES.consent_required);
+    expect(APP_ERROR_CODES.consent_required).toBe("consent_required");
+  });
+});
 
 describe("protectedResourceMetadataUrl", () => {
   it("places the well-known segment before the resource path", () => {

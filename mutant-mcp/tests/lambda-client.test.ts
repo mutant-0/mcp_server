@@ -25,6 +25,24 @@ describe("buildBackendEvent", () => {
       request_context: { request_id: "req-1" },
     });
   });
+
+  it("carries the verified client id for consent partitioning", () => {
+    const event = buildBackendEvent(
+      "get_analysis_context",
+      {},
+      makeUser({ userId: "sub-123", clientId: "chatgpt-connector" }),
+      "req-2",
+    );
+    expect(event.identity).toEqual({
+      user_id: "sub-123",
+      client_id: "chatgpt-connector",
+    });
+  });
+
+  it("omits client_id when the token carries none", () => {
+    const event = buildBackendEvent("get_analysis_context", {}, makeUser(), "req-3");
+    expect(event.identity).toEqual({ user_id: "user-1" });
+  });
 });
 
 describe("parseBackendPayload", () => {

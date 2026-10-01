@@ -302,6 +302,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   payload_too_large:
     "The processed DNA data is too large to submit in one request. Contact support@mutantbiotech.com.",
   service_unavailable: "Mutant is temporarily unavailable. Please try again in a moment.",
+  consent_required:
+    "Mutant needs your consent before importing DNA data or sharing findings. Open Mutant, review the current notice, and accept it, then try again.",
   analysis_failed:
     "Mutant could not finish your analysis. Your DNA file was imported; you can try again.",
   analysis_timeout: "Your analysis is taking longer than expected.",
@@ -339,6 +341,17 @@ function errorMessage(error: ToolResponse["error"] | undefined): string {
   if (mapped && mapped !== ERROR_MESSAGES[APP_ERROR_CODES.service_unavailable]) return mapped;
   const message = typeof error.message === "string" ? error.message.trim() : "";
   return message.length > 0 ? message : ERROR_MESSAGES.service_unavailable!;
+}
+
+/**
+ * Whether an envelope is the server's consent rejection. It is deliberately not
+ * an authorization failure, so the card must not tell the user to reconnect:
+ * the connection is valid and only the consent state is missing.
+ */
+function isConsentRequired(error: ToolResponse["error"] | undefined): boolean {
+  if (!error) return false;
+  if (error.app_code === APP_ERROR_CODES.consent_required) return true;
+  return error.code === "CONSENT_REQUIRED";
 }
 
 function formatCount(value: number): string {
@@ -999,6 +1012,13 @@ export function DnaImportApp({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [accountMissing, setAccountMissing] = useState(false);
   const [dnaOnFile, setDnaOnFile] = useState(false);
+  /**
+   * The server refused a sensitive operation because the account has not
+   * granted (or has withdrawn) consent. This is distinct from a connection or
+   * scope problem: the card must route the user to the consent flow, not ask
+   * them to reconnect. PRIV-05 owns the hosted flow and final wording.
+   */
+  const [consentRequired, setConsentRequired] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
   const [poll, setPoll] = useState<PollState>(INITIAL_POLL);
   const [findings, setFindings] = useState<FindingsState>({ status: "idle" });
@@ -1150,6 +1170,7 @@ export function DnaImportApp({
       const result = await client.callServerTool({ name: "get_snp_catalog", arguments: {} });
       const envelope = envelopeOf(result);
       if (result.isError || !envelope || !envelope.ok) {
+        if (isConsentRequired(envelope?.error)) setConsentRequired(true);
         setCatalogError(errorMessage(envelope?.error));
         return;
       }
@@ -1419,6 +1440,9 @@ export function DnaImportApp({
         const result = await client.callServerTool({ name: "create_report", arguments: args });
         const envelope = envelopeOf(result);
         if (result.isError || !envelope || !envelope.ok) {
+          // Consent is a server-side gate, not a connection problem: surface the
+          // dedicated consent card rather than a generic retry panel.
+          if (isConsentRequired(envelope?.error)) setConsentRequired(true);
           setUploadError(errorMessage(envelope?.error));
           // The review screen survives so the same file can be resubmitted.
           setStage("review_variants");
@@ -1647,6 +1671,7 @@ export function DnaImportApp({
       });
       const envelope = envelopeOf(result);
       if (result.isError || !envelope || !envelope.ok) {
+        if (isConsentRequired(envelope?.error)) setConsentRequired(true);
         setFindingsState({
           status: "error",
           message: errorMessage(envelope?.error),
@@ -1895,6 +1920,42 @@ export function DnaImportApp({
   }
   if (stage === "loading_catalog") {
     return <Loading label="Preparing DNA import…" />;
+  }
+
+  // A server-side consent rejection outranks every stage: the connection is
+  // valid, but the sensitive operation cannot proceed until the account grants
+  // consent. The card must not ask the user to reconnect. PRIV-05 owns the
+  // hosted flow and final wording.
+  if (consentRequired) {
+    return (
+      <Shell>
+        <h1 style={styles.h1}>Consent needed</h1>
+        <p style={styles.subtitle}>
+          Mutant needs your consent before it can import DNA data or share findings.
+        </p>
+        <div style={styles.privacy}>
+          <p style={{ margin: "0 0 4px", fontWeight: 600 }}>Review and accept the current notice</p>
+          <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>
+            Open Mutant, review the current consent notice, and accept it. Then return here and
+            continue. Your DNA file has not been sent.
+          </p>
+        </div>
+        <div style={styles.buttonRow}>
+          <button
+            type="button"
+            style={styles.primaryButton}
+            onClick={() => {
+              setConsentRequired(false);
+              setCatalogError(null);
+              void loadCatalog(app);
+              void loadStatus(app);
+            }}
+          >
+            I've accepted — check again
+          </button>
+        </div>
+      </Shell>
+    );
   }
 
   /**

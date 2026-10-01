@@ -11,6 +11,8 @@ import { dnaImportWriteAnnotations, type MutantToolDefinition } from "./types.js
  * authentication failure still produces a tool-level OAuth challenge:
  * `AUTHENTICATION_REQUIRED`, `INSUFFICIENT_SCOPE`, `PLAN_REQUIRED`, and
  * `PAYLOAD_TOO_LARGE` / `RESPONSE_TOO_LARGE` all pass through unchanged.
+ * `CONSENT_REQUIRED` also passes through: it is enforced with its own
+ * `app_code` and drives the component's consent state, not a reconnect.
  */
 const REMAPS: Record<string, { code: string; app_code: string; retryable?: boolean }> = {
   [ErrorCode.SERVICE_UNAVAILABLE]: {
