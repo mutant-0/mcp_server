@@ -201,8 +201,11 @@ describe("show_dna_import", () => {
     });
     const envelope = structured(result);
     expect(envelope.data).toEqual({ ui_rendered: true, mode: "regenerate" });
-    const meta = result._meta as { mutant?: { mode?: string } };
+    const meta = result._meta as { mutant?: { mode?: string; consent?: { url?: string } } };
     expect(meta.mutant?.mode).toBe("regenerate");
+    // The display result carries the portal consent link so the component can
+    // route the user without waiting for a refused call. It is a public URL only.
+    expect(meta.mutant?.consent?.url).toBe("https://mutantgenomics.com/consent");
   });
 });
 
@@ -433,6 +436,42 @@ describe("create_report", () => {
     const result = await client.callTool({ name: "create_report", arguments: VALID_IMPORT });
     expect(result.isError).toBe(false);
     expect(structured(result).ok).toBe(true);
+  });
+
+  it("tags a CONSENT_REQUIRED result with the genetic_processing consent link", async () => {
+    const { client } = await connect({
+      config: { MUTANT_OAUTH_CLIENT_ID: "connector-1" },
+      responder: () =>
+        makeErrorResponse("CONSENT_REQUIRED", "Consent is required.", {
+          app_code: "consent_required",
+        }),
+    });
+    const result = await client.callTool({ name: "create_report", arguments: VALID_IMPORT });
+    expect(structured(result).error?.code).toBe("CONSENT_REQUIRED");
+    expect(structured(result).error?.app_code).toBe("consent_required");
+    const meta = result._meta as {
+      mutant?: { consent?: { url?: string; purpose?: string; client_id?: string } };
+      "mcp/www_authenticate"?: unknown;
+    };
+    expect(meta.mutant?.consent?.url).toBe("https://mutantgenomics.com/consent");
+    expect(meta.mutant?.consent?.purpose).toBe("genetic_processing");
+    expect(meta.mutant?.consent?.client_id).toBe("connector-1");
+    // Consent is not an authorization failure: no OAuth challenge is emitted.
+    expect(meta["mcp/www_authenticate"]).toBeUndefined();
+  });
+
+  it("tags a refused analysis read with the chatgpt_sharing consent link", async () => {
+    const { client } = await connect({
+      config: { MUTANT_OAUTH_CLIENT_ID: "connector-1" },
+      responder: () =>
+        makeErrorResponse("CONSENT_REQUIRED", "Consent is required.", {
+          app_code: "consent_required",
+        }),
+    });
+    const result = await client.callTool({ name: "get_analysis_context", arguments: {} });
+    expect(structured(result).error?.code).toBe("CONSENT_REQUIRED");
+    const meta = result._meta as { mutant?: { consent?: { purpose?: string } } };
+    expect(meta.mutant?.consent?.purpose).toBe("chatgpt_sharing");
   });
 
   it("never logs the submitted genotypes", async () => {

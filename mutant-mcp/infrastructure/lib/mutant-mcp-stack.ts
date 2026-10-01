@@ -58,6 +58,8 @@ export interface MutantMcpStackProps extends StackProps {
    */
   planInfoUrl?: string;
   onboardingUrl?: string;
+  /** Portal consent route the DNA import card deep-links to (PRIV-05). */
+  consentUrl?: string;
   logLevel?: string;
   reservedConcurrency?: number;
   /**
@@ -119,6 +121,7 @@ export class MutantMcpStack extends Stack {
         MUTANT_TRACE_CAPTURE_ID: props.traceCaptureId ?? "",
         MUTANT_PLAN_INFO_URL: props.planInfoUrl ?? "https://mutantgenomics.com/plans",
         MUTANT_ONBOARDING_URL: props.onboardingUrl ?? "https://mutantgenomics.com/onboarding",
+        MUTANT_CONSENT_URL: props.consentUrl ?? "https://mutantgenomics.com/consent",
         MUTANT_REQUEST_TIMEOUT_MS: String(props.requestTimeoutMs ?? 20000),
         MUTANT_MAX_RESPONSE_BYTES: String(props.maxResponseBytes ?? 512000),
         MUTANT_SNP_CATALOG_MAX_BYTES: String(props.snpCatalogMaxBytes ?? 2000000),

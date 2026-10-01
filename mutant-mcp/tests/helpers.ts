@@ -27,6 +27,7 @@ export function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     MUTANT_CORS_ORIGINS: "https://chatgpt.com",
     MUTANT_PLAN_INFO_URL: "https://mutantgenomics.com/plans",
     MUTANT_ONBOARDING_URL: "https://mutantgenomics.com/onboarding",
+    MUTANT_CONSENT_URL: "https://mutantgenomics.com/consent",
     MUTANT_REQUEST_TIMEOUT_MS: 5000,
     MUTANT_MAX_RESPONSE_BYTES: 512000,
     MUTANT_SNP_CATALOG_MAX_BYTES: 2000000,

@@ -354,6 +354,70 @@ function isConsentRequired(error: ToolResponse["error"] | undefined): boolean {
   return error.code === "CONSENT_REQUIRED";
 }
 
+/**
+ * Where the user must record consent, and for which purpose. `purpose` is the
+ * server's `create_report`/read discriminator and may be absent when the host
+ * did not forward the widget meta.
+ */
+interface ConsentState {
+  /** Deep link to the portal consent route, or null when it cannot be built. */
+  url: string | null;
+  /** `genetic_processing` for DNA import, `chatgpt_sharing` for result reads. */
+  purpose: string | null;
+}
+
+/** Portal consent route used when the host does not forward the widget meta. */
+const DEFAULT_CONSENT_URL = "https://mutantgenomics.com/consent";
+
+const CONSENT_PURPOSE_GENETIC_PROCESSING = "genetic_processing";
+const CONSENT_PURPOSE_CHATGPT_SHARING = "chatgpt_sharing";
+
+const CONSENT_LINK_ERROR =
+  "Mutant could not open the consent page here. Open Mutant in your browser to review and accept the current notice.";
+
+/** Read the server-authored consent descriptor off a tool result's `_meta`. */
+function consentDescriptor(
+  meta: unknown,
+): { url: string | null; purpose: string | null; clientId: string | null } | null {
+  const consent = asRecord(asRecord(asRecord(meta)?.mutant)?.consent);
+  if (!consent) return null;
+  return {
+    url: firstString(consent.url),
+    purpose: firstString(consent.purpose),
+    clientId: firstString(consent.client_id),
+  };
+}
+
+/**
+ * Build the consent card state from a refused result. The link carries only the
+ * purpose and the connector client id the backend keys consent against -- never a
+ * token, finding, or health value. An absent descriptor still yields a card, with
+ * a null link the card reports instead of guessing a destination.
+ */
+function consentStateFrom(
+  result: { _meta?: unknown } | undefined,
+  error: ToolResponse["error"] | undefined,
+  fallbackPurpose: string,
+): ConsentState | null {
+  if (!isConsentRequired(error)) return null;
+  const descriptor = consentDescriptor(result ? result._meta : undefined);
+  const purpose = descriptor?.purpose ?? fallbackPurpose;
+  const base = descriptor?.url ?? DEFAULT_CONSENT_URL;
+  let url: string | null = null;
+  try {
+    const parsed = new URL(base);
+    if (parsed.protocol === "https:") {
+      parsed.searchParams.set("purpose", purpose);
+      if (descriptor?.clientId) parsed.searchParams.set("client_id", descriptor.clientId);
+      parsed.searchParams.set("source", "chatgpt");
+      url = parsed.toString();
+    }
+  } catch {
+    url = null;
+  }
+  return { url, purpose };
+}
+
 function formatCount(value: number): string {
   return value.toLocaleString("en-US");
 }
@@ -1016,9 +1080,13 @@ export function DnaImportApp({
    * The server refused a sensitive operation because the account has not
    * granted (or has withdrawn) consent. This is distinct from a connection or
    * scope problem: the card must route the user to the consent flow, not ask
-   * them to reconnect. PRIV-05 owns the hosted flow and final wording.
+   * them to reconnect.
    */
-  const [consentRequired, setConsentRequired] = useState(false);
+  const [consentRequired, setConsentRequired] = useState<ConsentState | null>(null);
+  /** Set when opening the portal consent link failed, so the card can say so. */
+  const [consentLinkError, setConsentLinkError] = useState<string | null>(null);
+  /** True while a post-acceptance re-check is in flight; blocks a double retry. */
+  const [consentChecking, setConsentChecking] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
   const [poll, setPoll] = useState<PollState>(INITIAL_POLL);
   const [findings, setFindings] = useState<FindingsState>({ status: "idle" });
@@ -1140,6 +1208,8 @@ export function DnaImportApp({
   const comparisonInFlightRef = useRef<string | null>(null);
   /** The version already prefetched, so the quiet read runs once per revision. */
   const comparisonPrefetchedRef = useRef<string | null>(null);
+  /** Keeps the post-consent re-check single-flight across a double click. */
+  const consentRetryRef = useRef(false);
 
   const setFindingsState = useCallback((next: FindingsState) => {
     findingsRef.current = next;
@@ -1170,7 +1240,11 @@ export function DnaImportApp({
       const result = await client.callServerTool({ name: "get_snp_catalog", arguments: {} });
       const envelope = envelopeOf(result);
       if (result.isError || !envelope || !envelope.ok) {
-        if (isConsentRequired(envelope?.error)) setConsentRequired(true);
+        const consent = consentStateFrom(result, envelope?.error, CONSENT_PURPOSE_GENETIC_PROCESSING);
+        if (consent) {
+          setConsentLinkError(null);
+          setConsentRequired(consent);
+        }
         setCatalogError(errorMessage(envelope?.error));
         return;
       }
@@ -1442,7 +1516,15 @@ export function DnaImportApp({
         if (result.isError || !envelope || !envelope.ok) {
           // Consent is a server-side gate, not a connection problem: surface the
           // dedicated consent card rather than a generic retry panel.
-          if (isConsentRequired(envelope?.error)) setConsentRequired(true);
+          const consent = consentStateFrom(
+            result,
+            envelope?.error,
+            CONSENT_PURPOSE_GENETIC_PROCESSING,
+          );
+          if (consent) {
+            setConsentLinkError(null);
+            setConsentRequired(consent);
+          }
           setUploadError(errorMessage(envelope?.error));
           // The review screen survives so the same file can be resubmitted.
           setStage("review_variants");
@@ -1645,7 +1727,16 @@ export function DnaImportApp({
     try {
       const result = await app.callServerTool({ name: "get_analysis_context", arguments: {} });
       const envelope = envelopeOf(result);
-      if (result.isError || !envelope || !envelope.ok) return;
+      if (result.isError || !envelope || !envelope.ok) {
+        // Sharing findings with ChatGPT is consent-gated too, so a refusal here
+        // must reach the card instead of being swallowed as a missing enhancement.
+        const consent = consentStateFrom(result, envelope?.error, CONSENT_PURPOSE_CHATGPT_SHARING);
+        if (consent) {
+          setConsentLinkError(null);
+          setConsentRequired(consent);
+        }
+        return;
+      }
       setPrompts(promptsFrom(envelope.data));
       const notice = planNoticeFrom(asRecord(envelope.data)?.plan_notice);
       if (notice) {
@@ -1671,7 +1762,11 @@ export function DnaImportApp({
       });
       const envelope = envelopeOf(result);
       if (result.isError || !envelope || !envelope.ok) {
-        if (isConsentRequired(envelope?.error)) setConsentRequired(true);
+        const consent = consentStateFrom(result, envelope?.error, CONSENT_PURPOSE_CHATGPT_SHARING);
+        if (consent) {
+          setConsentLinkError(null);
+          setConsentRequired(consent);
+        }
         setFindingsState({
           status: "error",
           message: errorMessage(envelope?.error),
@@ -1692,6 +1787,59 @@ export function DnaImportApp({
       setFindingsState({ status: "error", message: messageFor("service_unavailable") });
     }
   }, [app, isFull, loadPromptChips, setFindingsState]);
+
+  /**
+   * Open the portal consent route for the purpose the server refused. The URL is
+   * built from the server's own descriptor (see `consentStateFrom`); nothing is
+   * transmitted to the host beyond the link, and no token or health value is ever
+   * placed in it.
+   */
+  const openConsent = useCallback(() => {
+    const url = consentRequired?.url;
+    if (!app || !url) {
+      setConsentLinkError(CONSENT_LINK_ERROR);
+      return;
+    }
+    setConsentLinkError(null);
+    void app.openLink({ url }).then(
+      (result) => {
+        if (result.isError) setConsentLinkError(CONSENT_LINK_ERROR);
+      },
+      () => setConsentLinkError(CONSENT_LINK_ERROR),
+    );
+  }, [app, consentRequired]);
+
+  /**
+   * Re-attempt the refused operation after the user has accepted in the portal.
+   * The card never trusts a local checkbox: it clears the consent state and lets
+   * the authoritative backend answer again, so an unchecked or withdrawn grant
+   * returns the consent card instead of a success. A double click is single-flight.
+   */
+  const retryAfterConsent = useCallback(() => {
+    if (!app || consentRetryRef.current) return;
+    consentRetryRef.current = true;
+    setConsentChecking(true);
+    setConsentLinkError(null);
+    setConsentRequired(null);
+    const release = () => {
+      consentRetryRef.current = false;
+      setConsentChecking(false);
+    };
+    // An import was already prepared: resubmit the same attempt (same idempotency
+    // key) rather than making the user pick the file again.
+    if (parsed) {
+      void submit(app).finally(release);
+      return;
+    }
+    // The refusal came from a read: retry whichever read was blocked. The
+    // catalogue may not have loaded yet (it needs genetic processing), and result
+    // sharing lives in findings/prompt chips.
+    if (!catalog) void loadCatalog(app);
+    findingsRef.current = { status: "idle" };
+    setFindingsState({ status: "idle" });
+    promptsLoadedRef.current = false;
+    void loadFindings().finally(release);
+  }, [app, catalog, parsed, submit, loadCatalog, loadFindings, setFindingsState]);
 
   /**
    * The three rank-ordered findings the overview is bound to. It is the authority
@@ -1927,33 +2075,38 @@ export function DnaImportApp({
   // consent. The card must not ask the user to reconnect. PRIV-05 owns the
   // hosted flow and final wording.
   if (consentRequired) {
+    // The refused operation decides the wording: importing DNA needs genetic
+    // processing; any read needs permission to share findings with ChatGPT. The
+    // connection is valid, so the card never asks the user to reconnect.
+    const importing = consentRequired.purpose === CONSENT_PURPOSE_GENETIC_PROCESSING;
+    const needsWhat = importing
+      ? "before it can import your DNA data"
+      : "before it can share your findings here";
     return (
       <Shell>
         <h1 style={styles.h1}>Consent needed</h1>
-        <p style={styles.subtitle}>
-          Mutant needs your consent before it can import DNA data or share findings.
-        </p>
+        <p style={styles.subtitle}>Mutant needs your consent {needsWhat}.</p>
         <div style={styles.privacy}>
           <p style={{ margin: "0 0 4px", fontWeight: 600 }}>Review and accept the current notice</p>
           <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>
             Open Mutant, review the current consent notice, and accept it. Then return here and
-            continue. Your DNA file has not been sent.
+            continue. Nothing is imported or shared until you accept.
           </p>
         </div>
         <div style={styles.buttonRow}>
+          <button type="button" style={styles.primaryButton} onClick={openConsent}>
+            Review and accept in Mutant
+          </button>
           <button
             type="button"
-            style={styles.primaryButton}
-            onClick={() => {
-              setConsentRequired(false);
-              setCatalogError(null);
-              void loadCatalog(app);
-              void loadStatus(app);
-            }}
+            style={styles.secondaryButton}
+            onClick={retryAfterConsent}
+            disabled={consentChecking}
           >
-            I've accepted — check again
+            {consentChecking ? "Checking…" : "I've accepted — check again"}
           </button>
         </div>
+        {consentLinkError ? <ErrorPanel message={consentLinkError} /> : null}
       </Shell>
     );
   }
@@ -2583,8 +2736,9 @@ export function DnaImportApp({
         </p>
         <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>
           Only variants used by Mutant are submitted
-          {totalMarkers ? ` (${formatCount(totalMarkers)} markers in the Mutant panel)` : ""}. Your
-          file is never uploaded or stored by Mutant.
+          {totalMarkers ? ` (${formatCount(totalMarkers)} markers in the Mutant panel)` : ""}. Mutant
+          stores those selected genetic calls and your analysis; your raw DNA file is never uploaded
+          or stored.
         </p>
       </div>
 

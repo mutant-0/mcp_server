@@ -1,3 +1,4 @@
+import { approvedConsentUrl } from "../config.js";
 import { CONTRACT_VERSION, type ToolResponse } from "../contract.js";
 import { dnaImportOutputSchema, showDnaImportInputSchema } from "../schemas/index.js";
 import { DNA_IMPORT_UI_URI, dnaImportUiMeta } from "../ui/dna-import/resource.js";
@@ -43,6 +44,11 @@ export const showDnaImportTool: MutantToolDefinition = {
     // would be exactly the kind of mutable state the model must not narrate.
     // The selected mode is the one piece of state the component needs, and it
     // is reflected in the typed data plus widget-only `_meta`.
+    // The portal consent route and the connector client id the backend enforces
+    // against. Both are public identifiers, never secrets or genetic data; the
+    // card needs them to build the deep link when a sensitive call is refused.
+    const consentUrl = approvedConsentUrl(runtime.config);
+    const consentClientId = runtime.config.MUTANT_OAUTH_CLIENT_ID.trim();
     const response: ToolResponse = {
       contract_version: CONTRACT_VERSION,
       analysis_version: null,
@@ -54,7 +60,15 @@ export const showDnaImportTool: MutantToolDefinition = {
     // from the tool result rather than from the tool descriptor.
     return respond(response, runtime, {
       operation: "show_dna_import",
-      meta: { ...dnaImportUiMeta(), mutant: { mode } },
+      meta: {
+        ...dnaImportUiMeta(),
+        mutant: {
+          mode,
+          ...(consentUrl
+            ? { consent: { url: consentUrl, ...(consentClientId ? { client_id: consentClientId } : {}) } }
+            : {}),
+        },
+      },
     });
   },
 };

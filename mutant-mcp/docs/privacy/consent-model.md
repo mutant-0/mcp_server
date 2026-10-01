@@ -91,3 +91,31 @@ PRIV-04 stays open while these PRIV-01 items are unresolved:
 - **C1** — synthetic walk confirming the deployed consent route.
 
 The hosted consent UI/flow and final wording are PRIV-05.
+
+## 9. Consent surface (PRIV-05)
+
+Backend enforcement (section 6) is authoritative and unchanged. PRIV-05 adds the
+user-facing surface that records the grant it reads:
+
+- **Portal route** `https://mutantgenomics.com/consent` (protected; requires a
+  signed-in portal session). Reads server state via `GET /consent`, records via
+  `POST /consent/accept`, revokes via `POST /consent/withdraw`. It shows the
+  current notice version **before** acceptance, never preselects acceptance, and
+  requires a fresh accept when `notice_version != current_notice_version`.
+- **Client scoping.** The page records acceptance under the **connector** client
+  id it is deep-linked with, so the connector's `(subject, purpose, client_id)`
+  read is satisfied. `MUTANT_CONSENT_CLIENT_IDS` must therefore include the
+  connector client id (D3) and, for the portal onboarding path, the portal client
+  id. The portal reads its defaults from `REACT_APP_MUTANT_CONNECTOR_CLIENT_ID`
+  and `REACT_APP_MUTANT_PORTAL_CLIENT_ID`.
+- **MCP deep link.** A `CONSENT_REQUIRED` result carries
+  `_meta.mutant.consent = { url, purpose, client_id }` (URL from
+  `MUTANT_CONSENT_URL`, default `https://mutantgenomics.com/consent`, validated
+  to https on `mutantgenomics.com`). The DNA import card opens it with
+  `openLink` and re-attempts the refused call only after the user returns; the
+  card never treats a local checkbox as proof. Reads (`get_analysis_context`,
+  `list_health_hypotheses`) surface the same card, so sharing findings is gated
+  on existing accounts, not only on a first import.
+- **Deployed OAuth.** The connector reaches Cognito Hosted UI directly, so the
+  OAuth screen is not the enforcement point. `ChatGPTAuthorizePage` records
+  `chatgpt_sharing` best-effort on approval; the backend guard remains the gate.

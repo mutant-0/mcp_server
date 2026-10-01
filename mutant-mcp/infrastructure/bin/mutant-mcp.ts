@@ -37,6 +37,7 @@ new MutantMcpStack(app, "MutantMcpStack", {
     ? Number(process.env.MUTANT_MAX_REQUEST_BYTES)
     : undefined,
   planInfoUrl: process.env.MUTANT_PLAN_INFO_URL || undefined,
+  consentUrl: process.env.MUTANT_CONSENT_URL || undefined,
   devMode: process.env.MUTANT_DEV_MODE === "true",
   traceCapture: process.env.MUTANT_TRACE_CAPTURE === "true",
   traceCaptureId: process.env.MUTANT_TRACE_CAPTURE_ID || undefined,

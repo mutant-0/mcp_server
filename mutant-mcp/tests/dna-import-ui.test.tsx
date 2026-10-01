@@ -408,6 +408,16 @@ interface BridgeOptions {
    * instant answer a synchronous bridge would give.
    */
   deferToolNames?: string[];
+  /**
+   * Widget-only `_meta` the host attaches to a tool's reply (keyed by tool name),
+   * mirroring how the server's `CONSENT_REQUIRED` result carries the portal
+   * consent descriptor. A function receives the call number so a second call can
+   * answer differently.
+   */
+  toolMeta?: Record<
+    string,
+    Record<string, unknown> | ((args: Record<string, unknown>, call: number) => Record<string, unknown>)
+  >;
 }
 
 /** Stand up a fake host on `window` and answer bridge requests from it. */
@@ -453,21 +463,22 @@ function installHostBridge(responders: Responders = {}, options: BridgeOptions =
       const args = message.params?.arguments ?? {};
       toolCalls.push({ name, arguments: args });
       const envelope = answer(name, args);
-      if (options.deferToolNames?.includes(name)) {
-        deferred.push(() =>
-          reply(message.id as number, {
-            content: [{ type: "text", text: JSON.stringify(envelope) }],
-            structuredContent: envelope,
-            isError: false,
-          }),
-        );
-        return;
-      }
-      reply(message.id, {
+      const metaEntry = options.toolMeta?.[name];
+      const meta =
+        typeof metaEntry === "function"
+          ? metaEntry(args, calls.get(name) ?? 1)
+          : metaEntry;
+      const result = {
         content: [{ type: "text", text: JSON.stringify(envelope) }],
         structuredContent: envelope,
         isError: false,
-      });
+        ...(meta ? { _meta: meta } : {}),
+      };
+      if (options.deferToolNames?.includes(name)) {
+        deferred.push(() => reply(message.id as number, result));
+        return;
+      }
+      reply(message.id, result);
       return;
     }
     if (message.method === "ui/update-model-context") {
@@ -1775,6 +1786,94 @@ describe("DNA import component", () => {
     // The review screen survives so the same file can be resubmitted after the
     // user reconnects.
     expect(screen.getByRole("button", { name: /create my mutant analysis/i })).toBeDefined();
+  });
+
+  function consentError(): ToolResponse {
+    return makeErrorResponse("CONSENT_REQUIRED", "Consent is required.", {
+      app_code: "consent_required",
+    });
+  }
+
+  /** The widget `_meta` the server attaches to a CONSENT_REQUIRED result. */
+  function consentMeta(purpose: string): Record<string, unknown> {
+    return {
+      mutant: {
+        consent: {
+          url: "https://mutantgenomics.com/consent",
+          purpose,
+          client_id: "connector-1",
+        },
+      },
+    };
+  }
+
+  it("routes an import refused for consent to the portal consent page", async () => {
+    const bridge = await renderApp({ create_report: consentError() }, {}, {
+      toolMeta: { create_report: consentMeta("genetic_processing") },
+    });
+
+    selectFile(microarrayFile());
+    await screen.findByText(/Ready to submit/i);
+    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+
+    // The consent card replaces the review screen: the connection is valid, so it
+    // must not ask the user to reconnect, and it names the import purpose.
+    await screen.findByText(/^Consent needed$/);
+    await screen.findByText(/before it can import your DNA data/i);
+    expect(screen.queryByText(/Ready to submit/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Review and accept in Mutant/i }));
+    await waitFor(() => expect(bridge.openLinks).toHaveLength(1));
+    // Only the consent route, the purpose, and the public client id travel.
+    expect(bridge.openLinks[0]).toContain("https://mutantgenomics.com/consent");
+    expect(bridge.openLinks[0]).toContain("purpose=genetic_processing");
+    expect(bridge.openLinks[0]).toContain("client_id=connector-1");
+  });
+
+  it("re-runs the import only once when the user retries after accepting", async () => {
+    const bridge = await renderApp(
+      {
+        create_report: (_args, call) =>
+          call === 1
+            ? consentError()
+            : makeSuccessResponse({ analysis_id: "analysis_1", status: "processing" }),
+      },
+      {},
+      { toolMeta: { create_report: consentMeta("genetic_processing") } },
+    );
+
+    selectFile(microarrayFile());
+    await screen.findByText(/Ready to submit/i);
+    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+    await screen.findByText(/^Consent needed$/);
+
+    const retry = screen.getByRole("button", { name: /I've accepted/i });
+    fireEvent.click(retry);
+    fireEvent.click(retry);
+
+    await screen.findByText(PROCESSING_HEADING);
+    // One submit before the refusal, one retry after acceptance. The second click
+    // lands on the already-replaced card and cannot submit again.
+    expect(bridge.callsTo("create_report")).toHaveLength(2);
+  });
+
+  it("surfaces consent when sharing findings is refused for an existing account", async () => {
+    // A ready account opens directly on the completion card, not the file picker.
+    renderWith(
+      {
+        poll_analysis_status: statusResponse("ready"),
+        list_health_hypotheses: consentError(),
+      },
+      {},
+      { toolMeta: { list_health_hypotheses: consentMeta("chatgpt_sharing") } },
+    );
+
+    await screen.findByText(/^Analysis ready$/);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+
+    await screen.findByText(/^Consent needed$/);
+    // The read purpose, not importing DNA: sharing findings needs its own notice.
+    await screen.findByText(/before it can share your findings here/i);
   });
 
   it("explains a file with no panel variants instead of submitting it", async () => {

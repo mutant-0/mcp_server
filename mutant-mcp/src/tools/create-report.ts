@@ -186,6 +186,8 @@ export const createReportTool: MutantToolDefinition = {
       runtime.logger.warn(log, "dna import failed");
     }
 
-    return respond(response, runtime);
+    // Pass the operation so a CONSENT_REQUIRED rejection is tagged with the
+    // genetic_processing purpose (not the read purpose) for the widget.
+    return respond(response, runtime, { operation: "create_report" });
   },
 };

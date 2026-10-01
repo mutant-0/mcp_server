@@ -28,6 +28,11 @@ const EnvSchema = z.object({
   // Must be an https URL on mutantgenomics.com; the link is omitted otherwise.
   MUTANT_PLAN_INFO_URL: z.string().trim().default("https://mutantgenomics.com/plans"),
   MUTANT_ONBOARDING_URL: z.string().trim().default("https://mutantgenomics.com/onboarding"),
+  // Portal consent route (PRIV-05). The DNA import component deep-links here when
+  // the backend rejects a sensitive operation with CONSENT_REQUIRED, so the user
+  // can review the current notice and record acceptance server-side. Must be an
+  // https mutantgenomics.com URL; an invalid value is omitted from the envelope.
+  MUTANT_CONSENT_URL: z.string().trim().default("https://mutantgenomics.com/consent"),
   MUTANT_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
   MUTANT_MAX_RESPONSE_BYTES: z.coerce.number().int().positive().default(512000),
   // The SNP catalog is application data for the DNA import component, not model
@@ -58,6 +63,7 @@ export interface AppConfig {
   MUTANT_CORS_ORIGINS: string;
   MUTANT_PLAN_INFO_URL: string;
   MUTANT_ONBOARDING_URL: string;
+  MUTANT_CONSENT_URL: string;
   MUTANT_REQUEST_TIMEOUT_MS: number;
   MUTANT_MAX_RESPONSE_BYTES: number;
   MUTANT_SNP_CATALOG_MAX_BYTES: number;
@@ -131,6 +137,25 @@ export function analysisReadScope(config: AppConfig): string {
 export function dnaImportScope(config: AppConfig): string {
   if (config.MUTANT_OAUTH_SCOPE_DNA_IMPORT) return config.MUTANT_OAUTH_SCOPE_DNA_IMPORT;
   return `${resourceUri(config)}/${DNA_IMPORT_SCOPE_NAME}`;
+}
+
+/**
+ * The approved portal consent URL, or `null` when unset/invalid.
+ *
+ * Only an `https` URL on `mutantgenomics.com` (apex or subdomain) is returned, so
+ * a misconfigured value can never be handed to a host as an open-link target.
+ */
+export function approvedConsentUrl(config: AppConfig): string | null {
+  const value = config.MUTANT_CONSENT_URL.trim();
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    const approved = host === "mutantgenomics.com" || host.endsWith(".mutantgenomics.com");
+    return url.protocol === "https:" && approved ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
