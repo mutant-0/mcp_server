@@ -2252,9 +2252,17 @@ export function DnaImportApp({
           </div>
         ) : null}
 
-        {sentAction ? (
+        {pendingActionId === "connect-findings" ? (
           <p role="status" aria-live="polite" style={styles.handoffStatus}>
-            Question sent: {sentAction.label}. See the latest reply below.
+            Sending your request to ChatGPT. Checking connections can take a little while; the
+            answer will appear below.
+          </p>
+        ) : sentAction ? (
+          <p role="status" aria-live="polite" style={styles.handoffStatus}>
+            Question sent: {sentAction.label}.{" "}
+            {sentAction.id === "connect-findings"
+              ? "ChatGPT may need time to check the supporting evidence. The answer will appear below."
+              : "See the latest reply below."}
           </p>
         ) : null}
 

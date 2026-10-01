@@ -1126,6 +1126,50 @@ describe("DNA import component", () => {
     expect(screen.queryByText(/These results have changed/i)).toBeNull();
   });
 
+  it("explains the connection wait before host acknowledgment without claiming the answer is ready", async () => {
+    let resolveSend: () => void = () => undefined;
+    const sendFollowUpMessage = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    Object.defineProperty(window, "openai", {
+      value: { sendFollowUpMessage },
+      configurable: true,
+      writable: true,
+    });
+    const diagnostic = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    const bridge = renderWith({
+      poll_analysis_status: statusResponse("ready", FULL_PLAN),
+      get_analysis_context: makeSuccessResponse(
+        makeContextData({ suggested_prompts: [CONNECT_FINDINGS_CHIP] }),
+      ),
+    });
+    await screen.findByText(/Analysis ready/i);
+    bridge.sendToolResult(boundFullOverview(), { mutant: { mode: "overview" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Connect my findings" }));
+    expect((await screen.findByRole("status")).textContent).toContain(
+      "Checking connections can take a little while",
+    );
+    expect(screen.queryByText(/Question sent:/)).toBeNull();
+    await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
+    resolveSend();
+    await screen.findByText(/Question sent: Connect my findings/);
+    expect(screen.getByRole("status").textContent).toContain(
+      "may need time to check the supporting evidence",
+    );
+    const timing = diagnostic.mock.calls.filter(([message]) =>
+      String(message).startsWith("[mutant-ui] timing follow-up"),
+    );
+    expect(timing.map(([message]) => message)).toEqual([
+      expect.stringMatching(/^\[mutant-ui\] timing follow-up version check: \d+ms$/),
+      expect.stringMatching(/^\[mutant-ui\] timing follow-up host acknowledgment: \d+ms$/),
+    ]);
+    expect(timing.every((args) => args.length === 1)).toBe(true);
+    diagnostic.mockRestore();
+  });
+
   it("surfaces an unmatched analysis error instead of the transient outage copy", async () => {
     renderWith(
       {

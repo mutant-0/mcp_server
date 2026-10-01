@@ -1551,6 +1551,14 @@ add a `suggested_prompts` array to their `data`
   distinct evidence separated, contextual evidence kept apart, the scope actually
   examined stated, and an explicit "cannot be verified" / no-connection answer
   when nothing is supported. Topic search stays available through normal chat.
+  The prompt asks for a brief acknowledgment before evidence retrieval, reuse of
+  sufficient evidence from the same revision, and concurrent independent reads
+  when possible. These are model instructions, not a guarantee of time to first
+  text or completion. The card immediately explains the wait and, after host
+  acknowledgment, says the answer will appear below without claiming it is ready.
+  Browser diagnostics record separate version-check and host-acknowledgment
+  durations using static labels only; they do not measure model completion or
+  log finding details, versions, or prompts.
 - `prompt` is exact user-visible natural language. It must never contain an
   internal command, a tool name, or a raw hypothesis id. `explain_health_hypothesis`
   suggestions may carry a `hypothesis_id` **field** for the host's convenience,

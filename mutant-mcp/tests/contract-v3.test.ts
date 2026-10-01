@@ -593,6 +593,11 @@ describe("contract v3.0 acceptance", () => {
     expect(connectChip?.prompt).toMatch(/cannot be verified/i);
     expect(connectChip?.prompt).toMatch(/no meaningful connection/i);
     expect(connectChip?.prompt).toMatch(/State the scope you actually examined/i);
+    expect(connectChip?.prompt).toMatch(/Before retrieving evidence, briefly acknowledge/i);
+    expect(connectChip?.prompt).toMatch(/same analysis revision when sufficient/i);
+    expect(connectChip?.prompt).toMatch(
+      /retrieve independent supporting details together when possible/i,
+    );
 
     // Prompt chips carry a structured action bound to the displayed snapshot.
     const explain = data.suggested_prompts?.find((prompt) => prompt.id === "explain-first") as

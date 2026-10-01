@@ -68,16 +68,20 @@ export type FollowUpOutcome = "sent" | "failed" | "unavailable";
 export async function deliverFollowUp(app: App | null, prompt: string): Promise<FollowUpOutcome> {
   const host = chatGptHost();
   if (host && typeof host.sendFollowUpMessage === "function") {
+    const startedAt = Date.now();
     try {
       await host.sendFollowUpMessage({ prompt, scrollToBottom: true });
       return "sent";
     } catch (err) {
       logBridgeError(err);
       return "failed";
+    } finally {
+      logTiming("follow-up host acknowledgment", Date.now() - startedAt);
     }
   }
 
   if (app && typeof app.sendMessage === "function") {
+    const startedAt = Date.now();
     try {
       const result = await app.sendMessage({
         role: "user",
@@ -87,6 +91,8 @@ export async function deliverFollowUp(app: App | null, prompt: string): Promise<
     } catch (err) {
       logBridgeError(err);
       return "failed";
+    } finally {
+      logTiming("follow-up host acknowledgment", Date.now() - startedAt);
     }
   }
 
@@ -198,6 +204,7 @@ export async function verifyBoundVersion(
   boundVersion: string | null,
 ): Promise<BoundVersionCheck> {
   if (!app || typeof app.callServerTool !== "function" || !boundVersion) return "unknown";
+  const startedAt = Date.now();
   try {
     const result = await app.callServerTool({ name: "poll_analysis_status", arguments: {} });
     if ((result as { isError?: boolean }).isError === true) return "unknown";
@@ -213,5 +220,7 @@ export async function verifyBoundVersion(
   } catch (err) {
     logBridgeError(err);
     return "unknown";
+  } finally {
+    logTiming("follow-up version check", Date.now() - startedAt);
   }
 }
