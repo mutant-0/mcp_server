@@ -152,6 +152,8 @@ P0 means address before public onboarding. It does not mean a demonstrated produ
 
 **Acceptance/tests:** A captured synthetic access token issued before withdrawal cannot retrieve sensitive data after the defined enforcement point. Refresh fails after revocation. Relink works only after renewed authorization as required. Test two integrations/accounts independently and withdrawal during a pending request.
 
+**Implementation status (2026-10-02):** Delivered on `main` in both repositories — backend `core/consent.py` (grant rows + fence), `mcp/integration.py` (fail-closed boundary guard), `core/routes_consent.py` (`POST /consent/disconnect`), and MCP contract 3.3.0 (`INTEGRATION_REVOKED`, optional `identity.issued_at`, `_meta.mutant.integration`). Automated coverage exists for revocation, relink fencing, per-subject/client independence, the pending-request propagation bound, and fail-closed store errors. Provider refresh revocation now calls Cognito `RevokeToken` with the public connector client id (client secret attached only when configured), so refresh fails after revocation. The ticket remains **open**: the deployed synthetic-account walk (`docs/privacy/deployment-manifest.md` §11c) and PRIV-01 D1/D3/D5 + C1 are unresolved.
+
 ## PRIV-09 — Publish matching policies and complete listing metadata
 
 **Priority:** P0. **Owner:** portal/product/release. **Dependencies:** PRIV-01 and finalized behavior/commitments in PRIV-02 through PRIV-08.

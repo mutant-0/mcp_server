@@ -207,3 +207,54 @@ not fixed here.
 | Prod `analysis.read` scope anomaly | consent/scope enforcement | auth/infra | PRIV-04, PRIV-08 |
 | Backend log retention (`None`) | retention commitments | infra | PRIV-06 |
 | Adopted vs created MCP log groups | retention scope | infra | PRIV-06 |
+| Deployed integration-revocation behavior | withdrawal/revocation enforcement | MCP/backend | PRIV-08 |
+
+## 11. PRIV-08 integration revocation evidence
+
+Version: 1.0 (2026-10-02). Records identifiers and automated results only, never
+secrets or real subject data. The deployed synthetic-account walk is **pending**;
+until it runs, PRIV-08 stays open (see `owner-decisions.md` D1/D3/D5, C1).
+
+### 11a. Implementation surface
+
+| Component | Location | Contract |
+|---|---|---|
+| Grant state (`connected`/`disconnected`, `revoked_at_epoch`) | `report-generator/core/consent.py` (`INTEGRATION#<client_id>`) | row keyed `(subject_id, client_id)` |
+| Boundary guard (fail closed) | `report-generator/mcp/integration.py` via `mcp/dispatch.py` (after deletion + consent) | `INTEGRATION_REVOKED` |
+| Disconnect route | `report-generator/core/routes_consent.py` (`POST /consent/disconnect`) | `provider_revoked` reported separately |
+| Provider revoke | `core/routes_consent.py:_default_revoke_provider` | Cognito `RevokeToken`; secret only if configured |
+| MCP surface | `mutant-mcp/src/contract.ts` 3.3.0, `src/auth/user-context.ts`, `src/clients/mutant-lambda-client.ts`, `src/tools/respond.ts` | `identity.issued_at`, `_meta.mutant.integration` |
+
+### 11b. Automated evidence (in-repo, synthetic only)
+
+| Check | Test | Result |
+|---|---|---|
+| Disconnect withdraws sharing and sets the grant `disconnected` | `test/test_routes_consent.py` | pass |
+| Token issued at/before the relink boundary is fenced; a later token is honored | `test/test_routes_consent.py::test_accept_after_disconnect_clears_the_fence` | pass |
+| Grant is scoped per subject and client; other clients preserved | `test/test_routes_consent.py::test_disconnect_is_scoped_and_preserves_other_clients` | pass |
+| `RevokeToken` uses the public client id; secret attached only when configured | `test/test_routes_consent.py` | pass |
+| Sensitive read refused with no payload; import refused with no side effect | `mcp/tests/test_mcp_consent.py` | pass |
+| Store failure / unwired guard fails closed as `SERVICE_UNAVAILABLE` | `mcp/tests/test_mcp_consent.py` | pass |
+| Exempt operations (`get_analysis_status`, `get_snp_catalog`) unaffected | `mcp/tests/test_mcp_consent.py` | pass |
+| Two clients / two subjects independent; withdrawal seen on the next request | `mcp/tests/test_mcp_consent.py` | pass |
+| `issued_at` comes only from verified identity, bounded, never from arguments | `mcp/tests/test_mcp_consent.py` | pass |
+
+### 11c. Deployed synthetic-account walk (pending)
+
+| Step | Expected | Status |
+|---|---|---|
+| Connect synthetic account, import, then `POST /consent/disconnect` | grant `disconnected`, receipt `provider_revoked` reported | Pending (C1) |
+| Reuse the captured access token for a sensitive read | `INTEGRATION_REVOKED`, no payload | Pending |
+| Refresh after disconnect | refresh fails (provider revoked) or documented limitation | Pending |
+| Reconnect via renewed authorization | grant `connected`, fresh token honored, stale token still fenced | Pending |
+| Confirm unrelated portal client access for the same subject | unaffected | Pending |
+
+### 11d. Configuration identifiers
+
+| Item | Value | Source |
+|---|---|---|
+| Dev connector client id | `1hi6c97v6md1q68h91ld37tre4` | §5, `mcp-runbook.md` |
+| Prod connector client id | `[TBD — D3]` | §5 |
+| Deployed `MUTANT_CONSENT_CLIENT_IDS` | `[TBD — D3]`; empty means "any bounded id" | `core/consent.py` |
+| `MUTANT_COGNITO_CLIENT_SECRET` | `[secret]`; expected unset (public client) | design |
+| `MUTANT_DEV_MODE` (dev/prod) | `[TBD — D1]` | §2 |

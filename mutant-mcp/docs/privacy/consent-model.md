@@ -139,10 +139,20 @@ the token only) withdraws the listed purposes (default `chatgpt_sharing`),
 sets the grant to `disconnected`, and best-effort revokes the provider refresh
 token. It is **not** deletion: account closure remains the separate
 `POST /account/deletion` action, and the receipt reports `provider_revoked`
-separately from the authoritative disconnect. Provider revocation is optional
-because Cognito `RevokeToken` needs a confidential client and
-`AdminUserGlobalSignOut` would end the unrelated portal session; the backend
-fence is the enforcement point.
+separately from the authoritative disconnect.
+
+**Provider revocation.** When the portal supplies the connector refresh token,
+`core/routes_consent.py:_default_revoke_provider` calls Cognito `RevokeToken`
+with the connector client id; a revoked refresh token can no longer mint new
+access tokens, so refresh fails after revocation. Cognito requires a client
+secret only for a confidential client, so the connector's public client id is
+passed alone and `MUTANT_COGNITO_CLIENT_SECRET` is attached only when
+configured. `AdminUserGlobalSignOut` is deliberately **not** used because it
+would also end the unrelated portal session. The call stays best-effort (a
+provider failure is logged and reported as `provider_revoked: false`, never
+gating the disconnect): the backend grant fence is the enforcement point, and an
+already-issued access token is still refused by `revoked_at_epoch` even if the
+provider revoke fails.
 
 **Reconnect.** `POST /consent/accept` is the only path that re-grants. On success
 it also records the integration as `connected` and advances the token-`iat`
@@ -167,5 +177,8 @@ MCP layer adds `_meta.mutant.integration = { status: "revoked", retryable, url? 
 (the URL from `MUTANT_ONBOARDING_URL`, validated to https on
 `mutantgenomics.com`) so the widget can open the portal reconnect route.
 
-**Open dependencies.** Like PRIV-04, PRIV-08 stays open until PRIV-01 D1/D3/D5
-and C1 are resolved and a synthetic-account walk confirms the deployed behavior.
+**Open dependencies.** The guard, disconnect route, contract 3.3.0 surface, and
+their tests are implemented (backend `core/consent.py` / `mcp/integration.py`,
+MCP `src/contract.ts` 3.3.0 and `tools/respond.ts`). Like PRIV-04, PRIV-08 stays
+open until PRIV-01 D1/D3/D5 and C1 are resolved and a synthetic-account walk on
+the deployed candidate confirms the behavior (`deployment-manifest.md` §11).
