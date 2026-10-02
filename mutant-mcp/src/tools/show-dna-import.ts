@@ -28,6 +28,9 @@ export const showDnaImportTool: MutantToolDefinition = {
     "processing-status polling, and the completion UI.\n\n" +
     'Call it immediately when get_analysis_status reports dna_status="missing". For ' +
     'mode="regenerate", call it only when regeneration is required or the user asks to refresh.\n\n' +
+    'When a protected operation is refused with a CONSENT_REQUIRED next_action, call this tool ' +
+    'with view="consent" to open the privacy choices directly; do not tell the user to upload ' +
+    "DNA and do not describe the refusal as an outage.\n\n" +
     "After calling this tool, do not ask the user to check analysis status manually, do not " +
     "restate DNA status, analysis status, or import instructions from earlier tool results, and " +
     "do not tell the user to upload DNA: the component owns the whole flow.",
@@ -39,11 +42,19 @@ export const showDnaImportTool: MutantToolDefinition = {
   annotations: readOnlyAnnotations,
   handler: async (args, runtime) => {
     const mode = args.mode === "regenerate" ? "regenerate" : "initial";
+    // Consent recovery invokes this tool with `view: "consent"` so the component
+    // opens the privacy choices directly, instead of the DNA upload UI (which
+    // would wrongly imply the user's DNA is missing when an analysis is ready).
+    const view = args.view === "consent" ? "consent" : "import";
+    // The purpose the refusal named, when the consent view was requested through
+    // the structured next_action. Purely routing metadata; never genetic data.
+    const purpose =
+      typeof args.purpose === "string" && args.purpose.length > 0 ? args.purpose : undefined;
     // No routing state is echoed back: the component reads the authoritative
     // state from get_analysis_status on mount, and a stale `dna_status` here
     // would be exactly the kind of mutable state the model must not narrate.
-    // The selected mode is the one piece of state the component needs, and it
-    // is reflected in the typed data plus widget-only `_meta`.
+    // The selected mode and view are the state the component needs, reflected in
+    // the typed data plus widget-only `_meta`.
     // The portal consent route and the connector client id the backend enforces
     // against. Both are public identifiers, never secrets or genetic data; the
     // card needs them to build the deep link when a sensitive call is refused.
@@ -53,7 +64,7 @@ export const showDnaImportTool: MutantToolDefinition = {
       contract_version: CONTRACT_VERSION,
       analysis_version: null,
       ok: true,
-      data: { ui_rendered: true, mode },
+      data: { ui_rendered: true, mode, view },
       error: null,
     };
     // Echo the UI descriptor on the result too: some hosts mount the component
@@ -64,8 +75,15 @@ export const showDnaImportTool: MutantToolDefinition = {
         ...dnaImportUiMeta(),
         mutant: {
           mode,
-          ...(consentUrl
-            ? { consent: { url: consentUrl, ...(consentClientId ? { client_id: consentClientId } : {}) } }
+          view,
+          ...(consentUrl || purpose
+            ? {
+                consent: {
+                  ...(consentUrl ? { url: consentUrl } : {}),
+                  ...(consentClientId ? { client_id: consentClientId } : {}),
+                  ...(purpose ? { purpose } : {}),
+                },
+              }
             : {}),
         },
       },

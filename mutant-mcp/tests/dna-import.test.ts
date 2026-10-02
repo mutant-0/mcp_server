@@ -186,7 +186,7 @@ describe("show_dna_import", () => {
     expect(envelope.ok).toBe(true);
     // No routing state is echoed back: the component reads the authoritative
     // state itself, so there is nothing here for the model to narrate.
-    expect(envelope.data).toEqual({ ui_rendered: true, mode: "initial" });
+    expect(envelope.data).toEqual({ ui_rendered: true, mode: "initial", view: "import" });
     // Rendering the UI must not require a backend round trip.
     expect(backendClient.calls).toHaveLength(0);
     // No genotypes anywhere in the result.
@@ -200,12 +200,28 @@ describe("show_dna_import", () => {
       arguments: { mode: "regenerate" },
     });
     const envelope = structured(result);
-    expect(envelope.data).toEqual({ ui_rendered: true, mode: "regenerate" });
-    const meta = result._meta as { mutant?: { mode?: string; consent?: { url?: string } } };
+    expect(envelope.data).toEqual({ ui_rendered: true, mode: "regenerate", view: "import" });
+    const meta = result._meta as { mutant?: { mode?: string; view?: string; consent?: { url?: string } } };
     expect(meta.mutant?.mode).toBe("regenerate");
+    expect(meta.mutant?.view).toBe("import");
     // The display result carries the portal consent link so the component can
     // route the user without waiting for a refused call. It is a public URL only.
     expect(meta.mutant?.consent?.url).toBe("https://mutantgenomics.com/consent");
+  });
+
+  it("opens the consent view directly when invoked for recovery", async () => {
+    const { client } = await connect({});
+    const result = await client.callTool({
+      name: "show_dna_import",
+      arguments: { view: "consent", purpose: "chatgpt_sharing" },
+    });
+    const envelope = structured(result);
+    expect(envelope.data).toEqual({ ui_rendered: true, mode: "initial", view: "consent" });
+    const meta = result._meta as {
+      mutant?: { view?: string; consent?: { url?: string; purpose?: string } };
+    };
+    expect(meta.mutant?.view).toBe("consent");
+    expect(meta.mutant?.consent?.purpose).toBe("chatgpt_sharing");
   });
 });
 

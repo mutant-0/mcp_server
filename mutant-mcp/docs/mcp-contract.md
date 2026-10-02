@@ -1,4 +1,4 @@
-# Mutant MCP contract (3.3.0)
+# Mutant MCP contract (3.4.0)
 
 This document describes the implemented contract between the MCP Lambda
 (`mutant-mcp`) and the report-generator backend (`report-generator/mcp`). The
@@ -6,14 +6,31 @@ backend is authoritative for every business rule and returns the typed `data`
 shapes; the Lambda is a thin, authenticated transport that adds only the
 MCP-facing presentation (`content`, `suggested_prompts`, widget `_meta`).
 
-Version 3.3.0 adds integration revocation. A new `INTEGRATION_REVOKED` error code
-is returned by the authoritative backend when the ChatGPT integration has been
-disconnected, or when the presented token was issued before the last
-disconnect/relink boundary; the internal request identity may now carry the
-verified token's optional `issued_at`. It is otherwise the 3.2.0 contract, which
-added server-side consent enforcement (`CONSENT_REQUIRED` and
-`identity.client_id`), and is otherwise the 3.1.0 contract, which replaced the
-Free-plan upgrade offer surface.
+Version 3.4.0 makes a consent refusal a machine-readable, recoverable state. A
+`CONSENT_REQUIRED` error now carries `error.consent`
+(`{required, current, reason?, notice_version?}`) and a
+`next_action.arguments.view = "consent"`, and the MCP response layer returns it
+as a renderable result (UI descriptor + `_meta.mutant.experience_state =
+"CONSENT_REQUIRED"`) so the host mounts the privacy-choices card instead of a
+generic outage. It is otherwise the 3.3.0 contract, which adds integration
+revocation, and is otherwise the 3.2.0 contract, which added server-side consent
+enforcement (`CONSENT_REQUIRED` and `identity.client_id`), and is otherwise the
+3.1.0 contract, which replaced the Free-plan upgrade offer surface.
+
+What changed in 3.4.0:
+
+- `error.consent` on `CONSENT_REQUIRED`: `required`/`current` booleans plus an
+  optional `reason` (`NOTICE_REQUIRED` | `NOTICE_VERSION_OUTDATED` |
+  `WITHDRAWN`) and the current `notice_version`. It never carries genetic data.
+- `error.next_action.arguments.view = "consent"` (plus `purpose`) so the model's
+  recovery route opens the consent view directly.
+- The MCP layer marks a consent refusal as a renderable, non-`isError` result and
+  attaches the DNA-import UI descriptor, `_meta.mutant.consent.view = "consent"`,
+  and `_meta.mutant.experience_state = "CONSENT_REQUIRED"` for every protected
+  tool.
+- `show_dna_import` accepts `view: "import" | "consent"` (default `import`) and
+  an optional `purpose`; it echoes them in `data.view` and `_meta.mutant`.
+- Consent is still refused server-side; nothing is granted or partially served.
 
 What changed in 3.3.0:
 
@@ -127,7 +144,7 @@ error, or `ok: false` with data).
 
 ```json
 {
-  "contract_version": "3.3.0",
+  "contract_version": "3.4.0",
   "analysis_version": "rev42-v3.0.0",
   "ok": true,
   "data": { "…": "tool-specific" },
@@ -137,7 +154,7 @@ error, or `ok: false` with data).
 
 ```json
 {
-  "contract_version": "3.3.0",
+  "contract_version": "3.4.0",
   "analysis_version": null,
   "ok": false,
   "data": null,

@@ -40,7 +40,22 @@ export const errorOutputSchema = z.looseObject({
   required_scope: z.string().optional(),
   app_code: z.string().optional(),
   reason: z.string().optional().describe("Readiness diagnostic for an unservable analysis."),
+  consent: z
+    .looseObject({
+      required: z.boolean(),
+      current: z.boolean(),
+      reason: z.string().optional(),
+      notice_version: z.string().optional(),
+    })
+    .optional()
+    .describe(
+      "Consent state on a CONSENT_REQUIRED refusal; drives consent recovery instead of a generic error.",
+    ),
 });
+
+export const consentReasonSchema = z
+  .enum(["NOTICE_REQUIRED", "NOTICE_VERSION_OUTDATED", "WITHDRAWN"])
+  .describe("Why a consent gate refused an operation.");
 
 export const experienceStateSchema = z
   .enum([
@@ -51,9 +66,10 @@ export const experienceStateSchema = z
     "READY_REFRESH_PROCESSING",
     "REFRESH_PROCESSING_NO_USABLE_ANALYSIS",
     "PROCESSING_FAILED",
+    "CONSENT_REQUIRED",
   ])
   .describe(
-    "The one canonical experience state. Do not re-derive it from dna_status, active_analysis, or pending_analysis.",
+    "The one canonical experience state. Do not re-derive it from dna_status, active_analysis, or pending_analysis. CONSENT_REQUIRED is set by the MCP layer on a consent refusal; show the consent-recovery experience.",
   );
 
 export const activeAnalysisSchema = z.looseObject({
@@ -610,6 +626,10 @@ export const geneticContextDataSchema = z.looseObject({
 export const dnaImportDataSchema = z.looseObject({
   ui_rendered: z.literal(true),
   mode: z.enum(["initial", "regenerate"]),
+  view: z
+    .enum(["import", "consent"])
+    .optional()
+    .describe("Which view the component opens on; 'consent' renders privacy choices directly."),
 });
 
 export const snpCatalogDataSchema = z.looseObject({

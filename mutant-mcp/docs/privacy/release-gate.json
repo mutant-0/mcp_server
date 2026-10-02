@@ -35,7 +35,7 @@
         {
           "repo": "mcp_server",
           "path": "mutant-mcp/tests/contract-v3.test.ts",
-          "name": "surfaces CONSENT_REQUIRED without an OAuth challenge"
+          "name": "surfaces CONSENT_REQUIRED as a recoverable, renderable state without an OAuth challenge"
         }
       ],
       "note": "Proves the guard runs before import side effects and that an unwired guard refuses rather than assumes consent."

@@ -1,16 +1,22 @@
 /**
- * Shared Mutant MCP contract (version 3.3.0).
+ * Shared Mutant MCP contract (version 3.4.0).
  *
  * These constants, error codes, and envelope types mirror the backend
  * implementation in `report-generator/mcp/contract.py`. The backend owns all
  * business semantics; the MCP Lambda is a thin, authenticated transport.
  *
- * 3.3.0 adds integration revocation: a new `INTEGRATION_REVOKED` error code and
- * an optional `identity.issued_at` (the verified token's `iat`) on the internal
- * request, so the backend can fence a token issued before a disconnect/relink
- * boundary. It is otherwise the 3.2.0 contract, which adds server-side consent
- * enforcement: a `CONSENT_REQUIRED` error
- * code and an optional `identity.client_id` on the internal request. It is
+ * 3.4.0 makes a consent refusal a machine-readable, recoverable state on top of
+ * 3.3.0: a `CONSENT_REQUIRED` error carries `error.consent`
+ * (`{required, current, reason?, notice_version?}`) and
+ * `error.next_action.arguments.view = "consent"`, and `CONSENT_REQUIRED` is a
+ * canonical `ExperienceState`, so a host routes the user through consent
+ * recovery instead of collapsing the refusal into a generic outage. It is
+ * otherwise the 3.3.0 contract, which adds integration revocation: a new
+ * `INTEGRATION_REVOKED` error code and an optional `identity.issued_at` (the
+ * verified token's `iat`) on the internal request, so the backend can fence a
+ * token issued before a disconnect/relink boundary. It is otherwise the 3.2.0
+ * contract, which adds server-side consent enforcement: a `CONSENT_REQUIRED`
+ * error code and an optional `identity.client_id` on the internal request. It is
  * otherwise the 3.1.0 contract, which replaced the Free-plan upgrade offer
  * surface (the public `upgrade: {label, url}` object and `error.upgrade_url` are
  * gone, replaced by an optional, server-authored `plan_notice` -- a factual
@@ -29,7 +35,7 @@
  * `regeneration`, `current_results_usable`, and `optional_actions`.
  */
 
-export const CONTRACT_VERSION = "3.3.0";
+export const CONTRACT_VERSION = "3.4.0";
 
 /**
  * Analysis tools. These require `analysis.read`.
@@ -194,7 +200,39 @@ export interface McpApplicationError {
    * which one actually applied.
    */
   reason?: string;
+  /**
+   * Consent state on a `CONSENT_REQUIRED` refusal. A machine-readable recovery
+   * signal so the host selects the consent-recovery experience instead of
+   * inferring the state from tool-failure prose. Never carries genetic data.
+   */
+  consent?: ConsentState;
 }
+
+/** Why a consent gate refused an operation. */
+export const ConsentReason = {
+  NOTICE_REQUIRED: "NOTICE_REQUIRED",
+  NOTICE_VERSION_OUTDATED: "NOTICE_VERSION_OUTDATED",
+  WITHDRAWN: "WITHDRAWN",
+} as const;
+
+export type ConsentReasonValue = (typeof ConsentReason)[keyof typeof ConsentReason];
+
+/**
+ * Consent state carried on a `CONSENT_REQUIRED` error (and, where present, on a
+ * successful envelope). `required`/`current` are the machine-readable gate;
+ * `reason` distinguishes a first-time notice from a stale one or a withdrawal so
+ * the UI never implies a user who consented before never did.
+ */
+export interface ConsentState {
+  required: boolean;
+  current: boolean;
+  reason?: string;
+  /** The notice version the account must accept, when the backend reports it. */
+  notice_version?: string;
+}
+
+/** Directly render the consent/privacy choices view rather than the import UI. */
+export type DnaImportView = "import" | "consent";
 
 /** @deprecated Alias kept for existing imports; use `McpApplicationError`. */
 export type ToolErrorPayload = McpApplicationError;
@@ -251,7 +289,14 @@ export type ExperienceState =
   | "READY_REFRESH_AVAILABLE"
   | "READY_REFRESH_PROCESSING"
   | "REFRESH_PROCESSING_NO_USABLE_ANALYSIS"
-  | "PROCESSING_FAILED";
+  | "PROCESSING_FAILED"
+  /**
+   * The analysis lifecycle is unaffected, but a protected operation was refused
+   * because consent is missing, stale, or withdrawn. The host must show the
+   * consent-recovery experience, not a generic error. The backend owns the
+   * analysis states; this value is set by the MCP layer on the refusal.
+   */
+  | "CONSENT_REQUIRED";
 
 export type PendingAnalysisReason = "initial_analysis" | "platform_refresh" | "user_refresh";
 
@@ -418,6 +463,12 @@ export interface ShowAnalysisFollowupsData {
 export interface DnaImportData {
   ui_rendered: true;
   mode: "initial" | "regenerate";
+  /**
+   * Which view the component opens on. Defaults to the import UI; `consent` is
+   * set when the tool is invoked as consent recovery, so the card shows the
+   * privacy choices instead of implying the user's DNA is missing.
+   */
+  view?: DnaImportView;
 }
 
 /** The `create_report` payload. */

@@ -41,6 +41,7 @@ import {
   STALE_CARD_RECOVERY_PROMPT,
   deliverFollowUp,
   logBridgeError,
+  logConsentEvent,
   logTiming,
   persistSentAction,
   readSentAction,
@@ -351,9 +352,14 @@ function errorMessage(error: ToolResponse["error"] | undefined): string {
  * Whether an envelope is the server's consent rejection. It is deliberately not
  * an authorization failure, so the card must not tell the user to reconnect:
  * the connection is valid and only the consent state is missing.
+ *
+ * The machine-readable `error.consent.required` is authoritative; the code and
+ * app-code checks are a compatibility fallback for a backend that predates the
+ * 3.4.0 consent object.
  */
 function isConsentRequired(error: ToolResponse["error"] | undefined): boolean {
   if (!error) return false;
+  if (error.consent?.required === true) return true;
   if (error.app_code === APP_ERROR_CODES.consent_required) return true;
   return error.code === "CONSENT_REQUIRED";
 }
@@ -385,6 +391,22 @@ interface ConsentState {
   url: string | null;
   /** `genetic_processing` for DNA import, `chatgpt_sharing` for result reads. */
   purpose: string | null;
+  /** Why consent is required: NOTICE_REQUIRED | NOTICE_VERSION_OUTDATED | WITHDRAWN. */
+  reason: string | null;
+  /** The notice version the account must accept, when the server reported one. */
+  noticeVersion: string | null;
+}
+
+/**
+ * The protected action that triggered consent recovery. Kept only for the
+ * current recovery flow so it can be resumed once after consent, then cleared.
+ * Arguments are held in memory only and are never persisted or logged; the
+ * genotype payload an import already holds is reused rather than copied here.
+ */
+interface PendingMutantAction {
+  tool: string;
+  args: Record<string, unknown>;
+  source: string;
 }
 
 /** Portal consent route used when the host does not forward the widget meta. */
@@ -397,15 +419,21 @@ const CONSENT_LINK_ERROR =
   "Mutant could not open the consent page here. Open Mutant in your browser to review and accept the current notice.";
 
 /** Read the server-authored consent descriptor off a tool result's `_meta`. */
-function consentDescriptor(
-  meta: unknown,
-): { url: string | null; purpose: string | null; clientId: string | null } | null {
+function consentDescriptor(meta: unknown): {
+  url: string | null;
+  purpose: string | null;
+  clientId: string | null;
+  reason: string | null;
+  noticeVersion: string | null;
+} | null {
   const consent = asRecord(asRecord(asRecord(meta)?.mutant)?.consent);
   if (!consent) return null;
   return {
     url: firstString(consent.url),
     purpose: firstString(consent.purpose),
     clientId: firstString(consent.client_id),
+    reason: firstString(consent.reason),
+    noticeVersion: firstString(consent.notice_version),
   };
 }
 
@@ -419,8 +447,9 @@ function consentStateFrom(
   result: { _meta?: unknown } | undefined,
   error: ToolResponse["error"] | undefined,
   fallbackPurpose: string,
+  force = false,
 ): ConsentState | null {
-  if (!isConsentRequired(error)) return null;
+  if (!force && !isConsentRequired(error)) return null;
   const descriptor = consentDescriptor(result ? result._meta : undefined);
   const purpose = descriptor?.purpose ?? fallbackPurpose;
   const base = descriptor?.url ?? DEFAULT_CONSENT_URL;
@@ -436,7 +465,27 @@ function consentStateFrom(
   } catch {
     url = null;
   }
-  return { url, purpose };
+  return {
+    url,
+    purpose,
+    reason: descriptor?.reason ?? error?.consent?.reason ?? null,
+    noticeVersion: descriptor?.noticeVersion ?? error?.consent?.notice_version ?? null,
+  };
+}
+
+/**
+ * Whether a display-tool result explicitly asks for the consent view (the
+ * `show_dna_import` recovery route). Distinct from a refusal: the tool succeeds,
+ * but the component must open the privacy choices instead of the upload UI.
+ */
+function consentViewRequested(result: {
+  structuredContent?: unknown;
+  _meta?: unknown;
+}): boolean {
+  const envelope = envelopeOf(result as Parameters<typeof envelopeOf>[0]);
+  const dataMode = envelope ? asRecord(envelope.data)?.view : undefined;
+  const metaMode = asRecord(asRecord(result._meta)?.mutant)?.view;
+  return dataMode === "consent" || metaMode === "consent";
 }
 
 function formatCount(value: number): string {
@@ -1098,6 +1147,12 @@ export function DnaImportApp({
   const [accountMissing, setAccountMissing] = useState(false);
   const [dnaOnFile, setDnaOnFile] = useState(false);
   /**
+   * True once an analysis is known to be ready. Tracked separately from `stage`
+   * so the consent-recovery card can preserve the "analysis ready" context even
+   * when the refusal arrives from a flow that changed the stage.
+   */
+  const [analysisReady, setAnalysisReady] = useState(false);
+  /**
    * The server refused a sensitive operation because the account has not
    * granted (or has withdrawn) consent. This is distinct from a connection or
    * scope problem: the card must route the user to the consent flow, not ask
@@ -1114,6 +1169,18 @@ export function DnaImportApp({
   const [consentLinkError, setConsentLinkError] = useState<string | null>(null);
   /** True while a post-acceptance re-check is in flight; blocks a double retry. */
   const [consentChecking, setConsentChecking] = useState(false);
+  /**
+   * Set when a resumed action is refused with CONSENT_REQUIRED again: consent was
+   * saved but the backend still cannot confirm it. Distinct from a new consent
+   * requirement, and never retried automatically (no loop).
+   */
+  const [consentSyncFailed, setConsentSyncFailed] = useState(false);
+  /** The protected action blocked by consent, remembered so it can resume once. */
+  const pendingActionRef = useRef<PendingMutantAction | null>(null);
+  /** True while the post-consent resume runs, so a repeat refusal is a sync failure. */
+  const resumePendingRef = useRef(false);
+  /** Synchronous mirror of `consentSyncFailed` for the resume callback. */
+  const consentSyncFailedRef = useRef(false);
   const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
   const [poll, setPoll] = useState<PollState>(INITIAL_POLL);
   const [findings, setFindings] = useState<FindingsState>({ status: "idle" });
@@ -1166,6 +1233,24 @@ export function DnaImportApp({
       created.ontoolresult = (result) => {
         const next = importModeFrom(result);
         if (next) selectImportMode(next);
+        // A consent-recovery mount (`show_dna_import` with view="consent") opens
+        // the privacy-choices card directly, without implying the DNA is missing
+        // and without requiring the operation to have failed first.
+        if (consentViewRequested(result)) {
+          const consent = consentStateFrom(
+            result,
+            envelopeOf(result as Parameters<typeof envelopeOf>[0])?.error,
+            CONSENT_PURPOSE_CHATGPT_SHARING,
+            true,
+          );
+          if (consent) {
+            pendingActionRef.current = null;
+            consentSyncFailedRef.current = false;
+            setConsentSyncFailed(false);
+            setConsentLinkError(null);
+            setConsentRequired(consent);
+          }
+        }
         // A bound overview snapshot is authoritative: render exactly the
         // hypotheses it resolved and pin follow-ups to that revision.
         const snapshot = overviewSnapshotFrom(result);
@@ -1237,11 +1322,58 @@ export function DnaImportApp({
   const comparisonPrefetchedRef = useRef<string | null>(null);
   /** Keeps the post-consent re-check single-flight across a double click. */
   const consentRetryRef = useRef(false);
+  /** Focused when the consent card opens so keyboard/screen-reader users land on it. */
+  const consentHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  /** The element focused before recovery opened, restored when it closes. */
+  const consentReturnFocusRef = useRef<HTMLElement | null>(null);
 
   const setFindingsState = useCallback((next: FindingsState) => {
     findingsRef.current = next;
     setFindings(next);
   }, []);
+
+  /**
+   * Central consent-recovery entry point. Every protected operation routes its
+   * refusal here, so the state mapping is identical everywhere: capture the
+   * blocked action, then either show the consent card or — when the refusal
+   * arrives while resuming after consent — report a consent-sync failure instead
+   * of reopening the flow in a loop.
+   */
+  const enterConsentRecovery = useCallback(
+    (
+      result: { _meta?: unknown } | undefined,
+      error: ToolResponse["error"] | undefined,
+      fallbackPurpose: string,
+      pending: PendingMutantAction,
+    ): boolean => {
+      const consent = consentStateFrom(result, error, fallbackPurpose);
+      if (!consent) return false;
+      pendingActionRef.current = pending;
+      setConsentLinkError(null);
+      if (resumePendingRef.current) {
+        // Consent was saved but the backend still refuses: keep the card up with
+        // an explicit sync message and disable automatic retry so this cannot
+        // become a loop.
+        consentSyncFailedRef.current = true;
+        setConsentSyncFailed(true);
+        setConsentRequired(consent);
+        logConsentEvent("consent_sync_failed", {
+          source_tool: pending.tool,
+          notice_version: consent.noticeVersion ?? undefined,
+        });
+        return true;
+      }
+      consentSyncFailedRef.current = false;
+      setConsentSyncFailed(false);
+      setConsentRequired(consent);
+      logConsentEvent("consent_required_encountered", {
+        source_tool: pending.tool,
+        notice_version: consent.noticeVersion ?? undefined,
+      });
+      return true;
+    },
+    [],
+  );
 
   // Host styling has to be seeded explicitly: the hook applies the host's CSS
   // variables and theme when it is handed a context, and there is no `app` yet
@@ -1267,12 +1399,15 @@ export function DnaImportApp({
       const result = await client.callServerTool({ name: "get_snp_catalog", arguments: {} });
       const envelope = envelopeOf(result);
       if (result.isError || !envelope || !envelope.ok) {
-        const consent = consentStateFrom(result, envelope?.error, CONSENT_PURPOSE_GENETIC_PROCESSING);
-        if (consent) {
-          setConsentLinkError(null);
-          setConsentRequired(consent);
+        enterConsentRecovery(result, envelope?.error, CONSENT_PURPOSE_GENETIC_PROCESSING, {
+          tool: "get_snp_catalog",
+          args: {},
+          source: "catalog",
+        });
+        // Never surface a generic error when consent is the blocker.
+        if (!isConsentRequired(envelope?.error)) {
+          setCatalogError(errorMessage(envelope?.error));
         }
-        setCatalogError(errorMessage(envelope?.error));
         return;
       }
       const next = toCatalog(envelope);
@@ -1284,7 +1419,7 @@ export function DnaImportApp({
     } catch {
       setCatalogError(messageFor("service_unavailable"));
     }
-  }, []);
+  }, [enterConsentRecovery]);
 
   /**
    * Ask the server where this account stands. This is the component's only
@@ -1335,6 +1470,7 @@ export function DnaImportApp({
         return;
       }
       if (info.analysisStatus === "ready") {
+        setAnalysisReady(true);
         // A user-selected refresh must not bounce back to the ready card: the
         // banner would re-offer the same refresh and loop. Send the user to the
         // resubmission flow instead.
@@ -1348,9 +1484,11 @@ export function DnaImportApp({
       }
       if (info.analysisStatus === "failed") {
         logAnalysisState("analysis_failed", "status reported failed on mount");
+        setAnalysisReady(false);
         setStage("analysis_failed");
         return;
       }
+      setAnalysisReady(false);
       setDnaOnFile(info.dnaStatus === "available");
       setStage("waiting_for_file");
     } catch (err) {
@@ -1378,6 +1516,22 @@ export function DnaImportApp({
       current === "loading_catalog" || current === "analysis_ready" ? "waiting_for_file" : current,
     );
   }, [importMode]);
+
+  // Move focus to the consent heading when recovery opens so keyboard and
+  // screen-reader users are placed on the state instead of left on a gone CTA,
+  // and restore the previous focus when recovery closes.
+  useEffect(() => {
+    if (consentRequired) {
+      consentReturnFocusRef.current =
+        (typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null) ??
+        null;
+      consentHeadingRef.current?.focus();
+      return;
+    }
+    const target = consentReturnFocusRef.current;
+    consentReturnFocusRef.current = null;
+    if (target && target.isConnected) target.focus();
+  }, [consentRequired]);
 
   /** Tell the model the component owns this state, so it does not narrate it. */
   const reportToModel = useCallback(
@@ -1557,17 +1711,16 @@ export function DnaImportApp({
             return;
           }
           // Consent is a server-side gate, not a connection problem: surface the
-          // dedicated consent card rather than a generic retry panel.
-          const consent = consentStateFrom(
+          // dedicated consent card rather than a generic retry panel. The raw
+          // variant payload is deliberately not copied into the pending action;
+          // resume reuses the parsed result and idempotency key still in memory.
+          const consentBlocked = enterConsentRecovery(
             result,
             envelope?.error,
             CONSENT_PURPOSE_GENETIC_PROCESSING,
+            { tool: "create_report", args: {}, source: "import" },
           );
-          if (consent) {
-            setConsentLinkError(null);
-            setConsentRequired(consent);
-          }
-          setUploadError(errorMessage(envelope?.error));
+          if (!consentBlocked) setUploadError(errorMessage(envelope?.error));
           // The review screen survives so the same file can be resubmitted.
           setStage("review_variants");
           return;
@@ -1603,9 +1756,11 @@ export function DnaImportApp({
         }));
 
         if (submittedStatus === "ready") {
+          setAnalysisReady(true);
           setStage("analysis_ready");
         } else if (submittedStatus === "failed") {
           logAnalysisState("analysis_failed", "create_report returned failed");
+          setAnalysisReady(false);
           setStage("analysis_failed");
         } else {
           setStage("analysis_processing");
@@ -1620,7 +1775,7 @@ export function DnaImportApp({
         setStage("review_variants");
       }
     },
-    [parsed, maxPollingMs, reportToModel, setFindingsState],
+    [enterConsentRecovery, parsed, maxPollingMs, reportToModel, setFindingsState],
   );
 
   // Poll `poll_analysis_status` until the analysis is terminal, the ceiling is
@@ -1697,6 +1852,7 @@ export function DnaImportApp({
         setAnalysis((previous) => analysisFromStatus(previous, info));
 
         if (info.analysisStatus === "ready") {
+          setAnalysisReady(true);
           setStage("analysis_ready");
           reportToModel(
             "The Mutant analysis is ready and the DNA import component is showing the completion " +
@@ -1707,6 +1863,7 @@ export function DnaImportApp({
         }
         if (info.analysisStatus === "failed") {
           logAnalysisState("analysis_failed", "status reported failed");
+          setAnalysisReady(false);
           setStage("analysis_failed");
           return;
         }
@@ -1772,11 +1929,11 @@ export function DnaImportApp({
       if (result.isError || !envelope || !envelope.ok) {
         // Sharing findings with ChatGPT is consent-gated too, so a refusal here
         // must reach the card instead of being swallowed as a missing enhancement.
-        const consent = consentStateFrom(result, envelope?.error, CONSENT_PURPOSE_CHATGPT_SHARING);
-        if (consent) {
-          setConsentLinkError(null);
-          setConsentRequired(consent);
-        }
+        enterConsentRecovery(result, envelope?.error, CONSENT_PURPOSE_CHATGPT_SHARING, {
+          tool: "get_analysis_context",
+          args: {},
+          source: "prompt_chips",
+        });
         return;
       }
       setPrompts(promptsFrom(envelope.data));
@@ -1787,7 +1944,7 @@ export function DnaImportApp({
     } catch {
       // Chips are an enhancement; a failure must not disturb the findings card.
     }
-  }, [app]);
+  }, [app, enterConsentRecovery]);
 
   const loadFindings = useCallback(async () => {
     if (!app) return;
@@ -1804,15 +1961,29 @@ export function DnaImportApp({
       });
       const envelope = envelopeOf(result);
       if (result.isError || !envelope || !envelope.ok) {
-        const consent = consentStateFrom(result, envelope?.error, CONSENT_PURPOSE_CHATGPT_SHARING);
-        if (consent) {
-          setConsentLinkError(null);
-          setConsentRequired(consent);
+        const consentBlocked = enterConsentRecovery(
+          result,
+          envelope?.error,
+          CONSENT_PURPOSE_CHATGPT_SHARING,
+          {
+            tool: "list_health_hypotheses",
+            args: {
+              limit: isFull ? FULL_FINDINGS_LIMIT : FREE_FINDINGS_LIMIT,
+              ...(version ? { analysis_version: version } : {}),
+            },
+            source: "findings",
+          },
+        );
+        // Do not render a generic findings error when consent is the blocker: the
+        // consent card owns the state and the analysis-ready context is preserved.
+        if (!consentBlocked) {
+          setFindingsState({
+            status: "error",
+            message: errorMessage(envelope?.error),
+          });
+        } else {
+          setFindingsState({ status: "idle" });
         }
-        setFindingsState({
-          status: "error",
-          message: errorMessage(envelope?.error),
-        });
         return;
       }
       const items = findingsFrom(envelope.data);
@@ -1828,7 +1999,7 @@ export function DnaImportApp({
     } catch {
       setFindingsState({ status: "error", message: messageFor("service_unavailable") });
     }
-  }, [app, isFull, loadPromptChips, setFindingsState]);
+  }, [app, enterConsentRecovery, isFull, loadPromptChips, setFindingsState]);
 
   /**
    * Open the portal consent route for the purpose the server refused. The URL is
@@ -1842,6 +2013,10 @@ export function DnaImportApp({
       setConsentLinkError(CONSENT_LINK_ERROR);
       return;
     }
+    logConsentEvent("consent_recovery_opened", {
+      source_tool: pendingActionRef.current?.tool,
+      notice_version: consentRequired?.noticeVersion ?? undefined,
+    });
     setConsentLinkError(null);
     void app.openLink({ url }).then(
       (result) => {
@@ -1852,36 +2027,92 @@ export function DnaImportApp({
   }, [app, consentRequired]);
 
   /**
+   * Re-run the protected action consent blocked. Dispatches on the recorded tool
+   * so the original request resumes rather than a fixed guess, and reuses the
+   * in-memory parsed import / idempotency key for `create_report` so no genotype
+   * payload is copied into the pending action.
+   */
+  const resumePendingAction = useCallback(async (): Promise<boolean> => {
+    if (!app) return false;
+    const pending = pendingActionRef.current;
+    switch (pending?.tool) {
+      case "create_report":
+        if (!parsed) return false;
+        await submit(app);
+        return true;
+      case "get_snp_catalog":
+        if (!catalog) await loadCatalog(app);
+        return true;
+      case "get_analysis_context":
+        promptsLoadedRef.current = false;
+        await loadPromptChips();
+        return true;
+      case "list_health_hypotheses":
+      default:
+        findingsRef.current = { status: "idle" };
+        setFindingsState({ status: "idle" });
+        promptsLoadedRef.current = false;
+        await loadFindings();
+        return true;
+    }
+  }, [app, catalog, loadCatalog, loadFindings, loadPromptChips, parsed, submit, setFindingsState]);
+
+  /**
    * Re-attempt the refused operation after the user has accepted in the portal.
    * The card never trusts a local checkbox: it clears the consent state and lets
    * the authoritative backend answer again, so an unchecked or withdrawn grant
    * returns the consent card instead of a success. A double click is single-flight.
+   *
+   * The resume runs at most once; a second CONSENT_REQUIRED is reported as a
+   * consent-sync problem (see `enterConsentRecovery`) rather than looping.
    */
   const retryAfterConsent = useCallback(() => {
     if (!app || consentRetryRef.current) return;
     consentRetryRef.current = true;
     setConsentChecking(true);
     setConsentLinkError(null);
+    setConsentSyncFailed(false);
+    consentSyncFailedRef.current = false;
     setConsentRequired(null);
-    const release = () => {
+    const sourceTool = pendingActionRef.current?.tool;
+    // Marks the next refusal as a sync failure, not a fresh recovery, and must be
+    // set before the resumed call can observe it.
+    resumePendingRef.current = true;
+    void (async () => {
+      let resumed: boolean;
+      try {
+        resumed = await resumePendingAction();
+      } catch {
+        resumed = false;
+      } finally {
+        resumePendingRef.current = false;
+      }
+      if (consentSyncFailedRef.current) {
+        logConsentEvent("pending_action_resume_failed", {
+          source_tool: sourceTool,
+          resume_success: false,
+        });
+      } else if (resumed) {
+        logConsentEvent("consent_completed", { source_tool: sourceTool, resume_success: true });
+        logConsentEvent("pending_action_resumed", { source_tool: sourceTool, resume_success: true });
+        pendingActionRef.current = null;
+      }
       consentRetryRef.current = false;
       setConsentChecking(false);
-    };
-    // An import was already prepared: resubmit the same attempt (same idempotency
-    // key) rather than making the user pick the file again.
-    if (parsed) {
-      void submit(app).finally(release);
-      return;
-    }
-    // The refusal came from a read: retry whichever read was blocked. The
-    // catalogue may not have loaded yet (it needs genetic processing), and result
-    // sharing lives in findings/prompt chips.
-    if (!catalog) void loadCatalog(app);
-    findingsRef.current = { status: "idle" };
-    setFindingsState({ status: "idle" });
-    promptsLoadedRef.current = false;
-    void loadFindings().finally(release);
-  }, [app, catalog, parsed, submit, loadCatalog, loadFindings, setFindingsState]);
+    })();
+  }, [app, resumePendingAction]);
+
+  /** The user abandoned consent recovery without accepting. */
+  const cancelConsent = useCallback(() => {
+    logConsentEvent("consent_recovery_cancelled", {
+      source_tool: pendingActionRef.current?.tool,
+    });
+    pendingActionRef.current = null;
+    consentSyncFailedRef.current = false;
+    setConsentSyncFailed(false);
+    setConsentRequired(null);
+    setConsentLinkError(null);
+  }, []);
 
   /**
    * The three rank-ordered findings the overview is bound to. It is the authority
@@ -1938,7 +2169,19 @@ export function DnaImportApp({
             setStaleNotice(true);
             return;
           }
-          setComparison({ status: "error", message: errorMessage(envelope?.error) });
+          const consentBlocked = enterConsentRecovery(
+            result,
+            envelope?.error,
+            CONSENT_PURPOSE_CHATGPT_SHARING,
+            {
+              tool: "list_health_hypotheses",
+              args: { limit: COMPARISON_LIMIT, analysis_version: version },
+              source: "comparison",
+            },
+          );
+          setComparison(
+            consentBlocked ? { status: "idle" } : { status: "error", message: errorMessage(envelope?.error) },
+          );
           return;
         }
         // The read must describe the same revision the card is displaying.
@@ -1962,7 +2205,7 @@ export function DnaImportApp({
         if (comparisonInFlightRef.current === version) comparisonInFlightRef.current = null;
       }
     },
-    [app, boundTopThree],
+    [app, boundTopThree, enterConsentRecovery],
   );
 
   // The overview route opens directly on its findings and follow-up hints.
@@ -2148,36 +2391,70 @@ export function DnaImportApp({
   if (consentRequired) {
     // The refused operation decides the wording: importing DNA needs genetic
     // processing; any read needs permission to share findings with ChatGPT. The
-    // connection is valid, so the card never asks the user to reconnect.
+    // connection is valid, so the card never asks the user to reconnect, and it
+    // is never styled as an error: consent is a recoverable product state.
     const importing = consentRequired.purpose === CONSENT_PURPOSE_GENETIC_PROCESSING;
-    const needsWhat = importing
-      ? "before it can import your DNA data"
-      : "before it can share your findings here";
+    const outdated = consentRequired.reason === "NOTICE_VERSION_OUTDATED";
+    const withdrawn = consentRequired.reason === "WITHDRAWN";
+    const reasonText = outdated
+      ? "A newer privacy notice is available. Review and accept it to keep going."
+      : withdrawn
+        ? "Sharing was turned off. Accept the current privacy choices to turn it back on."
+        : importing
+          ? "Before Mutant can import your DNA data, review and accept the current privacy choices."
+          : "Before Mutant can share your findings here, review and accept the current privacy choices.";
     return (
       <Shell>
-        <h1 style={styles.h1}>Consent needed</h1>
-        <p style={styles.subtitle}>Mutant needs your consent {needsWhat}.</p>
-        <div style={styles.privacy}>
-          <p style={{ margin: "0 0 4px", fontWeight: 600 }}>Review and accept the current notice</p>
-          <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>
-            Open Mutant, review the current consent notice, and accept it. Then return here and
-            continue. Nothing is imported or shared until you accept.
-          </p>
-        </div>
-        <div style={styles.buttonRow}>
-          <button type="button" style={styles.primaryButton} onClick={openConsent}>
-            Review and accept in Mutant
-          </button>
-          <button
-            type="button"
-            style={styles.secondaryButton}
-            onClick={retryAfterConsent}
-            disabled={consentChecking}
+        <section
+          role="region"
+          aria-labelledby="mutant-consent-heading"
+          aria-live="polite"
+          style={{ width: "100%" }}
+        >
+          <h1
+            id="mutant-consent-heading"
+            ref={consentHeadingRef}
+            tabIndex={-1}
+            style={styles.h1}
           >
-            {consentChecking ? "Checking…" : "I've accepted — check again"}
-          </button>
-        </div>
-        {consentLinkError ? <ErrorPanel message={consentLinkError} /> : null}
+            {analysisReady ? "Analysis ready" : "Privacy review required"}
+          </h1>
+          {analysisReady ? (
+            <p style={styles.subtitle}>Your DNA analysis is complete.</p>
+          ) : null}
+          <div style={styles.privacy}>
+            <p style={{ margin: "0 0 4px", fontWeight: 600 }}>Privacy review required</p>
+            <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>{reasonText}</p>
+            {consentRequired.noticeVersion ? (
+              <p style={{ margin: "6px 0 0", color: "var(--color-text-secondary, #5f6368)" }}>
+                Notice version {consentRequired.noticeVersion}
+              </p>
+            ) : null}
+          </div>
+          <div style={styles.buttonRow}>
+            <button type="button" style={styles.primaryButton} onClick={openConsent}>
+              Review privacy choices
+            </button>
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={retryAfterConsent}
+              disabled={consentChecking || consentSyncFailed}
+            >
+              {consentChecking ? "Checking…" : "I've accepted — check again"}
+            </button>
+            <button type="button" style={styles.subtleButton} onClick={cancelConsent}>
+              Not now
+            </button>
+          </div>
+          {consentSyncFailed ? (
+            <div style={styles.notice} role="status">
+              Consent is saved, but Mutant still can't confirm it for this session. Reopen the
+              panel or reconnect ChatGPT to Mutant, then try again.
+            </div>
+          ) : null}
+          {consentLinkError ? <ErrorPanel message={consentLinkError} /> : null}
+        </section>
       </Shell>
     );
   }

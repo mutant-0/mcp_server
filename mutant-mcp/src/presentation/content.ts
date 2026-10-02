@@ -52,6 +52,22 @@ function clampText(value: string, max: number): string {
 
 function errorContent(response: ToolResponse): string {
   const error = response.error;
+  // A consent refusal is a recoverable state, not an outage: never surface the
+  // generic `error:` mirror or retry-in-a-moment language for it. The recovery
+  // card (mounted by the MCP response layer) owns the user-facing experience;
+  // this text only tells the model the operation is blocked on consent.
+  if (error?.code === "CONSENT_REQUIRED") {
+    const reason = asText(error.consent?.reason);
+    const head =
+      reason === "NOTICE_VERSION_OUTDATED"
+        ? "Privacy review required: a newer privacy notice needs acceptance."
+        : "Privacy review required.";
+    return (
+      `${head} Before Mutant can continue, review and accept the current privacy choices. ` +
+      "Call show_dna_import with view \"consent\" to open them; do not retry the failed " +
+      "operation or describe it as an outage."
+    );
+  }
   const lines = [
     `error: ${error?.code ?? "UNKNOWN"}`,
     error?.message ?? "Unknown error",

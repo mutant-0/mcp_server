@@ -911,10 +911,12 @@ describe("contract v3.0 acceptance", () => {
     expect(envelope.error?.next_action?.tool).toBe("show_analysis_overview");
   });
 
-  it("surfaces CONSENT_REQUIRED without an OAuth challenge", async () => {
+  it("surfaces CONSENT_REQUIRED as a recoverable, renderable state without an OAuth challenge", async () => {
     const { client } = await connect(() =>
       makeErrorResponse("CONSENT_REQUIRED", "Consent is required.", {
         app_code: "consent_required",
+        consent: { required: true, current: false, reason: "NOTICE_REQUIRED", notice_version: "2026-10-01" },
+        next_action: { tool: "show_dna_import", arguments: { view: "consent" } },
       }),
     );
     const result = (await client.callTool({
@@ -922,10 +924,29 @@ describe("contract v3.0 acceptance", () => {
       arguments: MINIMAL_ARGS.create_report,
     })) as { isError?: boolean; _meta?: Record<string, unknown> };
 
-    expect(result.isError).toBe(true);
+    // Consent is a known product state, not an opaque tool failure: the host
+    // must mount the recovery card rather than a generic error panel.
+    expect(result.isError).toBe(false);
     const envelope = envelopeOf(result);
+    expect(envelope.ok).toBe(false);
     expect(envelope.error?.code).toBe("CONSENT_REQUIRED");
     expect(envelope.error?.app_code).toBe("consent_required");
+    expect(envelope.error?.consent?.reason).toBe("NOTICE_REQUIRED");
+
+    const meta = result._meta as {
+      ui?: unknown;
+      "openai/outputTemplate"?: unknown;
+      mutant?: {
+        experience_state?: string;
+        consent?: { view?: string; purpose?: string; reason?: string; notice_version?: string };
+      };
+    };
+    expect(meta.ui).toBeDefined();
+    expect(meta["openai/outputTemplate"]).toBeDefined();
+    expect(meta.mutant?.experience_state).toBe("CONSENT_REQUIRED");
+    expect(meta.mutant?.consent?.view).toBe("consent");
+    expect(meta.mutant?.consent?.purpose).toBe("genetic_processing");
+    expect(meta.mutant?.consent?.reason).toBe("NOTICE_REQUIRED");
     // Consent is not an authorization failure: the host must not be told to
     // re-run OAuth.
     expect(result._meta?.["mcp/www_authenticate"]).toBeUndefined();

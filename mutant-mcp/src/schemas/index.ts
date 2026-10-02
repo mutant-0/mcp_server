@@ -195,6 +195,17 @@ export const showDnaImportInputSchema = {
       "Import mode. Use 'regenerate' only when a refresh is required or the user asks to refresh.",
     )
     .optional(),
+  view: z
+    .enum(["import", "consent"])
+    .describe(
+      "Which view to open. Use 'consent' only to route the user through consent recovery " +
+        "after a protected operation was refused; otherwise the import UI is shown.",
+    )
+    .optional(),
+  purpose: z
+    .enum(["genetic_processing", "chatgpt_sharing"])
+    .describe("Consent purpose to review when view='consent'. Copy it from the refusal's next_action.")
+    .optional(),
 };
 
 /** No arguments: the component needs the whole catalog or none of it. */

@@ -312,8 +312,8 @@ describe("DNA import tool input schemas", () => {
     import_request_id: "12345678-abcd-4ef0-9876-1234567890ab",
   };
 
-  it("takes no arguments for the catalog tool and only an optional mode for the UI tool", () => {
-    expect(Object.keys(showDnaImportInputSchema)).toEqual(["mode"]);
+  it("takes no arguments for the catalog tool and only optional routing for the UI tool", () => {
+    expect(Object.keys(showDnaImportInputSchema)).toEqual(["mode", "view", "purpose"]);
     expect(getSnpCatalogInputSchema).toEqual({});
   });
 

@@ -55,6 +55,40 @@ export function logTiming(label: string, durationMs: number): void {
 export type FollowUpOutcome = "sent" | "failed" | "unavailable";
 
 /**
+ * Bounded consent-recovery telemetry. The event name is a fixed vocabulary and
+ * the dimensions are non-sensitive routing facts only: never genotype content,
+ * hypothesis names, raw DNA, health findings, or any protected result payload.
+ */
+export type ConsentRecoveryEvent =
+  | "consent_required_encountered"
+  | "consent_recovery_opened"
+  | "consent_completed"
+  | "consent_recovery_cancelled"
+  | "pending_action_resumed"
+  | "pending_action_resume_failed"
+  | "consent_sync_failed";
+
+export interface ConsentRecoveryDimensions {
+  /** The tool whose refusal triggered recovery (never its arguments). */
+  source_tool?: string;
+  experience_state?: string;
+  notice_version?: string;
+  resume_success?: boolean;
+}
+
+export function logConsentEvent(
+  event: ConsentRecoveryEvent,
+  dimensions: ConsentRecoveryDimensions = {},
+): void {
+  if (typeof console === "undefined" || typeof console.debug !== "function") return;
+  const fields = Object.entries(dimensions)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(" ");
+  console.debug(`[mutant-ui] consent ${event}${fields ? ` ${fields}` : ""}`);
+}
+
+/**
  * Post a follow-up user turn into the host conversation.
  *
  * ChatGPT injects `window.openai.sendFollowUpMessage`, which is the API that

@@ -1818,11 +1818,10 @@ describe("DNA import component", () => {
 
     // The consent card replaces the review screen: the connection is valid, so it
     // must not ask the user to reconnect, and it names the import purpose.
-    await screen.findByText(/^Consent needed$/);
-    await screen.findByText(/before it can import your DNA data/i);
+    await screen.findByText(/Before Mutant can import your DNA data/i);
     expect(screen.queryByText(/Ready to submit/i)).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /Review and accept in Mutant/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review privacy choices/i }));
     await waitFor(() => expect(bridge.openLinks).toHaveLength(1));
     // Only the consent route, the purpose, and the public client id travel.
     expect(bridge.openLinks[0]).toContain("https://mutantgenomics.com/consent");
@@ -1845,7 +1844,7 @@ describe("DNA import component", () => {
     selectFile(microarrayFile());
     await screen.findByText(/Ready to submit/i);
     fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
-    await screen.findByText(/^Consent needed$/);
+    await screen.findByRole("button", { name: /Review privacy choices/i });
 
     const retry = screen.getByRole("button", { name: /I've accepted/i });
     fireEvent.click(retry);
@@ -1871,9 +1870,123 @@ describe("DNA import component", () => {
     await screen.findByText(/^Analysis ready$/);
     fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
 
-    await screen.findByText(/^Consent needed$/);
+    // The analysis-ready context is preserved: the card keeps the outcome and
+    // adds the privacy review state instead of looking like a fresh import.
+    await screen.findByText(/^Privacy review required$/);
+    await screen.findByText(/^Your DNA analysis is complete\.$/);
     // The read purpose, not importing DNA: sharing findings needs its own notice.
-    await screen.findByText(/before it can share your findings here/i);
+    await screen.findByText(/Before Mutant can share your findings here/i);
+    // Consent is not an outage: no generic error copy, and no import CTA.
+    expect(screen.queryByText(/Something went wrong/i)).toBeNull();
+    expect(screen.queryByText(/temporarily unavailable/i)).toBeNull();
+    expect(screen.queryByText(/Ready to submit/i)).toBeNull();
+  });
+
+  it("resumes the exact blocked findings read once after consent", async () => {
+    const bridge = renderWith(
+      {
+        poll_analysis_status: statusResponse("ready"),
+        get_analysis_context: chipContext(),
+        list_health_hypotheses: (_args, call) => (call === 1 ? consentError() : FINDINGS),
+      },
+      {},
+      { toolMeta: { list_health_hypotheses: consentMeta("chatgpt_sharing") } },
+    );
+
+    await screen.findByText(/^Analysis ready$/);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+    await screen.findByRole("button", { name: /Review privacy choices/i });
+    const beforeResume = bridge.callsTo("list_health_hypotheses").length;
+
+    fireEvent.click(screen.getByRole("button", { name: /I've accepted/i }));
+
+    // The original read (same arguments), not a fixed guess, resumes and renders.
+    await screen.findByText(/Alpha finding/i);
+    await waitFor(() =>
+      expect(bridge.callsTo("list_health_hypotheses").length).toBe(beforeResume + 1),
+    );
+    expect(bridge.callsTo("list_health_hypotheses").at(-1)?.arguments).toEqual({
+      limit: 3,
+      analysis_version: "analysis_1",
+    });
+  });
+
+  it("reports a consent-sync failure and stops when the resume is refused again", async () => {
+    const bridge = renderWith(
+      {
+        poll_analysis_status: statusResponse("ready"),
+        get_analysis_context: chipContext(),
+        list_health_hypotheses: consentError(),
+      },
+      {},
+      { toolMeta: { list_health_hypotheses: consentMeta("chatgpt_sharing") } },
+    );
+
+    await screen.findByText(/^Analysis ready$/);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+    await screen.findByRole("button", { name: /Review privacy choices/i });
+    const beforeResume = bridge.callsTo("list_health_hypotheses").length;
+
+    fireEvent.click(screen.getByRole("button", { name: /I've accepted/i }));
+
+    // The card stays up with an explicit sync message: exactly one resume
+    // attempt, then it stops (no loop).
+    await screen.findByText(/Mutant still can't confirm it/i);
+    expect(bridge.callsTo("list_health_hypotheses").length).toBe(beforeResume + 1);
+    const retry = screen.getByRole("button", { name: /I've accepted/i }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(true);
+  });
+
+  it("opens the privacy choices directly when mounted with view=consent", async () => {
+    const bridge = await renderApp({}, {}, {});
+    await screen.findByText(/Drag and drop your DNA file here/i);
+
+    bridge.sendToolResult(makeSuccessResponse({ ui_rendered: true, mode: "initial", view: "consent" }), {
+      mutant: {
+        view: "consent",
+        consent: { url: "https://mutantgenomics.com/consent", purpose: "chatgpt_sharing" },
+      },
+    });
+
+    // Recovery opens on consent, never the upload UI.
+    await screen.findByText(/Before Mutant can share your findings here/i);
+    await screen.findByRole("button", { name: /Review privacy choices/i });
+    expect(screen.queryByText(/Drag and drop your DNA file here/i)).toBeNull();
+  });
+
+  it("emits bounded consent telemetry with no sensitive payload", async () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    try {
+      renderWith(
+        {
+          poll_analysis_status: statusResponse("ready"),
+          get_analysis_context: chipContext(),
+          list_health_hypotheses: consentError(),
+        },
+        {},
+        { toolMeta: { list_health_hypotheses: consentMeta("chatgpt_sharing") } },
+      );
+
+      await screen.findByText(/^Analysis ready$/);
+      fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+      await screen.findByRole("button", { name: /Review privacy choices/i });
+      fireEvent.click(screen.getByRole("button", { name: /Review privacy choices/i }));
+
+      await waitFor(() =>
+        expect(
+          debug.mock.calls.some((call) => String(call[0]).includes("consent_recovery_opened")),
+        ).toBe(true),
+      );
+      const consentLogs = debug.mock.calls
+        .map((call) => String(call[0]))
+        .filter((line) => line.includes("consent "));
+      expect(consentLogs.some((line) => line.includes("consent_required_encountered"))).toBe(true);
+      const joined = consentLogs.join("\n");
+      expect(joined).not.toMatch(/rs\d{3,}/);
+      expect(joined).not.toMatch(/Alpha finding|Beta finding|Gamma finding/);
+    } finally {
+      debug.mockRestore();
+    }
   });
 
   it("shows a retryable deletion state when an import is refused mid-deletion", async () => {

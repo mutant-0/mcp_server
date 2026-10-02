@@ -50,10 +50,12 @@ export const showAnalysisOverviewTool: MutantToolDefinition = {
     );
     if (!response.ok) {
       // An unready analysis is an expected application state: forward the
-      // structured error envelope rather than throwing. No UI descriptor is
-      // attached, so a processing/locked/failed result can never mount the
+      // structured error envelope rather than throwing. This path attaches no UI
+      // descriptor, so a processing/locked/failed result can never mount the
       // overview card: the processing experience belongs to show_dna_import and
-      // poll_analysis_status. Any legacy upgrade field is stripped.
+      // poll_analysis_status. The one exception is a consent refusal, which
+      // `respond` centrally routes to the shared consent-recovery card. Any
+      // legacy upgrade field is stripped.
       return respond(withValidatedPlanNotice(response, runtime.config), runtime, {
         operation: "show_analysis_overview",
       });
