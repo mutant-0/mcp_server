@@ -61,6 +61,12 @@ jobs:
       - name: Test
         run: npm test
 
+      # PRIV-10: the named privacy release gate (consent bypass, payload
+      # leakage, sanitized logs, cross-account access, withdrawal, deletion
+      # races), then verifies the release-gate manifest resolves each test id.
+      - name: Privacy release gate
+        run: npm run test:privacy && npm run verify:privacy
+
   build-and-deploy:
     needs: test
     runs-on: ubuntu-latest

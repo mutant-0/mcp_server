@@ -188,6 +188,8 @@ P0 means address before public onboarding. It does not mean a demonstrated produ
 
 **Acceptance:** All required tests pass on the deployed release candidate; evidence links are complete and contain only synthetic/redacted data. The privacy review changes to implementation-verified only when every applicable ticket closes. Platform approval remains a separate outcome.
 
+**Implementation status (2026-10-02):** Automated half delivered on `main`. `docs/privacy/release-gate.json` is the machine-readable gate (six automated rows, three pending manual/deploy rows); `infrastructure/lib/privacy-release-gate.ts` and `tests/privacy-release-gate.test.ts` enforce that a `verified` row carries real evidence and resolve every available test id. `scripts/verify-privacy-gate.ts` (`npm run verify:privacy`, plus `--release` to enforce the manual rows) writes `privacy-release-report.json`. The focused `npm run test:privacy` suite covers consent-bypass, payload-leakage, log-sanitization, cross-account-access, withdrawal, and deletion-races; the backend registers a `privacy` pytest marker and `pytest -m privacy` runs the consent/withdrawal/deletion/cross-account modules (`test_routes_consent.py` is now collectable in CI, previously skipped because it imported `botocore` statically). Both deploy workflows run the gate. Plan and evidence requirements: `docs/privacy/release-gate-plan.md`. The ticket remains **open**: the staging synthetic-account walk, the release evidence bundle, and observed routing traces stay `pending`, blocked by PRIV-01 **C1/D1/D2/D3/D5/D6/D7** and the PRIV-06 **P3** decision.
+
 ## Decisions required from the product owner
 
 - Initial countries/states and intended age range.

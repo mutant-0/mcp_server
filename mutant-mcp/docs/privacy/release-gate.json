@@ -1,0 +1,235 @@
+{
+  "version": "1.0",
+  "updatedAt": "2026-10-02",
+  "backlogItem": "PRIV-10",
+  "decisionRefs": ["P1", "P2", "P3", "P4", "C1", "D1", "D2", "D3", "D5", "D6", "D7"],
+  "notes": [
+    "Machine-readable privacy release gate. It records which privacy requirements are backed by a named automated test and which still require deployed/manual evidence. It is not a compliance certification.",
+    "An automated row is 'verified' only while its tests[] entries resolve to a real, named test. A manual/deploy row is 'verified' only with an evidenceRef that a reviewer can open; a boolean edited to true is not evidence.",
+    "Default `npm run verify:privacy` fails on an unresolved automated row. `npm run verify:privacy -- --release` additionally fails while a required manual/deploy row is not verified. A pending row is not a pass.",
+    "Evidence bundles must contain synthetic/redacted data only; secrets are recorded by name, never by value."
+  ],
+  "checks": [
+    {
+      "id": "consent-bypass",
+      "requirement": "A sensitive operation is refused at the authoritative backend boundary with a typed CONSENT_REQUIRED envelope, no payload, and no side effect when consent is missing, stale, or denied, even when the browser/portal is bypassed.",
+      "kind": "automated",
+      "status": "verified",
+      "repo": "back-end",
+      "tests": [
+        {
+          "repo": "back-end",
+          "path": "report-generator/mcp/tests/test_mcp_consent.py",
+          "name": "test_create_report_requires_genetic_processing_consent"
+        },
+        {
+          "repo": "back-end",
+          "path": "report-generator/mcp/tests/test_mcp_consent.py",
+          "name": "test_withdrawn_consent_blocks_a_read_with_no_payload"
+        },
+        {
+          "repo": "back-end",
+          "path": "report-generator/mcp/tests/test_mcp_consent.py",
+          "name": "test_missing_consent_reader_fails_closed"
+        },
+        {
+          "repo": "mcp_server",
+          "path": "mutant-mcp/tests/contract-v3.test.ts",
+          "name": "surfaces CONSENT_REQUIRED without an OAuth challenge"
+        }
+      ],
+      "note": "Proves the guard runs before import side effects and that an unwired guard refuses rather than assumes consent."
+    },
+    {
+      "id": "payload-leakage",
+      "requirement": "Unexpected identifying, debug, or genotype fields in backend responses and WGS inputs do not cross the approved projection on structuredContent, text, metadata, or error paths; only declared response fields and explicitly approved genotype detail survive.",
+      "kind": "automated",
+      "status": "verified",
+      "repo": "mcp_server",
+      "tests": [
+        {
+          "repo": "mcp_server",
+          "path": "mutant-mcp/tests/response-projection.test.ts",
+          "name": "drops unknown top-level, nested, and object fields from structuredContent"
+        },
+        {
+          "repo": "mcp_server",
+          "path": "mutant-mcp/tests/response-projection.test.ts",
+          "name": "drops unrequested genotypes and debug fields from list results, keeping search scope"
+        },
+        {
+          "repo": "mcp_server",
+          "path": "mutant-mcp/tests/response-projection.test.ts",
+          "name": "keeps approved genotype detail in the variant evidence tool and drops sample metadata"
+        },
+        {
+          "repo": "mcp_server",
+          "path": "mutant-mcp/tests/schemas.test.ts",
+          "name": "rejects client-supplied identity, because identity comes from the token"
+        },
+        {
+          "repo": "mcp_server",
+          "path": "mutant-mcp/tests/lambda-client.test.ts",
+          "name": "carries the verified client id for consent partitioning"
+        },
+        {
+          "repo": "mcp_server",
+          "path": "mutant-mcp/tests/list-search-scope.test.ts",
+          "name": "limits a Full miss to the catalog search fields"
+        }
+      ],
+      "note": "The projection is per committed output schema; a loose validation schema alone is not a boundary."
+    },
+    {
+      "id": "log-sanitization",
+      "requirement": "Ordinary logs carry a bounded operational schema (tool, status, timing, opaque request id, schema-derived argument names) and never an argument value: no health-history prose, filenames, genotypes, tokens, context values, account identifiers, or data-bearing exception messages.",
+      "kind": "automated",
+      "status": "verified",
+      "repo": "mcp_server",
+      "tests": [
+        {
+          "repo": "mcp_server",
+          "path": "mutant-mcp/tests/tool-audit.test.ts",
+          "name": "keeps health-history prose, filenames, genotypes, tokens, and context out of the full log"
+        },
+        {
+          "repo": "mcp_server",
+          "path": "mutant-mcp/tests/tool-audit.test.ts",
+          "name": "classifies a thrown error without copying its message or stack"
+        },
+        {
+          "repo": "mcp_server",
+          "path": "mutant-mcp/tests/tool-audit.test.ts",
+          "name": "records one ordered record per call with argument names but no values"
+        }
+      ],
+      "note": "Routing argument values appear only in a designated synthetic capture, never in ordinary production logs."
+    },
+    {
+      "id": "cross-account-access",
+      "requirement": "Identity comes only from the verified token; a subject, client, or argument-supplied value cannot read or mutate another account's data, and grants remain scoped per subject and per client.",
+      "kind": "automated",
+      "status": "verified",
+      "repo": "back-end",
+      "tests": [
+        {
+          "repo": "back-end",
+          "path": "report-generator/mcp/tests/test_mcp_consent.py",
+          "name": "test_integration_grants_are_independent_per_client_and_subject"
+        },
+        {
+          "repo": "back-end",
+          "path": "report-generator/mcp/tests/test_mcp_consent.py",
+          "name": "test_identity_client_id_never_comes_from_arguments"
+        },
+        {
+          "repo": "back-end",
+          "path": "report-generator/test/test_routes_consent.py",
+          "name": "test_subject_is_taken_from_the_token_not_the_body"
+        },
+        {
+          "repo": "back-end",
+          "path": "report-generator/test/test_routes_consent.py",
+          "name": "test_disconnect_is_scoped_and_preserves_other_clients"
+        }
+      ],
+      "note": "Covers per-subject/per-client isolation for consent and integration grants."
+    },
+    {
+      "id": "withdrawal",
+      "requirement": "Withdrawal takes effect on the next request that reaches the boundary: a withdrawn purpose blocks sensitive reads with no payload, a disconnected integration is refused as INTEGRATION_REVOKED with a recovery hint, and relink must re-accept rather than silently restore withdrawn permissions.",
+      "kind": "automated",
+      "status": "verified",
+      "repo": "back-end",
+      "tests": [
+        {
+          "repo": "back-end",
+          "path": "report-generator/test/test_routes_consent.py",
+          "name": "test_disconnect_withdraws_sharing_and_marks_disconnected"
+        },
+        {
+          "repo": "back-end",
+          "path": "report-generator/test/test_routes_consent.py",
+          "name": "test_accept_after_disconnect_clears_the_fence"
+        },
+        {
+          "repo": "back-end",
+          "path": "report-generator/mcp/tests/test_mcp_consent.py",
+          "name": "test_withdrawal_takes_effect_on_the_next_request"
+        },
+        {
+          "repo": "mcp_server",
+          "path": "mutant-mcp/tests/contract-v3.test.ts",
+          "name": "surfaces INTEGRATION_REVOKED with a reconnect hint and no OAuth challenge"
+        }
+      ],
+      "note": "The documented propagation bound is that the fence gates request start; an in-flight request is not rechecked mid-run."
+    },
+    {
+      "id": "deletion-races",
+      "requirement": "The deletion fence runs before consent and before any side effect, blocks sensitive reads and imports with typed DELETION_IN_PROGRESS/DATA_DELETED envelopes and no payload, fails closed on a store error, and leaves the recovery import path open after a completed closure.",
+      "kind": "automated",
+      "status": "verified",
+      "repo": "back-end",
+      "tests": [
+        {
+          "repo": "back-end",
+          "path": "report-generator/mcp/tests/test_mcp_deletion.py",
+          "name": "test_fence_runs_before_consent_and_blocks_the_import"
+        },
+        {
+          "repo": "back-end",
+          "path": "report-generator/mcp/tests/test_mcp_deletion.py",
+          "name": "test_sensitive_read_is_blocked_with_no_payload"
+        },
+        {
+          "repo": "back-end",
+          "path": "report-generator/mcp/tests/test_mcp_deletion.py",
+          "name": "test_store_failure_fails_closed"
+        },
+        {
+          "repo": "back-end",
+          "path": "report-generator/mcp/tests/test_mcp_deletion.py",
+          "name": "test_create_report_is_the_recovery_path_from_a_closed_account"
+        }
+      ],
+      "note": "Covers the import/read fence and fail-closed behavior; physical store purge completeness remains PRIV-07 deployed evidence."
+    },
+    {
+      "id": "staging-walk",
+      "requirement": "In staging, synthetic new/existing accounts exercise absent/stale/withdrawn consent, import, overview/details, no-match searches, expired tokens, disconnect, delete, and relink, with every response channel and sampled logs inspected for sentinel data.",
+      "kind": "manual",
+      "status": "pending",
+      "repo": "mcp_server",
+      "evidenceRef": {
+        "path": "mutant-mcp/docs/privacy/deployment-manifest.md",
+        "section": "11c"
+      },
+      "note": "Requires AWS/Cognito and a manual ChatGPT session. Blocked by PRIV-01 C1; the discovery steps are in mutant-mcp/docs/privacy/discovery-runbook.md section 5."
+    },
+    {
+      "id": "release-evidence",
+      "requirement": "A release evidence bundle records component revisions, policy/consent notice versions, the approved data inventory, deployed retention/access settings, and deletion/withdrawal outcomes, with credentials and real identifiers removed.",
+      "kind": "deploy",
+      "status": "pending",
+      "repo": "mcp_server",
+      "evidenceRef": {
+        "path": "mutant-mcp/docs/privacy/deployment-manifest.md",
+        "section": "8"
+      },
+      "note": "Blocked by PRIV-01 D1/D2/D3/D5/D6/D7 and the PRIV-06 P3 retention decision; verify:retention emits the retention half (retention-report.json)."
+    },
+    {
+      "id": "golden-routing-provenance",
+      "requirement": "Observed ChatGPT routing traces are captured from a designated synthetic session so that pending-manual-capture placeholders become observed calls; privacy fixes must not turn an incomplete trace into an observed one.",
+      "kind": "manual",
+      "status": "pending",
+      "repo": "mcp_server",
+      "evidenceRef": {
+        "path": "mutant-mcp/docs/privacy/discovery-runbook.md",
+        "section": "5"
+      },
+      "note": "Requires MUTANT_TRACE_CAPTURE=1 in a controlled environment and a manual ChatGPT session (npm run record:trace)."
+    }
+  ]
+}
