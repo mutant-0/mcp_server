@@ -170,6 +170,8 @@ P0 means address before public onboarding. It does not mean a demonstrated produ
 
 **Acceptance:** Live public pages show the intended version and match tested behavior. Links work without login. Consent records resolve to the exact accepted notice. No retention promises exceed demonstrated controls. Listing data is validated against the current supported schema.
 
+**Implementation status (2026-10-02):** Partial on `main`. Portal `DataPolicyPage.js` raw-file claims are now route-specific (plugin import local-only vs portal web upload stored) and the `PrivacyPage.js` operational-log/backup wording no longer asserts unsupported expiration; `deploys3.ps1` invalidates `/privacy`, `/data-policy`, `/terms`, `/cookie-policy`. `plugin.json` carries the schema-supported `homepage`/`author`/`license`/`keywords` with a `tests/plugin-manifest.test.ts` conformance test against the vendored Agent Plugins 1.0.0 schema (which defines no privacy/terms/support URL field). The ticket remains **open**: PRIV-01 **D6/D7** (portal build root, served/rendered revision) block P0-C and live verification, **P1/P2/P4** block P0-E, and **P3** still blocks the retention wording. See `docs/privacy/policy-publishing-plan.md` §7.
+
 ## PRIV-10 — Add a privacy release gate and collect deployment evidence
 
 **Priority:** P1; required to close the review. **Owner:** release/QA. **Dependencies:** PRIV-02 through PRIV-09; PRIV-01 decisions resolved.

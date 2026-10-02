@@ -3,6 +3,20 @@
   "name": "mutant-genomics",
   "version": "1.0.0",
   "description": "Compare Mutant DNA findings with health history you share, explore findings, or add DNA data.",
+  "homepage": "https://mutantgenomics.com",
+  "author": {
+    "name": "Mutant Genomics",
+    "email": "support@mutantgenomics.com",
+    "url": "https://mutantgenomics.com"
+  },
+  "license": "UNLICENSED",
+  "keywords": [
+    "genomics",
+    "genetics",
+    "dna",
+    "health",
+    "chatgpt"
+  ],
   "extensions": {
     "com.openai": {
       "interface": {
