@@ -178,6 +178,8 @@ export class DevTokenValidator implements TokenValidator {
         userId: "dev-user",
         clientId: "dev-client",
         scopes,
+        // A dev token is always "issued now"; there is no boundary to satisfy.
+        issuedAt: Math.floor(Date.now() / 1000),
         isDev: true,
       };
     }
@@ -257,10 +259,19 @@ export function contextFromClaims(payload: JWTPayload, config: ValidatorOptions)
     }
   }
 
+  // `iat` is a standard JWT claim. Rounded to whole seconds; absent/`non-numeric`
+  // claims become 0 so the backend treats the token as having no boundary to
+  // satisfy (a token with an integration row must still postdate it).
+  const issuedAt =
+    typeof payload.iat === "number" && Number.isFinite(payload.iat)
+      ? Math.floor(payload.iat)
+      : 0;
+
   return {
     userId,
     ...(clientId ? { clientId } : {}),
     scopes,
+    issuedAt,
   };
 }
 

@@ -1876,6 +1876,47 @@ describe("DNA import component", () => {
     await screen.findByText(/before it can share your findings here/i);
   });
 
+  it("shows a retryable deletion state when an import is refused mid-deletion", async () => {
+    const bridge = await renderApp({
+      create_report: makeErrorResponse("DELETION_IN_PROGRESS", "Deletion in progress.", {
+        app_code: "deletion_in_progress",
+        retryable: true,
+      }),
+    });
+
+    selectFile(microarrayFile());
+    await screen.findByText(/Ready to submit/i);
+    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+
+    await screen.findByText(/^Deletion in progress$/);
+    // Not a connection or consent problem.
+    expect(screen.queryByText(/Reconnect Mutant/i)).toBeNull();
+    expect(screen.queryByText(/^Consent needed$/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Check again/i }));
+    await waitFor(() => expect(screen.queryByText(/^Deletion in progress$/)).toBeNull());
+    expect(bridge.callsTo("create_report")).toHaveLength(1);
+  });
+
+  it("offers a fresh import once the account data has been deleted", async () => {
+    await renderApp({
+      create_report: makeErrorResponse("DATA_DELETED", "Data deleted.", {
+        app_code: "data_deleted",
+        retryable: false,
+      }),
+    });
+
+    selectFile(microarrayFile());
+    await screen.findByText(/Ready to submit/i);
+    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+
+    await screen.findByText(/^Data deleted$/);
+    expect(screen.queryByText(/Reconnect Mutant/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Import DNA$/i }));
+    await waitFor(() => expect(screen.queryByText(/^Data deleted$/)).toBeNull());
+  });
+
   it("explains a file with no panel variants instead of submitting it", async () => {
     const bridge = await renderApp();
 

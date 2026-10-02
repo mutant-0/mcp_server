@@ -12,6 +12,12 @@ export interface MutantUserContext {
   clientId?: string;
   /** Verified scopes carried by the access token. */
   scopes: string[];
+  /**
+   * The verified token's issued-at claim (`iat`, Unix seconds). Forwarded to the
+   * backend so it can fence a token issued before a disconnect/relink boundary
+   * (PRIV-08). `0` when the token carried no `iat`.
+   */
+  issuedAt?: number;
   /** True when running under MUTANT_DEV_MODE (no cryptography). */
   isDev?: boolean;
 }

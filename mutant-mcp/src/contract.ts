@@ -1,11 +1,15 @@
 /**
- * Shared Mutant MCP contract (version 3.2.0).
+ * Shared Mutant MCP contract (version 3.3.0).
  *
  * These constants, error codes, and envelope types mirror the backend
  * implementation in `report-generator/mcp/contract.py`. The backend owns all
  * business semantics; the MCP Lambda is a thin, authenticated transport.
  *
- * 3.2.0 adds server-side consent enforcement: a new `CONSENT_REQUIRED` error
+ * 3.3.0 adds integration revocation: a new `INTEGRATION_REVOKED` error code and
+ * an optional `identity.issued_at` (the verified token's `iat`) on the internal
+ * request, so the backend can fence a token issued before a disconnect/relink
+ * boundary. It is otherwise the 3.2.0 contract, which adds server-side consent
+ * enforcement: a `CONSENT_REQUIRED` error
  * code and an optional `identity.client_id` on the internal request. It is
  * otherwise the 3.1.0 contract, which replaced the Free-plan upgrade offer
  * surface (the public `upgrade: {label, url}` object and `error.upgrade_url` are
@@ -25,7 +29,7 @@
  * `regeneration`, `current_results_usable`, and `optional_actions`.
  */
 
-export const CONTRACT_VERSION = "3.2.0";
+export const CONTRACT_VERSION = "3.3.0";
 
 /**
  * Analysis tools. These require `analysis.read`.
@@ -127,6 +131,20 @@ export const ErrorCode = {
    * user through the consent flow rather than re-running OAuth.
    */
   CONSENT_REQUIRED: "CONSENT_REQUIRED",
+  /**
+   * An authenticated deletion is in flight. New imports and sensitive reads are
+   * blocked until it completes; retryable.
+   */
+  DELETION_IN_PROGRESS: "DELETION_IN_PROGRESS",
+  /** Account closure completed; no findings can be served. Not retryable. */
+  DATA_DELETED: "DATA_DELETED",
+  /**
+   * The ChatGPT integration grant is withdrawn, or the presented token was
+   * issued before the last disconnect/relink boundary. Distinct from consent:
+   * the user must reconnect the integration, not merely re-accept the notice.
+   * Not retryable by polling.
+   */
+  INTEGRATION_REVOKED: "INTEGRATION_REVOKED",
 } as const;
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -995,6 +1013,12 @@ export const APP_ERROR_CODES = {
   service_unavailable: "service_unavailable",
   /** The account must complete the consent flow before this sensitive operation. */
   consent_required: "consent_required",
+  /** An authenticated deletion is in flight; sensitive operations are blocked. */
+  deletion_in_progress: "deletion_in_progress",
+  /** Account closure completed; there is no data left to serve. */
+  data_deleted: "data_deleted",
+  /** The ChatGPT integration is disconnected; reconnect to continue. */
+  integration_revoked: "integration_revoked",
   // Derived by the DNA import component from the analysis lifecycle rather than
   // returned by a tool: `analysis_failed` when the analysis reaches a failed
   // state, `analysis_timeout` when polling stops without a terminal state. They
@@ -1029,6 +1053,12 @@ export function appErrorCode(code: string): AppErrorCode {
       return APP_ERROR_CODES.payload_too_large;
     case ErrorCode.CONSENT_REQUIRED:
       return APP_ERROR_CODES.consent_required;
+    case ErrorCode.DELETION_IN_PROGRESS:
+      return APP_ERROR_CODES.deletion_in_progress;
+    case ErrorCode.DATA_DELETED:
+      return APP_ERROR_CODES.data_deleted;
+    case ErrorCode.INTEGRATION_REVOKED:
+      return APP_ERROR_CODES.integration_revoked;
     default:
       return APP_ERROR_CODES.service_unavailable;
   }

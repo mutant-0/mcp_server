@@ -1,4 +1,9 @@
-import { approvedConsentUrl, requiredScope, resourceUri } from "../config.js";
+import {
+  approvedConsentUrl,
+  approvedOnboardingUrl,
+  requiredScope,
+  resourceUri,
+} from "../config.js";
 import type { ToolName, ToolResponse } from "../contract.js";
 import { protectedResourceMetadataUrl, toolAuthChallenge } from "../responses/errors.js";
 import { toolResultFromResponse, type ToolResultOptions } from "../responses/tool-result.js";
@@ -70,6 +75,42 @@ export function respond(
     return toolResultFromResponse(response, {
       ...options,
       meta: { ...(options.meta ?? {}), ...consent },
+    });
+  }
+  if (code === "INTEGRATION_REVOKED") {
+    // The ChatGPT connection was withdrawn (or the token predates the relink).
+    // The recovery is to reconnect from the portal, so the widget gets a safe
+    // Mutant URL; no genetic payload is present.
+    const url = approvedOnboardingUrl(runtime.config);
+    return toolResultFromResponse(response, {
+      ...options,
+      meta: {
+        ...(options.meta ?? {}),
+        mutant: {
+          ...((options.meta?.mutant as Record<string, unknown> | undefined) ?? {}),
+          integration: {
+            status: "revoked",
+            retryable: response.error?.retryable ?? false,
+            ...(url ? { url } : {}),
+          },
+        },
+      },
+    });
+  }
+  if (code === "DELETION_IN_PROGRESS" || code === "DATA_DELETED") {
+    // No genetic payload is present; the widget only needs to know whether to
+    // wait (deletion in flight) or offer a fresh import (data deleted).
+    return toolResultFromResponse(response, {
+      ...options,
+      meta: {
+        ...(options.meta ?? {}),
+        mutant: {
+          deletion: {
+            status: code === "DATA_DELETED" ? "deleted" : "in_progress",
+            retryable: response.error?.retryable ?? false,
+          },
+        },
+      },
     });
   }
   return toolResultFromResponse(response, options);

@@ -119,3 +119,53 @@ user-facing surface that records the grant it reads:
 - **Deployed OAuth.** The connector reaches Cognito Hosted UI directly, so the
   OAuth screen is not the enforcement point. `ChatGPTAuthorizePage` records
   `chatgpt_sharing` best-effort on approval; the backend guard remains the gate.
+
+## 10. Withdrawal and integration revocation (PRIV-08)
+
+Consent and *connection* are distinct. Withdrawing the sharing purpose stops
+sharing findings; revoking the integration grant additionally means the ChatGPT
+connection itself is disconnected. A signature and a scope check cannot express
+"this integration is not connected", so the backend records grant state and
+enforces it at the resource boundary.
+
+**Grant state.** Stored in the same `CONSENT_TABLE` (`ConsentRecords`) at
+`sk = INTEGRATION#<client_id>`: `status` (`connected`/`disconnected`),
+`revoked_at_epoch`, `source`, `updated_at`, `revision`. It is keyed by
+`(subject_id, client_id)`, so disconnecting the ChatGPT integration does not
+affect any other grant or the user's portal access.
+
+**Disconnect action.** `POST /consent/disconnect` (authenticated; identity from
+the token only) withdraws the listed purposes (default `chatgpt_sharing`),
+sets the grant to `disconnected`, and best-effort revokes the provider refresh
+token. It is **not** deletion: account closure remains the separate
+`POST /account/deletion` action, and the receipt reports `provider_revoked`
+separately from the authoritative disconnect. Provider revocation is optional
+because Cognito `RevokeToken` needs a confidential client and
+`AdminUserGlobalSignOut` would end the unrelated portal session; the backend
+fence is the enforcement point.
+
+**Reconnect.** `POST /consent/accept` is the only path that re-grants. On success
+it also records the integration as `connected` and advances the token-`iat`
+fence to now, so only a token issued *after* re-acceptance (the fresh OAuth
+linking token) is honored. A withdrawn grant never auto-restores.
+
+**Enforcement.** `report-generator/mcp/integration.py` runs after the consent
+guard and before the handler for the same sensitive operations. A token
+`issued_at <= revoked_at_epoch`, or a `disconnected` grant, is refused with
+`INTEGRATION_REVOKED` and no payload/side effect. A store failure, or an unwired
+guard, fails closed as `SERVICE_UNAVAILABLE`. The fence value comes from the
+verified token's `iat`, forwarded as `identity.issued_at`; no tool argument can
+supply it.
+
+**Propagation bound.** The guard reads through to the store with no positive
+cache, so revocation takes effect on the next request that reaches the boundary.
+The token-`iat` fence covers a captured access token whose signature and expiry
+are still valid, including one issued before a relink.
+
+**MCP surface.** An `INTEGRATION_REVOKED` result carries no genetic content; the
+MCP layer adds `_meta.mutant.integration = { status: "revoked", retryable, url? }`
+(the URL from `MUTANT_ONBOARDING_URL`, validated to https on
+`mutantgenomics.com`) so the widget can open the portal reconnect route.
+
+**Open dependencies.** Like PRIV-04, PRIV-08 stays open until PRIV-01 D1/D3/D5
+and C1 are resolved and a synthetic-account walk confirms the deployed behavior.

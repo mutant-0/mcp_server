@@ -146,10 +146,27 @@ export function dnaImportScope(config: AppConfig): string {
  * a misconfigured value can never be handed to a host as an open-link target.
  */
 export function approvedConsentUrl(config: AppConfig): string | null {
-  const value = config.MUTANT_CONSENT_URL.trim();
-  if (!value) return null;
+  return approvedMutantUrl(config.MUTANT_CONSENT_URL);
+}
+
+/**
+ * The approved onboarding/reconnect URL, or `null` when unset/invalid.
+ *
+ * PRIV-08 recovery target: after the integration is revoked the user must
+ * reconnect, which restarts the OAuth linking flow from onboarding. Only an
+ * `https` URL on `mutantgenomics.com` (apex or subdomain) is returned, so a
+ * misconfigured value can never be handed to a host as an open-link target.
+ */
+export function approvedOnboardingUrl(config: AppConfig): string | null {
+  return approvedMutantUrl(config.MUTANT_ONBOARDING_URL);
+}
+
+/** Shared allowlist check for a user-facing Mutant portal URL. */
+function approvedMutantUrl(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
   try {
-    const url = new URL(value);
+    const url = new URL(trimmed);
     const host = url.hostname.toLowerCase();
     const approved = host === "mutantgenomics.com" || host.endsWith(".mutantgenomics.com");
     return url.protocol === "https:" && approved ? url.toString() : null;

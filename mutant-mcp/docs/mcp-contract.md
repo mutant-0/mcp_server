@@ -1,4 +1,4 @@
-# Mutant MCP contract (3.2.0)
+# Mutant MCP contract (3.3.0)
 
 This document describes the implemented contract between the MCP Lambda
 (`mutant-mcp`) and the report-generator backend (`report-generator/mcp`). The
@@ -6,12 +6,28 @@ backend is authoritative for every business rule and returns the typed `data`
 shapes; the Lambda is a thin, authenticated transport that adds only the
 MCP-facing presentation (`content`, `suggested_prompts`, widget `_meta`).
 
-Version 3.2.0 adds server-side consent enforcement. A new `CONSENT_REQUIRED`
-error code is returned by the authoritative backend before sensitive collection
-(`create_report`) and before sensitive result retrieval, and the internal request
-identity may now carry an optional `client_id` (the OAuth client the verified
-token was issued to) so consent state is partitioned per integration. It is
-otherwise the 3.1.0 contract, which replaced the Free-plan upgrade offer surface.
+Version 3.3.0 adds integration revocation. A new `INTEGRATION_REVOKED` error code
+is returned by the authoritative backend when the ChatGPT integration has been
+disconnected, or when the presented token was issued before the last
+disconnect/relink boundary; the internal request identity may now carry the
+verified token's optional `issued_at`. It is otherwise the 3.2.0 contract, which
+added server-side consent enforcement (`CONSENT_REQUIRED` and
+`identity.client_id`), and is otherwise the 3.1.0 contract, which replaced the
+Free-plan upgrade offer surface.
+
+What changed in 3.3.0:
+
+- New `INTEGRATION_REVOKED` error code and matching `error.app_code`
+  (`integration_revoked`). It means the integration grant is withdrawn (or the
+  token predates a relink), which is distinct from consent: the user reconnects
+  the integration rather than merely re-accepting the notice. It is **not** an
+  authentication/scope failure, so no `mcp/www_authenticate` challenge is
+  emitted. The MCP layer attaches `_meta.mutant.integration = {status, url?}` so
+  the widget can open the portal's reconnect route.
+- `identity.issued_at` is an optional, bounded field on the internal request: the
+  verified token's `iat` (Unix seconds) as read by the MCP Lambda from the token,
+  never from tool arguments. The backend uses it only to fence a token issued at
+  or before the account's last disconnect/relink boundary.
 
 What changed in 3.2.0:
 
@@ -111,7 +127,7 @@ error, or `ok: false` with data).
 
 ```json
 {
-  "contract_version": "3.2.0",
+  "contract_version": "3.3.0",
   "analysis_version": "rev42-v3.0.0",
   "ok": true,
   "data": { "…": "tool-specific" },
@@ -121,7 +137,7 @@ error, or `ok: false` with data).
 
 ```json
 {
-  "contract_version": "3.2.0",
+  "contract_version": "3.3.0",
   "analysis_version": null,
   "ok": false,
   "data": null,
@@ -1618,6 +1634,7 @@ states never reach a transport or MCP exception.
 |---|---|
 | `AUTHENTICATION_REQUIRED` / `INSUFFICIENT_SCOPE` | Transport-level OAuth failures (`INSUFFICIENT_SCOPE` carries `required_scope`). |
 | `CONSENT_REQUIRED` | The account has not granted (or has withdrawn) consent for this operation's purpose. Enforced at the backend before any side effect or sensitive retrieval; carries `app_code: "consent_required"` and a `show_dna_import` `next_action`. Never a `mcp/www_authenticate` challenge. |
+| `INTEGRATION_REVOKED` | The ChatGPT integration grant is withdrawn, or the presented token was issued before the last disconnect/relink boundary. Carries `app_code: "integration_revoked"`; the MCP layer adds `_meta.mutant.integration`. Never a `mcp/www_authenticate` challenge. |
 | `ACCOUNT_NOT_AVAILABLE` | The connected account cannot be served. |
 | `DNA_NOT_AVAILABLE` | No DNA has been imported, so no analysis can exist (`next_action`: `show_dna_import`). |
 | `ANALYSIS_PROCESSING` | A generation is in flight; retryable (`retry_after_seconds`, `next_action`: `get_analysis_status`). |

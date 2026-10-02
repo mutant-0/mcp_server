@@ -304,6 +304,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   service_unavailable: "Mutant is temporarily unavailable. Please try again in a moment.",
   consent_required:
     "Mutant needs your consent before importing DNA data or sharing findings. Open Mutant, review the current notice, and accept it, then try again.",
+  deletion_in_progress:
+    "This account's data is being deleted. Importing and reading findings are paused until it finishes. Try again shortly.",
+  data_deleted:
+    "This account's data was deleted. Import your DNA again to start a new analysis.",
   analysis_failed:
     "Mutant could not finish your analysis. Your DNA file was imported; you can try again.",
   analysis_timeout: "Your analysis is taking longer than expected.",
@@ -352,6 +356,23 @@ function isConsentRequired(error: ToolResponse["error"] | undefined): boolean {
   if (!error) return false;
   if (error.app_code === APP_ERROR_CODES.consent_required) return true;
   return error.code === "CONSENT_REQUIRED";
+}
+
+/**
+ * The deletion fence states the card can render. `in_progress` is retryable;
+ * `deleted` is terminal for the current data and only a fresh import recovers.
+ */
+type DeletionState = "in_progress" | "deleted";
+
+function deletionStateFrom(error: ToolResponse["error"] | undefined): DeletionState | null {
+  if (!error) return null;
+  if (error.code === "DELETION_IN_PROGRESS" || error.app_code === APP_ERROR_CODES.deletion_in_progress) {
+    return "in_progress";
+  }
+  if (error.code === "DATA_DELETED" || error.app_code === APP_ERROR_CODES.data_deleted) {
+    return "deleted";
+  }
+  return null;
 }
 
 /**
@@ -1083,6 +1104,12 @@ export function DnaImportApp({
    * them to reconnect.
    */
   const [consentRequired, setConsentRequired] = useState<ConsentState | null>(null);
+  /**
+   * The server refused a sensitive operation because of the account's deletion
+   * fence: `in_progress` while a deletion runs, `deleted` once it completed.
+   * Distinct from consent and from a connection problem.
+   */
+  const [deletionState, setDeletionState] = useState<DeletionState | null>(null);
   /** Set when opening the portal consent link failed, so the card can say so. */
   const [consentLinkError, setConsentLinkError] = useState<string | null>(null);
   /** True while a post-acceptance re-check is in flight; blocks a double retry. */
@@ -1274,6 +1301,12 @@ export function DnaImportApp({
       if (result.isError || !envelope || !envelope.ok) {
         const code = envelope?.error?.code;
         const appCode = envelope?.error?.app_code ?? (code ? appErrorCode(code) : undefined);
+        const deletion = deletionStateFrom(envelope?.error);
+        if (deletion) {
+          setDeletionState(deletion);
+          setStage("waiting_for_file");
+          return;
+        }
         if (code === "AUTHENTICATION_REQUIRED" || code === "ACCOUNT_NOT_AVAILABLE") {
           setAccountMissing(true);
         } else if (appCode === "insufficient_scope") {
@@ -1514,6 +1547,15 @@ export function DnaImportApp({
         const result = await client.callServerTool({ name: "create_report", arguments: args });
         const envelope = envelopeOf(result);
         if (result.isError || !envelope || !envelope.ok) {
+          // A deletion fence is neither a connection nor a consent problem: show
+          // the dedicated state so the user waits or starts a fresh import.
+          const deletion = deletionStateFrom(envelope?.error);
+          if (deletion) {
+            setUploadError(null);
+            setDeletionState(deletion);
+            setStage("waiting_for_file");
+            return;
+          }
           // Consent is a server-side gate, not a connection problem: surface the
           // dedicated consent card rather than a generic retry panel.
           const consent = consentStateFrom(
@@ -2068,6 +2110,35 @@ export function DnaImportApp({
   }
   if (stage === "loading_catalog") {
     return <Loading label="Preparing DNA import…" />;
+  }
+
+  // A deletion fence outranks consent and every stage: nothing can be imported
+  // or read until the deletion finishes (or, once deleted, until a fresh import).
+  if (deletionState) {
+    const inProgress = deletionState === "in_progress";
+    return (
+      <Shell>
+        <h1 style={styles.h1}>{inProgress ? "Deletion in progress" : "Data deleted"}</h1>
+        <p style={styles.subtitle}>
+          {inProgress
+            ? "Mutant is deleting this account's data. Importing and reading findings are paused until it finishes."
+            : "This account's data was deleted. Import your DNA again to start a new analysis."}
+        </p>
+        <div style={styles.buttonRow}>
+          <button
+            type="button"
+            style={styles.primaryButton}
+            onClick={() => {
+              setDeletionState(null);
+              setStage("waiting_for_file");
+              if (app) void loadStatus(app);
+            }}
+          >
+            {inProgress ? "Check again" : "Import DNA"}
+          </button>
+        </div>
+      </Shell>
+    );
   }
 
   // A server-side consent rejection outranks every stage: the connection is

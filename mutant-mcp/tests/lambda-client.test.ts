@@ -43,6 +43,24 @@ describe("buildBackendEvent", () => {
     const event = buildBackendEvent("get_analysis_context", {}, makeUser(), "req-3");
     expect(event.identity).toEqual({ user_id: "user-1" });
   });
+
+  it("carries the verified token iat for the revocation fence", () => {
+    const event = buildBackendEvent(
+      "get_analysis_context",
+      {},
+      makeUser({ userId: "sub-123", issuedAt: 1_700_000_000 }),
+      "req-4",
+    );
+    expect(event.identity).toEqual({
+      user_id: "sub-123",
+      issued_at: 1_700_000_000,
+    });
+  });
+
+  it("omits issued_at when the token carries none", () => {
+    const event = buildBackendEvent("get_analysis_context", {}, makeUser(), "req-5");
+    expect(event.identity).not.toHaveProperty("issued_at");
+  });
 });
 
 describe("parseBackendPayload", () => {

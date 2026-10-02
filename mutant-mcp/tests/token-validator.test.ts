@@ -85,6 +85,22 @@ describe("JwtTokenValidator", () => {
     expect(context.scopes).toContain(SCOPE);
   });
 
+  it("propagates the token iat so the backend can fence revocation", async () => {
+    const { publicJwk, privateKey } = await makeKeys();
+    const token = await sign(privateKey, baseClaims());
+    const context = await makeValidator(publicJwk).validate(token);
+    expect(typeof context.issuedAt).toBe("number");
+    expect(context.issuedAt).toBeGreaterThan(0);
+  });
+
+  it("defaults issuedAt to 0 when the token carries no iat", () => {
+    const context = contextFromClaims(
+      { sub: "user-1", client_id: CLIENT_ID, scope: SCOPE },
+      makeOptions(),
+    );
+    expect(context.issuedAt).toBe(0);
+  });
+
   it("rejects a token from the wrong issuer", async () => {
     const { publicJwk, privateKey } = await makeKeys();
     const token = await sign(privateKey, baseClaims(), { issuer: "https://evil.example.com" });

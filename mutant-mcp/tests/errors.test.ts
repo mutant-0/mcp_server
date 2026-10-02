@@ -10,6 +10,16 @@ describe("consent error code", () => {
   });
 });
 
+describe("integration error code", () => {
+  it("maps INTEGRATION_REVOKED to the component-facing app code", () => {
+    expect(ErrorCode.INTEGRATION_REVOKED).toBe("INTEGRATION_REVOKED");
+    expect(appErrorCode(ErrorCode.INTEGRATION_REVOKED)).toBe(
+      APP_ERROR_CODES.integration_revoked,
+    );
+    expect(APP_ERROR_CODES.integration_revoked).toBe("integration_revoked");
+  });
+});
+
 describe("protectedResourceMetadataUrl", () => {
   it("places the well-known segment before the resource path", () => {
     expect(protectedResourceMetadataUrl("https://dev-api.mutantbiotech.com/mcp")).toBe(

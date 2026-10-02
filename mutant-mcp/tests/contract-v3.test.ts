@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
+  APP_ERROR_CODES,
   CONTRACT_VERSION,
+  ErrorCode,
   TOOL_NAMES,
+  appErrorCode,
   type BackendOperation,
   type ToolName,
   type ToolResponse,
@@ -940,5 +943,85 @@ describe("contract v3.0 acceptance", () => {
     })) as { _meta?: Record<string, unknown> };
 
     expect(result._meta?.["mcp/www_authenticate"]).toBeDefined();
+  });
+
+  it("maps the deletion error codes to component application codes", () => {
+    expect(appErrorCode(ErrorCode.DELETION_IN_PROGRESS)).toBe(APP_ERROR_CODES.deletion_in_progress);
+    expect(appErrorCode(ErrorCode.DATA_DELETED)).toBe(APP_ERROR_CODES.data_deleted);
+    // The contract codes exist and are stable strings.
+    expect(ErrorCode.DELETION_IN_PROGRESS).toBe("DELETION_IN_PROGRESS");
+    expect(ErrorCode.DATA_DELETED).toBe("DATA_DELETED");
+  });
+
+  it("surfaces DELETION_IN_PROGRESS as retryable without an OAuth challenge", async () => {
+    const { client } = await connect(() =>
+      makeErrorResponse("DELETION_IN_PROGRESS", "Deletion in progress.", {
+        app_code: "deletion_in_progress",
+        retryable: true,
+      }),
+    );
+    const result = (await client.callTool({
+      name: "create_report",
+      arguments: MINIMAL_ARGS.create_report,
+    })) as { _meta?: Record<string, unknown> };
+
+    const envelope = envelopeOf(result);
+    expect(envelope.error?.code).toBe("DELETION_IN_PROGRESS");
+    expect(envelope.error?.app_code).toBe("deletion_in_progress");
+    const meta = result._meta as { mutant?: { deletion?: { status?: string } } };
+    expect(meta.mutant?.deletion?.status).toBe("in_progress");
+    expect(result._meta?.["mcp/www_authenticate"]).toBeUndefined();
+  });
+
+  it("surfaces DATA_DELETED as terminal without an OAuth challenge", async () => {
+    const { client } = await connect(() =>
+      makeErrorResponse("DATA_DELETED", "Data deleted.", {
+        app_code: "data_deleted",
+        retryable: false,
+      }),
+    );
+    const result = (await client.callTool({
+      name: "get_analysis_context",
+      arguments: {},
+    })) as { _meta?: Record<string, unknown> };
+
+    const envelope = envelopeOf(result);
+    expect(envelope.error?.code).toBe("DATA_DELETED");
+    expect(envelope.error?.app_code).toBe("data_deleted");
+    const meta = result._meta as { mutant?: { deletion?: { status?: string } } };
+    expect(meta.mutant?.deletion?.status).toBe("deleted");
+    expect(result._meta?.["mcp/www_authenticate"]).toBeUndefined();
+  });
+
+  it("maps INTEGRATION_REVOKED to the component application code", () => {
+    expect(appErrorCode(ErrorCode.INTEGRATION_REVOKED)).toBe(
+      APP_ERROR_CODES.integration_revoked,
+    );
+    expect(ErrorCode.INTEGRATION_REVOKED).toBe("INTEGRATION_REVOKED");
+  });
+
+  it("surfaces INTEGRATION_REVOKED with a reconnect hint and no OAuth challenge", async () => {
+    const { client } = await connect(() =>
+      makeErrorResponse("INTEGRATION_REVOKED", "Integration disconnected.", {
+        app_code: "integration_revoked",
+        retryable: false,
+      }),
+    );
+    const result = (await client.callTool({
+      name: "get_analysis_context",
+      arguments: {},
+    })) as { _meta?: Record<string, unknown> };
+
+    const envelope = envelopeOf(result);
+    expect(envelope.error?.code).toBe("INTEGRATION_REVOKED");
+    expect(envelope.error?.app_code).toBe("integration_revoked");
+    const meta = result._meta as {
+      mutant?: { integration?: { status?: string; url?: string } };
+    };
+    expect(meta.mutant?.integration?.status).toBe("revoked");
+    // The recovery target is a safe Mutant URL; a disconnect is not an
+    // authorization failure, so no OAuth challenge is emitted.
+    expect(meta.mutant?.integration?.url).toContain("mutantgenomics.com");
+    expect(result._meta?.["mcp/www_authenticate"]).toBeUndefined();
   });
 });
