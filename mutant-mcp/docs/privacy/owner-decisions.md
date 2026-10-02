@@ -29,11 +29,11 @@ response-field work (backlog note).
 | D5 | Prod `analysis.read` scope advertises the **dev** resource URI | Live prod AS/PRM: `scopes_supported[0] = https://dev-api.mutantbiotech.com/mcp/analysis.read` while `resource = https://api.mutantbiotech.com/mcp` | auth/infra | PRIV-04, PRIV-08 |
 | D6 | Portal build root + hosting/deploy mechanism + served commit | Two local roots differ; served `index.html` 2026-09-09 ETag `5153ea1d…`; commit TBD | portal | PRIV-05, PRIV-09 |
 | D7 | Rendered live policy version | Served artifact predates the `2026-09-18` source policy; prior review saw rendered `2026-01-07` | portal/product | PRIV-09 |
-| D8 | Backend log-group retention | All four report-generator/store groups have `retentionInDays = None` (never expire) | infra | PRIV-06 |
-| D9 | Whether the MCP log group is adopted (retention not applied) vs created | Both `mutant-mcp-dev`/`prod` show 30 days; confirm adopted vs created per env | infra | PRIV-06 |
+| D8 | Backend log-group retention | All four report-generator/store groups have `retentionInDays = None` (never expire). PRIV-06 adds `scripts/apply-retention.ts` (dry-run by default) to set them; the actual period is still P3 | infra | PRIV-06 |
+| D9 | Whether the MCP log group is adopted (retention not applied) vs created | Both `mutant-mcp-dev`/`prod` show 30 days. PRIV-06 handles both paths: created groups get `RetentionInDays`, adopted groups get a `LogRetention` resource (PutRetentionPolicy only) | infra | **Resolved (mechanism)**; period remains P3 |
 | D10 | Whether the portal upload route (Route B) writes raw files today | S3 `mutantbt-genetic-data` exists with `users/` prefix behavior in code; live usage not enumerated | backend/portal | PRIV-03, PRIV-07 |
-| D11 | Backend log interpolation of exception messages | `core/persistence.py` interpolates `{renew_err}`-style SDK errors into warnings (lines ~343, 400, 465, 578, 690, 758, 829, 891); replace with a classified code (PRIV-02 pattern) | backend | PRIV-06, PRIV-07 |
-| D12 | Backend log retention + restricted-correlation purpose | report-generator log groups never expire (D8); truncated `user_id` still linkable; needs retention + a documented restricted channel for subject correlation | infra/backend | PRIV-06, PRIV-07 |
+| D11 | Backend log interpolation of exception messages | `core/persistence.py` interpolated `{renew_err}`-style SDK errors into warnings. **Closed:** all cache/causes failure logs now emit a classified `code=` via `_error_code` (provider error code or exception class), never the message | backend | PRIV-06, PRIV-07 |
+| D12 | Backend log retention + restricted-correlation purpose | report-generator log groups never expire (D8); truncated `user_id` still linkable; needs retention + a documented restricted channel for subject correlation | infra/backend | PRIV-06 (**retention pending P3**), PRIV-07 |
 
 ## 3. Consent-route decision input (PRIV-01 step 2)
 

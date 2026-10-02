@@ -58,8 +58,12 @@ PRIV-05; this inventory is based on backend routes and the MCP client.
 | `Recommendations` | recommendations | `user_id` | TTL disabled | Yes (report prefix) |
 | `Status` | report status | `user_id` | TTL disabled | Yes |
 | `CacheVersions` | cache revision clock | `user_id` | **TTL enabled** (`ttl`) | Not a data store; not purged |
-| MCP CloudWatch log group | tool-call audit (no account id) | `requestId` | 30 days | No (retention only) |
+| MCP CloudWatch log group | tool-call audit (no account id) | `requestId` | 30 days (existing config; see `retention-policy.md`) | No (retention only) |
 | Backend CloudWatch log groups | request/import/deletion logs | `user_id` truncated to 8 chars in messages | none | No |
+
+Retention is driven by `retention-policy.json`; `docs/privacy/retention-policy.md`
+describes how it is applied and verified. All rows are `pending` until owner
+decision **P3** supplies the approved periods.
 
 ## 3. Recipients
 
@@ -76,6 +80,11 @@ PRIV-05; this inventory is based on backend routes and the MCP client.
   `UserGenomics`, `Results`, `Assessments`, `Recommendations`, `Status`). Retention
   settings are PRIV-06; product retention commitments are an owner decision.
 - **Backend log groups never expire.** Retention work is PRIV-06.
+- **PRIV-06 (mechanism in place):** `retention-policy.json` records every store,
+  the MCP log group applies retention on both created and adopted groups, an
+  idempotent applier manages the backend tables/bucket/log groups, readers enforce
+  logical expiry, and `npm run verify:retention` reports deployed-vs-approved. The
+  periods themselves remain `pending` until owner decision **P3**.
 - **PRIV-03 (resolved): filename is no longer sent by the plugin.** `upload_meta.file_name`
   is optional in the contract (`schemas/index.ts`), the plugin sends only
   provider/format/build/size, and the MCP `create_report` handler strips any
@@ -133,9 +142,11 @@ Inspected `report-generator/mcp/handlers.py` and `report-generator/core/persiste
   `delete_patterns_cache_chunks`, `delete_precomputed_causes`) log counts, not
   payloads — good — but still attach the truncated user id.
 
-Follow-ups: **D11** (backend error interpolation -> classified codes) and
-**D12** (backend log retention + restricted-channel purpose) in
-`owner-decisions.md`.
+Follow-ups: **D11** (backend error interpolation -> classified codes) is
+**closed** in PRIV-06 (`core/persistence.py` now logs a bounded `code=`), and
+**D12** (backend log retention + restricted-channel purpose) remains open with
+**P3** in `owner-decisions.md`. `scripts/apply-retention.ts` and
+`npm run verify:retention` are the mechanism; the periods are unset until P3.
 
 ## 6. Response boundary projection (PRIV-03 step 3)
 

@@ -6,8 +6,42 @@ import { CfnDomainName, ApiMapping, HttpApi, type IDomainNameRef } from "aws-cdk
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Architecture, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
-import { LogGroup, RetentionDays, type ILogGroup } from "aws-cdk-lib/aws-logs";
+import { LogGroup, LogRetention, RetentionDays, type ILogGroup } from "aws-cdk-lib/aws-logs";
 import type { Construct } from "constructs";
+import { getRetentionStore } from "./retention-policy.js";
+
+/** CloudWatch-supported retention values, keyed by day count. */
+const RETENTION_DAYS_BY_COUNT: Record<number, RetentionDays> = {
+  1: RetentionDays.ONE_DAY,
+  3: RetentionDays.THREE_DAYS,
+  5: RetentionDays.FIVE_DAYS,
+  7: RetentionDays.ONE_WEEK,
+  14: RetentionDays.TWO_WEEKS,
+  30: RetentionDays.ONE_MONTH,
+  60: RetentionDays.TWO_MONTHS,
+  90: RetentionDays.THREE_MONTHS,
+  120: RetentionDays.FOUR_MONTHS,
+  150: RetentionDays.FIVE_MONTHS,
+  180: RetentionDays.SIX_MONTHS,
+  365: RetentionDays.ONE_YEAR,
+  400: RetentionDays.THIRTEEN_MONTHS,
+  545: RetentionDays.EIGHTEEN_MONTHS,
+  731: RetentionDays.TWO_YEARS,
+  1096: RetentionDays.THREE_YEARS,
+  1827: RetentionDays.FIVE_YEARS,
+  3653: RetentionDays.TEN_YEARS,
+};
+
+/** Map an approved day count to the CDK enum, rejecting unsupported values. */
+function toRetentionDays(days: number): RetentionDays {
+  const mapped = RETENTION_DAYS_BY_COUNT[days];
+  if (mapped === undefined) {
+    throw new Error(
+      `Unsupported log-group retention of ${days} days; use a CloudWatch-supported value.`,
+    );
+  }
+  return mapped;
+}
 
 /** Mapping key that serves OAuth discovery at the custom domain's root. */
 const DEFAULT_WELL_KNOWN_MAPPING_KEY = ".well-known";
@@ -67,9 +101,18 @@ export interface MutantMcpStackProps extends StackProps {
    * creating it. Required once the Lambda service has auto-created the group
    * (first deploy without an explicit `logGroup`), which otherwise fails with
    * "Resource of type 'AWS::Logs::LogGroup' ... already exists".
-   * Retention is not applied to an adopted group.
+   *
+   * Retention is still applied to the adopted group, via a dedicated
+   * `LogRetention` resource that only calls `PutRetentionPolicy` -- the group is
+   * never recreated or deleted.
    */
   adoptLogGroup?: boolean;
+  /**
+   * Log-group retention in days. Defaults to the `cw-mcp-log-group` value in
+   * `retention-policy.json` (the existing deployed configuration). Applied to
+   * both created and adopted groups.
+   */
+  logRetentionDays?: number;
 }
 
 export class MutantMcpStack extends Stack {
@@ -86,13 +129,29 @@ export class MutantMcpStack extends Stack {
     // auto-named (e.g. `mutant-mcp-dev-McpLogGroup7D3BF67E-…`) and the function
     // logs there instead of the conventional `/aws/lambda/<function>` group,
     // which makes operational lookups and dashboards miss the logs.
+    //
+    // PRIV-06: retention comes from the approved policy for the MCP store. A
+    // created group sets it inline; an adopted group is left untouched by
+    // CloudFormation and instead gets a dedicated `LogRetention` resource, which
+    // calls only `PutRetentionPolicy` (never replaces or deletes the group).
     const logGroupName = `/aws/lambda/${props.functionName ?? "mutant-mcp"}`;
+    const retentionDays =
+      props.logRetentionDays ?? getRetentionStore("cw-mcp-log-group").retentionDays;
+    // A null policy value means "not configured"; fall back to the previous
+    // inline default so a pending policy cannot silently drop retention.
+    const retention = toRetentionDays(retentionDays ?? 30);
     const logGroup: ILogGroup = props.adoptLogGroup
       ? LogGroup.fromLogGroupName(this, "McpLogGroup", logGroupName)
       : new LogGroup(this, "McpLogGroup", {
           logGroupName,
-          retention: RetentionDays.ONE_MONTH,
+          retention,
         });
+    if (props.adoptLogGroup) {
+      new LogRetention(this, "McpLogGroupRetention", {
+        logGroupName,
+        retention,
+      });
+    }
 
     const fn = new DockerImageFunction(this, "McpFunction", {
       code: DockerImageCode.fromImageAsset(projectRoot()),

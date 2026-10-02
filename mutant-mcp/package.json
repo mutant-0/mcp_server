@@ -20,6 +20,8 @@
     "sync:genomics": "node scripts/sync-genomics.mjs",
     "check:genomics": "node scripts/sync-genomics.mjs --check",
     "record:trace": "tsx scripts/record-golden-trace.ts",
+    "apply:retention": "tsx scripts/apply-retention.ts",
+    "verify:retention": "tsx scripts/verify-retention.ts",
     "dev": "tsx watch src/handler.ts",
     "start": "node dist/index.mjs",
     "test": "vitest run",

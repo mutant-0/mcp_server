@@ -42,6 +42,9 @@ new MutantMcpStack(app, "MutantMcpStack", {
   traceCapture: process.env.MUTANT_TRACE_CAPTURE === "true",
   traceCaptureId: process.env.MUTANT_TRACE_CAPTURE_ID || undefined,
   adoptLogGroup: process.env.MUTANT_ADOPT_LOG_GROUP === "true",
+  logRetentionDays: process.env.MUTANT_LOG_RETENTION_DAYS
+    ? Number(process.env.MUTANT_LOG_RETENTION_DAYS)
+    : undefined,
 });
 
 app.synth();

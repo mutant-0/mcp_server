@@ -134,6 +134,7 @@ jobs:
           MUTANT_DOMAIN_NAME: ${{ vars.MUTANT_DOMAIN_NAME }}
           MUTANT_API_MAPPING_KEY: ${{ vars.MUTANT_API_MAPPING_KEY }}
           MUTANT_ADOPT_LOG_GROUP: ${{ vars.MUTANT_ADOPT_LOG_GROUP }}
+          MUTANT_LOG_RETENTION_DAYS: ${{ vars.MUTANT_LOG_RETENTION_DAYS }}
         run: |
           npm run bundle:cdk
           npx cdk deploy \
