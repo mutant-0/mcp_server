@@ -1485,7 +1485,7 @@ never a countdown, percentage, or estimated time remaining.
 When the analysis is ready the same card becomes the completion view, offering
 either `View my top 3 findings`, which calls `list_health_hypotheses` from the
 component (pinned to `displayed_analysis_version`) and renders the summaries
-inline, or `Ask ChatGPT about my results` / `Explain finding #N`, which hand off
+inline, or `Summarize my top 3` / `Explain finding #N`, which hand off
 to ChatGPT only when the user asks for interpretation. The handoff is
 feature-detected and delivered as a real follow-up turn, never rendered inside the
 card: on ChatGPT it uses `window.openai.sendFollowUpMessage({ prompt,
@@ -1493,6 +1493,15 @@ scrollToBottom: true })`, on MCP Apps hosts it uses the `ui/message` bridge
 (`App.sendMessage`), and when neither is available (or the host rejects it) the
 card shows a user-visible error instead. It applies the host's theme and CSS
 variables (`useHostStyles`).
+
+The summary action requests a concise interpretation of up to three displayed
+findings: meaning, supporting evidence, uncertainty, and a clinician question
+grounded in returned confirmation options when available. It carries the exact
+analysis revision and displayed finding identities, requires a revision pin,
+and uses `Summarize my findings` when fewer than three are displayed. The model
+uses the context and finding-details tools to answer directly; it does not
+reopen the overview or ask the user what they want to know. Consent recovery
+opens only when a protected tool returns `CONSENT_REQUIRED`.
 
 Each handoff prepends the action's server-authored bounded `heading` as one
 generic instruction (`Start your reply with this heading on its own line: …`) so

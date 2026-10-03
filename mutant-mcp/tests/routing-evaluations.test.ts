@@ -73,6 +73,26 @@ const FOLLOWUP_ARGS = {
 
 const SPECIFIC_PROMPTS: Scenario[] = [
   {
+    name: "Summarize displayed findings",
+    prompt: "Summarize the Mutant findings identified below in plain English.",
+    tools: [
+      { name: "get_analysis_context" },
+      {
+        name: "explain_health_hypothesis",
+        arguments: { hypothesis_id: "HYP_A", analysis_version: "rev42-v3.0.0" },
+      },
+      {
+        name: "explain_health_hypothesis",
+        arguments: { hypothesis_id: "HYP_B", analysis_version: "rev42-v3.0.0" },
+      },
+      {
+        name: "explain_health_hypothesis",
+        arguments: { hypothesis_id: "HYP_C", analysis_version: "rev42-v3.0.0" },
+      },
+    ],
+    noUiOn: ["get_analysis_context", "explain_health_hypothesis"],
+  },
+  {
     name: "Explain #1",
     prompt: "Explain my #1 finding in plain English.",
     tools: [

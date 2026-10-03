@@ -2833,18 +2833,37 @@ export function DnaImportApp({
             <button
               type="button"
               style={styles.secondaryButton}
-              disabled={pendingActionId === "ask-results"}
-              onClick={() =>
+              disabled={pendingActionId === "summarize-results"}
+              onClick={() => {
+                const version = displayedVersionRef.current;
+                if (!version) {
+                  setStaleNotice(true);
+                  return;
+                }
+                const topFindings = loaded.slice(0, 3);
                 void askChatGpt({
-                  id: "ask-results",
-                  label: "Ask about my results",
-                  prompt: "Ask ChatGPT about my Mutant results.",
-                  heading: "Mutant follow-up: Ask about my results",
-                  boundVersion: displayedVersionRef.current,
-                })
-              }
+                  id: "summarize-results",
+                  label: topFindings.length === 3 ? "Summarize my top 3" : "Summarize my findings",
+                  prompt:
+                    "Summarize the Mutant findings identified below in plain English. This is a request to interpret the findings already displayed, not to open another results overview. Use the interpretation context and retrieve the supporting details for each identified finding at the bound analysis_version, reusing details already available for that revision. For each finding, briefly explain what it means, the main genetic evidence supporting it, and the most important uncertainty or limitation. Use any finding-specific confirmation options returned by Mutant to suggest one useful question to discuss with my clinician. Keep the answer concise and grounded in the returned evidence; distinguish genetic support from disease probability or a diagnosis, and do not assume symptoms, test results, or health history I have not shared. Answer this request directly without asking what I want to know. If retrieval is blocked, follow the returned recovery action instead of inventing a summary.\n\n" +
+                    JSON.stringify({
+                      analysis_version: version,
+                      findings: topFindings.map((finding) => ({
+                        hypothesis_id: finding.id,
+                        rank: finding.rank,
+                        name: finding.title,
+                      })),
+                    }),
+                  heading: "## Your Mutant findings explained",
+                  boundVersion: version,
+                });
+              }}
             >
-              {pendingActionId === "ask-results" ? "Sending…" : "Ask ChatGPT about my results"}
+              {pendingActionId === "summarize-results"
+                ? "Sending…"
+                : loaded.length >= 3
+                  ? "Summarize my top 3"
+                  : "Summarize my findings"}
             </button>
           ) : null}
           <button type="button" style={styles.subtleButton} onClick={openFilePicker}>

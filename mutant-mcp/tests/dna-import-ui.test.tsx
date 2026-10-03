@@ -926,7 +926,7 @@ describe("DNA import component", () => {
     expect(calls[0]?.arguments).toEqual({ limit: 3, analysis_version: "analysis_1" });
     // The findings render in place; ChatGPT is not asked to do it again.
     expect(bridge.messages).toHaveLength(0);
-    expect(screen.getByRole("button", { name: /ask chatgpt about my results/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Summarize my top 3" })).toBeDefined();
   });
 
   it("hands a finding to ChatGPT only when the user asks", async () => {
@@ -1478,7 +1478,8 @@ describe("DNA import component", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /explain finding #1/i })[0]!);
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
 
-    fireEvent.click(screen.getByRole("button", { name: /ask chatgpt about my results/i }));
+    expect(screen.queryByRole("button", { name: /ask chatgpt about my results/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Summarize my top 3" }));
     await waitFor(() => expect(bridge.messages).toHaveLength(2));
 
     // One host message per click, delivered as a user turn.
@@ -1489,8 +1490,14 @@ describe("DNA import component", () => {
     });
     expect(texts[0]).toMatch(/Explain my "Alpha finding"/);
     // The heading instruction is prepended; the server-selected prompt survives.
-    expect(texts[1]).toContain("Mutant follow-up: Ask about my results");
-    expect(texts[1]).toContain("Ask ChatGPT about my Mutant results.");
+    expect(texts[1]).toContain("## Your Mutant findings explained");
+    expect(texts[1]).toContain("retrieve the supporting details for each identified finding");
+    expect(texts[1]).toContain("the most important uncertainty or limitation");
+    expect(texts[1]).toContain("without asking what I want to know");
+    expect(texts[1]).toContain('"analysis_version":"analysis_1"');
+    for (const id of ["HYP_A", "HYP_B", "HYP_C"]) {
+      expect(texts[1]).toContain(`"hypothesis_id":"${id}"`);
+    }
 
     // The widget's findings are unchanged and the prompt text is nowhere in the card.
     expect(screen.getByRole("list").textContent).toBe(findingsBefore);
@@ -1501,14 +1508,63 @@ describe("DNA import component", () => {
 
     // The clicked action's short label is acknowledged; the prompt is not echoed.
     await waitFor(() =>
-      expect(screen.getByRole("status").textContent).toContain(
-        "Question sent: Ask about my results",
-      ),
+      expect(screen.getByRole("status").textContent).toContain("Question sent: Summarize my top 3"),
     );
     const ack = screen.getByRole("status").textContent ?? "";
     expect(ack).toContain("See the latest reply below");
     expect(ack).not.toContain("Retrieve the full finding details");
     expect(ack).not.toContain("Mutant follow-up");
+  });
+
+  it("limits a Full summary handoff to the top three displayed findings", async () => {
+    const bridge = renderWith({ poll_analysis_status: statusResponse("ready", FULL_PLAN) });
+    await screen.findByText(/Analysis ready/i);
+    bridge.sendToolResult(boundFullOverview(), { mutant: { mode: "overview" } });
+    await screen.findByText("1. Finding 01");
+
+    fireEvent.click(screen.getByRole("button", { name: "Summarize my top 3" }));
+    await waitFor(() => expect(bridge.messages).toHaveLength(1));
+    const sent = JSON.stringify(bridge.messages[0]);
+    for (const id of ["HYP_01", "HYP_02", "HYP_03"]) expect(sent).toContain(id);
+    expect(sent).not.toContain("HYP_04");
+    expect(sent).not.toContain("HYP_10");
+  });
+
+  it("offers an accurate summary label when fewer than three findings are displayed", async () => {
+    const bridge = renderWith({ poll_analysis_status: statusResponse("ready") });
+    await screen.findByText(/Analysis ready/i);
+    const snapshot = boundOverview();
+    bridge.sendToolResult(
+      makeSuccessResponse(
+        {
+          ...snapshot.data,
+          displayed_hypotheses: [{ id: "HYP_A", rank: 1, name: "Alpha finding" }],
+        },
+        "analysis_1",
+      ),
+      { mutant: { mode: "overview" } },
+    );
+    await screen.findByText(/Alpha finding/i);
+
+    expect(screen.queryByRole("button", { name: "Summarize my top 3" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Summarize my findings" }));
+    await waitFor(() => expect(bridge.messages).toHaveLength(1));
+    const sent = JSON.stringify(bridge.messages[0]);
+    expect(sent).toContain("HYP_A");
+    expect(sent).not.toContain("HYP_B");
+  });
+
+  it("stops a summary handoff when the displayed analysis is stale", async () => {
+    let version = "analysis_1";
+    const bridge = renderWith({ poll_analysis_status: () => readyAt(version) });
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+    await screen.findByText(/Alpha finding/i);
+
+    version = "analysis_2";
+    fireEvent.click(screen.getByRole("button", { name: "Summarize my top 3" }));
+    await screen.findByText(/These results have changed/);
+    expect(bridge.messages).toHaveLength(0);
   });
 
   it("uses the ChatGPT host API when the widget is injected with window.openai", async () => {
@@ -1620,14 +1676,14 @@ describe("DNA import component", () => {
       fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
       await screen.findByText(/Alpha finding/i);
 
-      const button = screen.getByRole("button", { name: /ask chatgpt about my results/i });
+      const button = screen.getByRole("button", { name: "Summarize my top 3" });
       fireEvent.click(button);
 
       await waitFor(() => expect(button.textContent).toBe("Sending…"));
       expect((button as HTMLButtonElement).disabled).toBe(true);
 
       resolveSend();
-      await waitFor(() => expect(button.textContent).toBe("Ask ChatGPT about my results"));
+      await waitFor(() => expect(button.textContent).toBe("Summarize my top 3"));
     } finally {
       delete (window as unknown as { openai?: unknown }).openai;
     }
