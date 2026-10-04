@@ -89,6 +89,7 @@ MCP Lambda (`mutant-mcp`):
 | `MUTANT_OAUTH_SCOPE_DNA_IMPORT` | leave **empty** to derive `<MUTANT_MCP_RESOURCE_URI>/dna.import`; set only to override |
 | `MUTANT_MCP_RESOURCE_URI` | e.g. `https://dev-api.mutantbiotech.com/mcp` |
 | `MUTANT_CORS_ORIGINS` | `https://chatgpt.com,https://chat.openai.com` |
+| `MUTANT_OPENAI_DOMAIN_VERIFICATION_TOKEN` | OpenAI Apps SDK domain-verification token; unset by default (challenge paths then 404). Served verbatim, unauthenticated, on GET `/.well-known/openai-apps-challenge` |
 | `MUTANT_PLAN_INFO_URL` | `https://mutantgenomics.com/plans` (informational plan page; must be https on `mutantgenomics.com`) |
 | `MUTANT_SNP_CATALOG_MAX_BYTES` | optional, default `2000000` (per-tool cap for `get_snp_catalog`) |
 | `MUTANT_MAX_REQUEST_BYTES` | optional, default `5242880` (cap for `create_report` payloads) |
@@ -128,6 +129,25 @@ curl -si https://<mcp-host>/mcp -H 'content-type: application/json' \
 The `.well-known` mapping means API Gateway strips that prefix too, so the Lambda
 receives `/oauth-authorization-server` and `/oauth-protected-resource`; the handler
 accepts the root, mount-prefixed, and prefix-stripped forms.
+
+### OpenAI Apps SDK domain verification
+
+The submission portal verifies domain ownership by fetching
+`https://<mcp-host>/.well-known/openai-apps-challenge`. The existing `.well-known`
+mapping already routes it to this Lambda (arriving as `/openai-apps-challenge`),
+so no extra mapping is added. Set `MUTANT_OPENAI_DOMAIN_VERIFICATION_TOKEN` in the
+target environment to the token the portal shows; unset, the challenge paths 404.
+
+```bash
+# Unauthenticated; expect 200 and the exact token bytes (no newline):
+curl -si https://<mcp-host>/.well-known/openai-apps-challenge
+curl -s  https://<mcp-host>/.well-known/openai-apps-challenge | xxd | tail -1
+```
+
+The response is `Content-Type: text/plain; charset=utf-8`, `Cache-Control:
+no-store`, and the token verbatim (never JSON-quoted). The handler also accepts the
+mapping-stripped `/openai-apps-challenge` and mounted
+`/mcp/.well-known/openai-apps-challenge` forms.
 
 `resource_metadata` is built as
 `<origin>/.well-known/oauth-protected-resource<resource-path>` (the well-known

@@ -94,6 +94,11 @@ export interface MutantMcpStackProps extends StackProps {
   onboardingUrl?: string;
   /** Portal consent route the DNA import card deep-links to (PRIV-05). */
   consentUrl?: string;
+  /**
+   * OpenAI Apps SDK domain-verification token. When set, a GET to the challenge
+   * paths returns it verbatim as unauthenticated plain text. Leave unset to 404.
+   */
+  openAiDomainVerificationToken?: string;
   logLevel?: string;
   reservedConcurrency?: number;
   /**
@@ -181,6 +186,7 @@ export class MutantMcpStack extends Stack {
         MUTANT_PLAN_INFO_URL: props.planInfoUrl ?? "https://mutantgenomics.com/plans",
         MUTANT_ONBOARDING_URL: props.onboardingUrl ?? "https://mutantgenomics.com/onboarding",
         MUTANT_CONSENT_URL: props.consentUrl ?? "https://mutantgenomics.com/consent",
+        MUTANT_OPENAI_DOMAIN_VERIFICATION_TOKEN: props.openAiDomainVerificationToken ?? "",
         MUTANT_REQUEST_TIMEOUT_MS: String(props.requestTimeoutMs ?? 20000),
         MUTANT_MAX_RESPONSE_BYTES: String(props.maxResponseBytes ?? 512000),
         MUTANT_SNP_CATALOG_MAX_BYTES: String(props.snpCatalogMaxBytes ?? 2000000),

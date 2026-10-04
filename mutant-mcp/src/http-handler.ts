@@ -76,6 +76,18 @@ const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource"
 const AUTHORIZATION_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server";
 
 /**
+ * OpenAI Apps SDK domain-verification challenge paths. The submission portal
+ * fetches `<origin>/.well-known/openai-apps-challenge`, but the deployed
+ * `.well-known` API mapping strips that prefix before invoking the Lambda, and a
+ * mounted request may include the `/mcp` form. Accept all three exact paths.
+ */
+const OPENAI_APPS_CHALLENGE_PATHS = [
+  "/.well-known/openai-apps-challenge",
+  "/openai-apps-challenge",
+  "/mcp/.well-known/openai-apps-challenge",
+] as const;
+
+/**
  * Match a well-known route in any of the shapes the deployment produces:
  *
  * - host root: `/.well-known/oauth-authorization-server` (the RFC 8414 form,
@@ -156,6 +168,25 @@ async function handleRequest(
       sendJson(res, 200, await authorizationServerMetadata(config, options.oauthFetch), {
         "Cache-Control": "no-store, max-age=0",
       });
+      return;
+    }
+
+    // OpenAI Apps SDK domain verification (unauthenticated). Served before any
+    // bearer-token check so the portal can fetch it without credentials.
+    if (
+      req.method === "GET" &&
+      (OPENAI_APPS_CHALLENGE_PATHS as readonly string[]).includes(path)
+    ) {
+      const token = config.MUTANT_OPENAI_DOMAIN_VERIFICATION_TOKEN;
+      const headers = {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+      };
+      if (token) {
+        res.writeHead(200, headers).end(token);
+      } else {
+        res.writeHead(404, headers).end();
+      }
       return;
     }
 

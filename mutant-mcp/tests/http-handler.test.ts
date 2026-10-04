@@ -207,4 +207,60 @@ describe("HTTP handler (dev mode)", () => {
     expect(response.status).toBe(204);
     expect(response.headers.get("access-control-allow-origin")).toBe("https://chatgpt.com");
   });
+
+  it("returns 404 for the OpenAI challenge paths when the token is unset", async () => {
+    for (const path of [
+      "/.well-known/openai-apps-challenge",
+      "/openai-apps-challenge",
+      "/mcp/.well-known/openai-apps-challenge",
+    ]) {
+      const response = await fetch(`${baseUrl}${path}`);
+      expect(response.status).toBe(404);
+    }
+  });
+});
+
+describe("HTTP handler (OpenAI domain verification)", () => {
+  const VERIFICATION_TOKEN = "SbYPOQyAzVyf5iIPB_1AmlpDAq8kJ-eTtcIM5RXwAMM";
+  const challengePaths = [
+    "/.well-known/openai-apps-challenge",
+    "/openai-apps-challenge",
+    "/mcp/.well-known/openai-apps-challenge",
+  ] as const;
+
+  let challengeServer: Server;
+  let challengeBaseUrl: string;
+
+  beforeAll(async () => {
+    const handler = await createHttpHandler(
+      makeConfig({ MUTANT_OPENAI_DOMAIN_VERIFICATION_TOKEN: VERIFICATION_TOKEN }),
+      createLogger("silent"),
+    );
+    challengeServer = createServer(handler);
+    await new Promise<void>((resolve) => challengeServer.listen(0, resolve));
+    const address = challengeServer.address() as AddressInfo;
+    challengeBaseUrl = `http://127.0.0.1:${address.port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => challengeServer.close(() => resolve()));
+  });
+
+  it("serves the exact token as plain text on every challenge path without auth", async () => {
+    for (const path of challengePaths) {
+      const response = await fetch(`${challengeBaseUrl}${path}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      // Exact bytes: no JSON encoding, quotes, whitespace, or trailing newline.
+      expect(await response.text()).toBe(VERIFICATION_TOKEN);
+    }
+  });
+
+  it("leaves OAuth discovery and MCP unchanged alongside the challenge", async () => {
+    const discovery = await fetch(`${challengeBaseUrl}/.well-known/oauth-protected-resource`);
+    expect(discovery.status).toBe(200);
+    const unauthorized = await fetch(`${challengeBaseUrl}/mcp`, { method: "GET" });
+    expect(unauthorized.status).toBe(405);
+  });
 });

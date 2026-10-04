@@ -33,6 +33,7 @@ export function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     MUTANT_SNP_CATALOG_MAX_BYTES: 2000000,
     MUTANT_MAX_REQUEST_BYTES: 5 * 1024 * 1024,
     MUTANT_DEV_MODE: true,
+    MUTANT_OPENAI_DOMAIN_VERIFICATION_TOKEN: "",
     MUTANT_TRACE_CAPTURE: false,
     MUTANT_TRACE_CAPTURE_ID: "",
     LOG_LEVEL: "silent",

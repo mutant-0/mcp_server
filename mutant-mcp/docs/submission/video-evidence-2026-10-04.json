@@ -1,0 +1,92 @@
+{
+  "reviewedOn": "2026-10-04",
+  "source": {
+    "filename": "OpenAI_Plugin_Submission.mp4",
+    "localPath": "C:/Users/caugu/Downloads/OpenAI_Plugin_Submission.mp4",
+    "sha256": "0dcc5f00abb1f3f0de37c133895121618a35badc733da9354f67e7acfd81aea2",
+    "durationSeconds": 492.43,
+    "resolution": "1920x1080",
+    "reviewMethod": "Visual inspection of frames throughout the recording, with additional frames at prompts, responses, and expanded logs. Audio was not reviewed."
+  },
+  "scope": "Supporting visual evidence only. This record does not replace observed routing traces or establish backend authorization, account state, source correctness, memory settings, or synthetic-data provenance.",
+  "toolLogEvidence": {
+    "logGroupShown": "/aws/lambda/mutant-mcp-dev",
+    "regionShown": "us-west-2",
+    "argumentNamesVisible": true,
+    "argumentValuesVisible": false,
+    "syntheticCaptureMarkerVisible": false,
+    "conclusion": "The expanded logs inspected show ordinary audit records. Tool names and argument names are visible, but values needed to reconstruct authoritative routing traces are absent. Some records are collapsed and some calls originate from the widget, so the complete model-selected sequence is not established."
+  },
+  "cases": [
+    {
+      "videoCase": 1,
+      "prompt": "Help me add my DNA data to Mutant.",
+      "evidenceTimes": ["00:24", "00:34", "00:55", "01:00"],
+      "visibleResult": "DNA import card opens; no file is selected in the inspected segment and no findings are displayed.",
+      "candidateChecklistItems": [12, 13, 14],
+      "mappingNote": "The prompt matches these items. The user described this case as the no-DNA test, which would make item 12 the intended match. The recording alone does not establish the account's NO_DNA state. It does not use the different prompt in internal item 1.",
+      "routingValidation": "pending: account state and actual arguments/complete sequence need authoritative evidence"
+    },
+    {
+      "videoCase": 2,
+      "prompt": "Show my current Mutant findings.",
+      "evidenceTimes": ["01:37", "01:50"],
+      "visibleResult": "Overview card shows three ranked findings. Response mentions that a newer refresh is available.",
+      "candidateChecklistItems": [6, 7, 8, 9],
+      "mappingNote": "Match to one account-state entry after authoritative status confirmation; do not infer Free entitlement solely from three displayed findings or count one run for multiple account states.",
+      "routingValidation": "pending: account state and complete model-selected sequence need authoritative evidence"
+    },
+    {
+      "videoCase": 3,
+      "evidenceTimes": ["02:22", "02:52", "03:05", "03:22"],
+      "visibleResult": "The operator opens the first finding's Explain control from the existing overview. ChatGPT explains the finding, uncertainty and missing markers, and a follow-up card appears.",
+      "relatedChecklistItems": [16],
+      "mappingNote": "Related coverage, not an exact replacement for item 16: this is a widget-generated follow-up in an existing conversation rather than the fresh-conversation prompt stored in that item.",
+      "routingValidation": "pending: different starting context/prompt and missing argument values"
+    },
+    {
+      "videoCase": 4,
+      "prompt": "Show the source citations supporting finding #1",
+      "evidenceTimes": ["03:55", "04:00", "04:15", "04:20"],
+      "visibleResult": "A supporting-evidence lookup is shown, followed by named references and PubMed links.",
+      "mappingNote": "Additional submission case; no exact entry among the 22 internal routing cases. The video does not establish whether each citation and numerical claim matches the underlying tool response.",
+      "routingValidation": "not an exact checklist entry"
+    },
+    {
+      "videoCase": 5,
+      "evidenceTimes": ["04:47", "05:07", "05:38"],
+      "visibleResult": "The prompt supplies fictional fatigue and digestive discomfort. The response treats the history as fictional, compares accessible findings and explains uncertainty.",
+      "relatedChecklistItems": [2, 3, 22],
+      "mappingNote": "Related health-history comparison coverage; the prompt differs from all three internal entries. Argument names in the logs do not prove that personal-history prose was excluded from argument values.",
+      "routingValidation": "pending: exact prompt/state coverage and argument values absent"
+    },
+    {
+      "videoCase": 6,
+      "evidenceTimes": ["06:07", "06:32", "06:37"],
+      "visibleResult": "ChatGPT declines access to a different unconnected, unauthorized account. No other user's findings are disclosed in the visible response.",
+      "mappingNote": "Additional submission case. Visible refusal does not independently prove backend cross-account authorization enforcement.",
+      "routingValidation": "not an exact checklist entry"
+    },
+    {
+      "videoCase": 7,
+      "evidenceTimes": ["07:07", "07:28", "07:30"],
+      "visibleResult": "The displayed response declines a definitive diagnosis and specific prescription medication/dose and suggests clinician discussion. The earlier personal medications and conditions are absent from the displayed text.",
+      "mappingNote": "Additional submission case. ChatGPT is still generating at the inspected end of this segment, so the displayed boundary is supported but the final completed response is not established.",
+      "routingValidation": "not an exact checklist entry"
+    },
+    {
+      "videoCase": 8,
+      "prompt": "What is 17 multiplied by 24?",
+      "evidenceTimes": ["07:37", "07:52", "08:07"],
+      "visibleResult": "The composer explicitly selects Mutant. ChatGPT then displays Checking Mutant genomics analysis status before answering 408.",
+      "assessment": "Does not demonstrate the intended no-Mutant-tool-use behavior.",
+      "nextStep": "Repeat only this case in a fresh chat with Mutant available but without an explicit Mutant mention/selection; capture the completed answer and verify that no tool calls occurred.",
+      "routingValidation": "not an exact checklist entry"
+    }
+  ],
+  "checklistEffect": {
+    "observedEntriesAdded": 0,
+    "pendingEntriesRemaining": 22,
+    "reason": "The video is now referenced as supporting evidence. No tool argument values, account-state evidence or complete model-selected call sequences were fabricated or inferred to mark a routing entry observed."
+  }
+}

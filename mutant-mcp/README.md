@@ -317,6 +317,7 @@ origin to fetch sibling assets from.
 | `MUTANT_CORS_ORIGINS` | Comma-separated browser origin allowlist. |
 | `MUTANT_PLAN_INFO_URL` | Informational plan page for the Free-plan notice's learn-more link (default `/plans`; must be an https URL on `mutantgenomics.com`). |
 | `MUTANT_ONBOARDING_URL` | Onboarding URL. |
+| `MUTANT_OPENAI_DOMAIN_VERIFICATION_TOKEN` | OpenAI Apps SDK domain-verification token. Unset (default) makes the challenge paths 404; set it to serve the token verbatim as unauthenticated plain text on GET `/.well-known/openai-apps-challenge`. |
 | `MUTANT_REQUEST_TIMEOUT_MS` | Backend invocation deadline (default `20000`). |
 | `MUTANT_MAX_RESPONSE_BYTES` | Serialized response cap (default `512000`). |
 | `MUTANT_SNP_CATALOG_MAX_BYTES` | Per-tool response cap for `get_snp_catalog` (default `2000000`). |
