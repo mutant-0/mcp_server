@@ -1,5 +1,9 @@
 param(
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [ValidateSet('Codex', 'Portable')]
+    [string]$PackageFormat = 'Codex',
+    [ValidateSet('New', 'Existing')]
+    [string]$SubmissionTarget = 'New'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,7 +13,8 @@ if (-not $OutputDirectory) {
 }
 
 $manifestPath = Join-Path $pluginRoot 'plugin.json'
-$connectionPath = Join-Path $pluginRoot 'mcp.json'
+$connectionFileName = if ($PackageFormat -eq 'Codex') { '.mcp.json' } else { 'mcp.json' }
+$connectionPath = Join-Path $pluginRoot $connectionFileName
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $connections = Get-Content -LiteralPath $connectionPath -Raw | ConvertFrom-Json
 $openaiMetadata = $manifest.extensions.'com.openai'
@@ -57,9 +62,44 @@ $serverEntries = @($connections.mcpServers.PSObject.Properties)
 if ($serverEntries.Count -ne 1 -or $serverEntries[0].Value.url -notmatch '^https://') {
     throw 'Expected one remote HTTPS MCP server.'
 }
+if ($PackageFormat -eq 'Codex') {
+    if ([string]::IsNullOrWhiteSpace($serverEntries[0].Value.oauth.clientId)) {
+        throw 'The Codex submission requires predefined oauth.clientId.'
+    }
+    if ($SubmissionTarget -eq 'New') {
+        if ($serverEntries[0].Value.type -cne 'http') {
+            throw 'Use type http for the new Codex-format OAuth submission.'
+        }
+    } else {
+        # Existing drafts reject server configuration replacements. Preserve
+        # identity here; the portal also needs to accept any OAuth changes.
+        $originalConnections = Get-Content -LiteralPath (Join-Path $pluginRoot 'mcp.json') -Raw | ConvertFrom-Json
+        $originalServers = @($originalConnections.mcpServers.PSObject.Properties)
+        if ($originalServers.Count -ne 1 -or
+            $serverEntries[0].Name -cne $originalServers[0].Name -or
+            $serverEntries[0].Value.type -cne $originalServers[0].Value.type -or
+            $serverEntries[0].Value.url -cne $originalServers[0].Value.url) {
+            throw 'The OAuth package changes the original MCP configuration; create a new plugin instead.'
+        }
+    }
+    # Derive the compatibility manifest from the existing listing source so the
+    # two submission formats retain the same identity and review materials.
+    $packageManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $packageManifest.PSObject.Properties.Remove('$schema')
+    $packageManifest | Add-Member -NotePropertyName mcpServers -NotePropertyValue './.mcp.json'
+    $packageManifest | Add-Member -NotePropertyName interface -NotePropertyValue $packageManifest.extensions.'com.openai'.interface
+    $packageManifest.extensions.'com.openai'.PSObject.Properties.Remove('interface')
+    if (-not $packageManifest.interface.PSObject.Properties['capabilities']) {
+        $packageManifest.interface | Add-Member -NotePropertyName capabilities -NotePropertyValue @(
+            'Explore DNA findings', 'Review supporting evidence', 'Import DNA data'
+        )
+    }
+    $packageManifestJson = $packageManifest | ConvertTo-Json -Depth 30
+}
 
-# Package only the manifests and their two declared brand assets.
-# Server source, environment files, recordings and credentials are excluded.
+# Package only the selected manifests and their two declared brand assets.
+# The public OAuth client ID is included; server source, environment files,
+# recordings, passwords, client secrets and access tokens are excluded.
 $assetPaths = @()
 foreach ($field in @('logo', 'composerIcon')) {
     $assetReference = $interface.$field
@@ -77,13 +117,27 @@ foreach ($field in @('logo', 'composerIcon')) {
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-$zipPath = Join-Path $OutputDirectory ($manifest.name + '-' + $manifest.version + '.zip')
+$zipSuffix = if ($PackageFormat -eq 'Codex' -and $SubmissionTarget -eq 'New') { '-oauth-new-plugin.zip' } else { '.zip' }
+$zipPath = Join-Path $OutputDirectory ($manifest.name + '-' + $manifest.version + $zipSuffix)
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $fileStream = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::Create)
 $archive = New-Object System.IO.Compression.ZipArchive($fileStream, [System.IO.Compression.ZipArchiveMode]::Create)
 try {
-    foreach ($sourcePath in @($manifestPath, $connectionPath) + $assetPaths) {
+    if ($PackageFormat -eq 'Codex') {
+        # Omit the portable root manifest: otherwise it takes precedence over
+        # .codex-plugin/plugin.json and the portable schema rejects OAuth fields.
+        $manifestEntry = $archive.CreateEntry('.codex-plugin/plugin.json')
+        $manifestWriter = [System.IO.StreamWriter]::new(
+            $manifestEntry.Open(), [System.Text.UTF8Encoding]::new($false)
+        )
+        try { $manifestWriter.Write($packageManifestJson) }
+        finally { $manifestWriter.Dispose() }
+        $sourcePaths = @($connectionPath) + $assetPaths
+    } else {
+        $sourcePaths = @($manifestPath, $connectionPath) + $assetPaths
+    }
+    foreach ($sourcePath in $sourcePaths) {
         $entryName = $sourcePath.Substring($pluginRoot.Length + 1).Replace('\', '/')
         [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
             $archive, $sourcePath, $entryName, [System.IO.Compression.CompressionLevel]::Optimal
@@ -95,4 +149,6 @@ finally {
     $fileStream.Dispose()
 }
 Write-Output "Created $zipPath"
+Write-Output "Package format: $PackageFormat"
+Write-Output "Submission target: $SubmissionTarget"
 Write-Output 'Before final review: confirm the packaged video link is reviewer-accessible, enter demo credentials privately in the dashboard, and verify the production connection and domain.'

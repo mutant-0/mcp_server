@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "mutant_genomics": {
+      "url": "https://api.mutantbiotech.com/mcp"
+    }
+  }
+}

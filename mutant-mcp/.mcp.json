@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mutant-genomics": {
+      "type": "http",
+      "url": "https://api.mutantbiotech.com/mcp",
+      "oauth": {
+        "clientId": "1hi6c97v6md1q68h91ld37tre4"
+      }
+    }
+  }
+}
