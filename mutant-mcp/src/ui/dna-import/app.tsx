@@ -309,6 +309,8 @@ const ERROR_MESSAGES: Record<string, string> = {
     "This account's data is being deleted. Importing and reading findings are paused until it finishes. Try again shortly.",
   data_deleted:
     "This account's data was deleted. Import your DNA again to start a new analysis.",
+  integration_revoked:
+    "Your Mutant connection was reset. Reconnect Mutant in ChatGPT, then try again.",
   analysis_failed:
     "Mutant could not finish your analysis. Your DNA file was imported; you can try again.",
   analysis_timeout: "Your analysis is taking longer than expected.",

@@ -1198,6 +1198,27 @@ describe("DNA import component", () => {
     expect(screen.queryByText(/temporarily unavailable/i)).toBeNull();
   });
 
+  it("shows the reconnect copy when the integration grant is revoked", async () => {
+    renderWith(
+      {
+        poll_analysis_status: statusResponse("ready"),
+        list_health_hypotheses: makeErrorResponse(
+          "INTEGRATION_REVOKED",
+          "The ChatGPT connection to Mutant is disconnected. Reconnect to continue.",
+          { app_code: "integration_revoked" },
+        ),
+      },
+      { mode: "overview" },
+    );
+
+    // A revoked connector is actionable, never the generic transient outage.
+    await screen.findByText(/Reconnect Mutant in ChatGPT/i);
+    expect(
+      screen.getByText("Your Mutant connection was reset. Reconnect Mutant in ChatGPT, then try again."),
+    ).toBeDefined();
+    expect(screen.queryByText(/temporarily unavailable/i)).toBeNull();
+  });
+
   it("renders the factual plan notice and its informational link only for Free accounts", async () => {
     const bridge = renderWith({
       poll_analysis_status: statusResponse("ready"),
