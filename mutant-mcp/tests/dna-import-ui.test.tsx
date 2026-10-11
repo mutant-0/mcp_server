@@ -264,9 +264,7 @@ function chipContext(): ToolResponse {
 }
 
 /** Responders for the overview route with the compare chip and a ready analysis. */
-function compareOverviewResponders(
-  overrides: Responders = {},
-): Responders {
+function compareOverviewResponders(overrides: Responders = {}): Responders {
   return {
     poll_analysis_status: statusResponse("ready"),
     get_analysis_context: chipContext(),
@@ -416,7 +414,8 @@ interface BridgeOptions {
    */
   toolMeta?: Record<
     string,
-    Record<string, unknown> | ((args: Record<string, unknown>, call: number) => Record<string, unknown>)
+    | Record<string, unknown>
+    | ((args: Record<string, unknown>, call: number) => Record<string, unknown>)
   >;
 }
 
@@ -1017,7 +1016,9 @@ describe("DNA import component", () => {
     // The bound result carries the revision the status reports, as the real
     // display tool does: a card must never be pinned to a different revision
     // than the account's current one.
-    bridge.sendToolResult(makeSuccessResponse({ ui_rendered: true, mode: "overview" }, "analysis_1"));
+    bridge.sendToolResult(
+      makeSuccessResponse({ ui_rendered: true, mode: "overview" }, "analysis_1"),
+    );
 
     await screen.findByText(/Alpha finding/i);
     expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
@@ -1045,14 +1046,12 @@ describe("DNA import component", () => {
     expect(screen.queryByText(/Something went wrong/i)).toBeNull();
   });
 
-  it("offers the stale recovery notice when a bound card's analysis moved", async () => {
-    // The bound overview result is what the model displayed, so a moved revision
-    // must not be silently swapped for a different one. The card shows the
-    // recovery notice instead of sending a read the server must refuse.
+  it("reloads the bound snapshot in the same card when its analysis moved", async () => {
     const bridge = renderWith(
       {
         poll_analysis_status: (_args, call) =>
           statusResponse("ready", {}, call === 1 ? "analysis_1" : "analysis_2"),
+        show_analysis_overview: boundOverview("analysis_2"),
       },
       { mode: "overview" },
     );
@@ -1062,9 +1061,12 @@ describe("DNA import component", () => {
       makeSuccessResponse({ ui_rendered: true, mode: "overview" }, "analysis_1"),
     );
 
-    await screen.findByText(/These results have changed/i);
+    await screen.findByText(/Findings updated/i);
     expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(0);
-    expect(screen.getByRole("button", { name: /open your current findings/i })).toBeDefined();
+    expect(bridge.callsTo("show_analysis_overview")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /open your current findings/i })).toBeNull();
+    expect(bridge.callsTo("create_report")).toHaveLength(0);
+    expect(bridge.messages).toHaveLength(0);
   });
 
   it("shows hints from the bound overview snapshot without a second list read", async () => {
@@ -1171,7 +1173,7 @@ describe("DNA import component", () => {
     const sent = params.content?.map((block) => block.text ?? "").join("") ?? "";
     // The heading instruction precedes the untouched server-authored prompt.
     expect(params.role).toBe("user");
-    expect(sent).toContain('Mutant follow-up: Connect my findings');
+    expect(sent).toContain("Mutant follow-up: Connect my findings");
     expect(sent).toContain(
       "Look across the findings I can access in this analysis and tell me whether several of them are telling parts of the same biological story.",
     );
@@ -1261,7 +1263,9 @@ describe("DNA import component", () => {
     // A revoked connector is actionable, never the generic transient outage.
     await screen.findByText(/Reconnect Mutant in ChatGPT/i);
     expect(
-      screen.getByText("Your Mutant connection was reset. Reconnect Mutant in ChatGPT, then try again."),
+      screen.getByText(
+        "Your Mutant connection was reset. Reconnect Mutant in ChatGPT, then try again.",
+      ),
     ).toBeDefined();
     expect(screen.queryByText(/temporarily unavailable/i)).toBeNull();
   });
@@ -1471,7 +1475,8 @@ describe("DNA import component", () => {
     const bridge = renderWith({
       // The mount status reports one revision; the verification read the card
       // makes before a follow-up reports the revision the overview pinned.
-      poll_analysis_status: (_args, call) => (call === 1 ? readyAt("analysis_2") : readyAt("analysis_1")),
+      poll_analysis_status: (_args, call) =>
+        call === 1 ? readyAt("analysis_2") : readyAt("analysis_1"),
     });
 
     await screen.findByText(/Analysis ready/i);
@@ -1624,14 +1629,17 @@ describe("DNA import component", () => {
 
   it("stops a summary handoff when the displayed analysis is stale", async () => {
     let version = "analysis_1";
-    const bridge = renderWith({ poll_analysis_status: () => readyAt(version) });
+    const bridge = renderWith({
+      poll_analysis_status: () => readyAt(version),
+      show_analysis_overview: boundOverview("analysis_2"),
+    });
     await screen.findByText(/Analysis ready/i);
     fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
     await screen.findByText(/Alpha finding/i);
 
     version = "analysis_2";
     fireEvent.click(screen.getByRole("button", { name: "Summarize my top 3" }));
-    await screen.findByText(/These results have changed/);
+    await screen.findByText(/Findings updated/);
     expect(bridge.messages).toHaveLength(0);
   });
 
@@ -1717,7 +1725,9 @@ describe("DNA import component", () => {
         ?.map((block) => block.text ?? "")
         .join("") ?? "";
     // The heading instruction precedes the untouched server-selected prompt.
-    expect(sent).toContain('Start your reply with this heading on its own line: "Mutant follow-up: Explain finding #1"');
+    expect(sent).toContain(
+      'Start your reply with this heading on its own line: "Mutant follow-up: Explain finding #1"',
+    );
     expect(sent).toContain("Explain my #1 finding in plain English.");
     expect(sent.indexOf("Mutant follow-up:")).toBeLessThan(
       sent.indexOf("Explain my #1 finding in plain English."),
@@ -1757,14 +1767,18 @@ describe("DNA import component", () => {
     }
   });
 
-  it("stops a stale card click and offers the current findings", async () => {
+  it("stops an old action, reloads findings in place, and pins the next click to the new snapshot", async () => {
     let version = "analysis_1";
+    const updated = boundOverview("analysis_2");
+    updated.data!.displayed_hypotheses = [
+      { id: "HYP_D", rank: 1, name: "Delta finding" },
+      { id: "HYP_B", rank: 2, name: "Beta finding" },
+      { id: "HYP_C", rank: 3, name: "Gamma finding" },
+    ];
     const bridge = renderWith({
       poll_analysis_status: () =>
-        makeSuccessResponse(
-          statusResponse("ready").data as Record<string, unknown>,
-          version,
-        ),
+        makeSuccessResponse(statusResponse("ready").data as Record<string, unknown>, version),
+      show_analysis_overview: updated,
     });
 
     await screen.findByText(/Analysis ready/i);
@@ -1775,15 +1789,43 @@ describe("DNA import component", () => {
     version = "analysis_2";
     fireEvent.click(screen.getAllByRole("button", { name: /explain finding #1/i })[0]!);
 
-    await screen.findByText(/These results have changed/);
+    await screen.findByText(/Findings updated/);
     // The old action never reached the host.
     expect(bridge.messages).toHaveLength(0);
     expect(version).toBe("analysis_2");
 
-    // The recovery action hands off the current-findings prompt instead.
-    fireEvent.click(screen.getByRole("button", { name: /open your current findings/i }));
+    expect(bridge.callsTo("show_analysis_overview")).toHaveLength(1);
+    expect(bridge.callsTo("create_report")).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /open your current findings/i })).toBeNull();
+    // The user explicitly chooses a new action after the displayed snapshot updates.
+    fireEvent.click(screen.getByRole("button", { name: "Summarize my top 3" }));
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
-    expect(JSON.stringify(bridge.messages[0])).toContain("Show my current Mutant findings.");
+    expect(JSON.stringify(bridge.messages[0])).toContain("analysis_2");
+    expect(JSON.stringify(bridge.messages[0])).toContain("Delta finding");
+    expect(JSON.stringify(bridge.messages[0])).not.toContain("Alpha finding");
+  });
+
+  it("retries a failed in-card update without resubmitting DNA or sending the old action", async () => {
+    let version = "analysis_1";
+    const bridge = renderWith({
+      poll_analysis_status: () => readyAt(version),
+      show_analysis_overview: (_args, call) => call === 1
+        ? makeErrorResponse("SERVICE_UNAVAILABLE", "unavailable")
+        : boundOverview("analysis_2"),
+    });
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+    await screen.findByText(/Alpha finding/i);
+    version = "analysis_2";
+    fireEvent.click(screen.getByRole("button", { name: /explain finding #1/i }));
+    await screen.findByText(/We couldn't update your findings/i);
+    expect(screen.getByText(/Alpha finding/i)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /^try again$/i }));
+    await screen.findByText(/Findings updated/i);
+    expect(screen.queryByText(/We couldn't update your findings/i)).toBeNull();
+    expect(bridge.callsTo("show_analysis_overview")).toHaveLength(2);
+    expect(bridge.callsTo("create_report")).toHaveLength(0);
+    expect(bridge.messages).toHaveLength(0);
   });
 
   it("persists only the sent action id and label through widget state", async () => {
@@ -1932,9 +1974,13 @@ describe("DNA import component", () => {
   }
 
   it("routes an import refused for consent to the portal consent page", async () => {
-    const bridge = await renderApp({ create_report: consentError() }, {}, {
-      toolMeta: { create_report: consentMeta("genetic_processing") },
-    });
+    const bridge = await renderApp(
+      { create_report: consentError() },
+      {},
+      {
+        toolMeta: { create_report: consentMeta("genetic_processing") },
+      },
+    );
 
     selectFile(microarrayFile());
     await screen.findByText(/Ready to submit/i);
@@ -2065,12 +2111,15 @@ describe("DNA import component", () => {
     const bridge = await renderApp({}, {}, {});
     await screen.findByText(/Drag and drop your DNA file here/i);
 
-    bridge.sendToolResult(makeSuccessResponse({ ui_rendered: true, mode: "initial", view: "consent" }), {
-      mutant: {
-        view: "consent",
-        consent: { url: "https://mutantgenomics.com/consent", purpose: "chatgpt_sharing" },
+    bridge.sendToolResult(
+      makeSuccessResponse({ ui_rendered: true, mode: "initial", view: "consent" }),
+      {
+        mutant: {
+          view: "consent",
+          consent: { url: "https://mutantgenomics.com/consent", purpose: "chatgpt_sharing" },
+        },
       },
-    });
+    );
 
     // Recovery opens on consent, never the upload UI.
     await screen.findByText(/Before Mutant can share your findings here/i);
@@ -2299,23 +2348,22 @@ describe("DNA import component", () => {
     expect(bridge.messages).toHaveLength(0);
   });
 
-  it("recovers with the stale notice when the comparison revision changed", async () => {
+  it("updates the card after a confirmed comparison version change without a chat turn or DNA submission", async () => {
     const bridge = await renderCompareOverview({
       list_health_hypotheses: makeErrorResponse(
         "ANALYSIS_VERSION_CHANGED",
         "The analysis changed since that revision.",
       ),
+      show_analysis_overview: boundOverview("analysis_2"),
     });
 
-    await screen.findByText(/These results have changed/i);
-
-    fireEvent.click(screen.getByRole("button", { name: "Compare top 3" }));
-    await waitFor(() => expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(2));
-    // No panel is rendered: the card shows the recovery notice instead of a
-    // comparison from a different revision.
+    await screen.findByText(/Findings updated/i);
+    expect(bridge.callsTo("show_analysis_overview")).toHaveLength(1);
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
     expect(screen.queryByRole("region", { name: "Comparing your top three findings" })).toBeNull();
     expect(bridge.messages).toHaveLength(0);
-    expect(screen.getByRole("button", { name: /open your current findings/i })).toBeDefined();
+    expect(bridge.callsTo("create_report")).toHaveLength(0);
+    expect(screen.queryByText(/These results have changed/i)).toBeNull();
   });
 
   it("refuses a comparison read that does not match the bound top three", async () => {
@@ -2330,12 +2378,31 @@ describe("DNA import component", () => {
       ),
     });
 
-    await screen.findByText(/These results have changed/i);
+    await waitForComparisonPrefetch(bridge);
 
     fireEvent.click(screen.getByRole("button", { name: "Compare top 3" }));
     await waitFor(() => expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(2));
-    expect(screen.queryByRole("region", { name: "Comparing your top three findings" })).toBeNull();
+    await screen.findByText(/We couldn't verify this comparison/i);
     expect(screen.queryByText("Zeta finding")).toBeNull();
+    expect(screen.queryByText(/These results have changed/i)).toBeNull();
+    expect(bridge.callsTo("show_analysis_overview")).toHaveLength(0);
+    expect(bridge.messages).toHaveLength(0);
+  });
+
+  it("keeps optional analysis refresh separate from a comparison verification failure", async () => {
+    const bridge = await renderCompareOverview({
+      poll_analysis_status: refreshAvailable(),
+      list_health_hypotheses: { ...FINDINGS, analysis_version: "analysis_2" },
+    });
+    await waitForComparisonPrefetch(bridge);
+    fireEvent.click(screen.getByRole("button", { name: "Compare top 3" }));
+    await screen.findByText(/We couldn't verify this comparison/i);
+    expect(screen.queryByText(/These results have changed/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /open your current findings/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^refresh analysis$/i }));
+    await screen.findByText(/Drag and drop your DNA file here/i);
+    expect(bridge.callsTo("create_report")).toHaveLength(0);
+    expect(bridge.callsTo("show_analysis_overview")).toHaveLength(0);
     expect(bridge.messages).toHaveLength(0);
   });
 

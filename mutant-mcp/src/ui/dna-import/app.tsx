@@ -31,14 +31,16 @@ import {
 } from "react";
 import { useApp, useDocumentTheme, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
 import type { App } from "@modelcontextprotocol/ext-apps";
-import { APP_ERROR_CODES, appErrorCode, type AppErrorCode, type ToolResponse } from "../../contract";
+import {
+  APP_ERROR_CODES,
+  appErrorCode,
+  type AppErrorCode,
+  type ToolResponse,
+} from "../../contract";
 import { DARK_PALETTE, LIGHT_PALETTE, paletteVars } from "../shared/theme";
 import {
   FOLLOW_UP_FAILED_MESSAGE,
   FOLLOW_UP_UNAVAILABLE_MESSAGE,
-  STALE_CARD_MESSAGE,
-  STALE_CARD_RECOVERY_HEADING,
-  STALE_CARD_RECOVERY_PROMPT,
   deliverFollowUp,
   fetchCurrentAnalysisVersion,
   logBridgeError,
@@ -1203,8 +1205,11 @@ export function DnaImportApp({
    * remount. The prompt and any health history are never stored or shown.
    */
   const [sentAction, setSentAction] = useState<SentAction | null>(() => readSentAction());
-  /** Set when the clicked card's bound revision is no longer current. */
-  const [staleNotice, setStaleNotice] = useState(false);
+  /** Reload existing findings in this card; never resubmit DNA or open another card. */
+  const [findingsRecovery, setFindingsRecovery] = useState<
+    "idle" | "loading" | "updated" | "error"
+  >("idle");
+  const findingsRecoveryInFlightRef = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
   /** Ticks while processing so the elapsed timer advances without polling state. */
   const [now, setNow] = useState(() => Date.now());
@@ -1949,6 +1954,71 @@ export function DnaImportApp({
     }
   }, [app, enterConsentRecovery]);
 
+  /** Replace the entire displayed snapshot, then let the user choose a new action. */
+  const reloadOverview = useCallback(async () => {
+    if (!app || findingsRecoveryInFlightRef.current) return;
+    findingsRecoveryInFlightRef.current = true;
+    setFindingsRecovery("loading");
+    setComparisonOpen(false);
+    setComparison({ status: "idle" });
+    comparisonCacheRef.current.clear();
+    setHandoffError(null);
+    try {
+      const result = await app.callServerTool({ name: "show_analysis_overview", arguments: {} });
+      const envelope = envelopeOf(result);
+      if (result.isError || !envelope?.ok) {
+        const blocked = enterConsentRecovery(
+          result,
+          envelope?.error,
+          CONSENT_PURPOSE_CHATGPT_SHARING,
+          {
+            tool: "show_analysis_overview",
+            args: {},
+            source: "findings",
+          },
+        );
+        setFindingsRecovery(blocked ? "idle" : "error");
+        if (findingsRef.current.status === "loading")
+          setFindingsState({
+            status: "error",
+            message: "We couldn't update your findings. Try again.",
+          });
+        return;
+      }
+      const snapshot = overviewSnapshotFrom(result);
+      if (!snapshot?.version || !snapshot.items.length)
+        throw new Error("Invalid overview snapshot");
+      // All identities and the revision change together. Never replay an action
+      // that referred to the previous snapshot, even if ranks look unchanged.
+      pinnedSnapshotRef.current = true;
+      displayedVersionRef.current = snapshot.version;
+      comparisonPrefetchedRef.current = snapshot.version;
+      setFindingsState({
+        status: "loaded",
+        items: snapshot.items,
+        totalAccessible: snapshot.totalAccessible,
+        hasMore: snapshot.hasMore,
+      });
+      setAnalysis((previous) =>
+        previous ? { ...previous, planNotice: snapshot.planNotice } : previous,
+      );
+      setPrompts([]);
+      promptsLoadedRef.current = false;
+      setSentAction(null);
+      setFindingsRecovery("updated");
+      void loadPromptChips();
+    } catch {
+      setFindingsRecovery("error");
+      if (findingsRef.current.status === "loading")
+        setFindingsState({
+          status: "error",
+          message: "We couldn't update your findings. Try again.",
+        });
+    } finally {
+      findingsRecoveryInFlightRef.current = false;
+    }
+  }, [app, enterConsentRecovery, loadPromptChips, setFindingsState]);
+
   const loadFindings = useCallback(async () => {
     if (!app) return;
     if (findingsRef.current.status === "loading" || findingsRef.current.status === "loaded") return;
@@ -1962,14 +2032,12 @@ export function DnaImportApp({
       // sending a pin the server must refuse as ANALYSIS_VERSION_CHANGED -- a
       // refusal the host surfaces in the conversation as an error the user
       // cannot act on. A revision bound to a displayed overview snapshot is not
-      // silently swapped: a moved revision there is a stale card, so the stale
-      // recovery notice is shown rather than mixed-revision findings.
+      // replaced piecemeal: a moved revision reloads the whole overview snapshot.
       if (version) {
         const current = await fetchCurrentAnalysisVersion(app);
         if (current && current !== version) {
           if (pinnedSnapshotRef.current) {
-            setFindingsState({ status: "idle" });
-            setStaleNotice(true);
+            await reloadOverview();
             return;
           }
           version = current;
@@ -1985,13 +2053,10 @@ export function DnaImportApp({
       });
       const envelope = envelopeOf(result);
       // The revision moved between the confirmation above and this read, so the
-      // card is holding a revision the server no longer serves. That is the
-      // stale-card state -- findings from the old revision were never rendered --
-      // so the recovery notice ("Open your current findings") is shown, never an
-      // error panel the user cannot act on.
+      // card is holding a revision the server no longer serves. Reload the
+      // snapshot in this card instead of asking the user to open another one.
       if (envelope?.error?.code === "ANALYSIS_VERSION_CHANGED") {
-        setFindingsState({ status: "idle" });
-        setStaleNotice(true);
+        await reloadOverview();
         return;
       }
       if (result.isError || !envelope || !envelope.ok) {
@@ -2033,7 +2098,7 @@ export function DnaImportApp({
     } catch {
       setFindingsState({ status: "error", message: messageFor("service_unavailable") });
     }
-  }, [app, enterConsentRecovery, isFull, loadPromptChips, setFindingsState]);
+  }, [app, enterConsentRecovery, isFull, loadPromptChips, reloadOverview, setFindingsState]);
 
   /**
    * Open the portal consent route for the purpose the server refused. The URL is
@@ -2070,6 +2135,9 @@ export function DnaImportApp({
     if (!app) return false;
     const pending = pendingActionRef.current;
     switch (pending?.tool) {
+      case "show_analysis_overview":
+        await reloadOverview();
+        return true;
       case "create_report":
         if (!parsed) return false;
         await submit(app);
@@ -2089,7 +2157,17 @@ export function DnaImportApp({
         await loadFindings();
         return true;
     }
-  }, [app, catalog, loadCatalog, loadFindings, loadPromptChips, parsed, submit, setFindingsState]);
+  }, [
+    app,
+    catalog,
+    loadCatalog,
+    loadFindings,
+    loadPromptChips,
+    parsed,
+    reloadOverview,
+    submit,
+    setFindingsState,
+  ]);
 
   /**
    * Re-attempt the refused operation after the user has accepted in the portal.
@@ -2128,7 +2206,10 @@ export function DnaImportApp({
         });
       } else if (resumed) {
         logConsentEvent("consent_completed", { source_tool: sourceTool, resume_success: true });
-        logConsentEvent("pending_action_resumed", { source_tool: sourceTool, resume_success: true });
+        logConsentEvent("pending_action_resumed", {
+          source_tool: sourceTool,
+          resume_success: true,
+        });
         pendingActionRef.current = null;
       }
       consentRetryRef.current = false;
@@ -2165,20 +2246,23 @@ export function DnaImportApp({
    * the bound snapshot.
    *
    * `fromClick` separates an explicit click from the quiet prefetch: a click on an
-   * unusable card switches to the stale recovery notice, while a prefetch that
-   * cannot run yet just waits. Only a validated three-item result is cached and
+   * unverifiable card shows a retry error, while a prefetch that cannot run yet
+   * just waits. Only a validated three-item result is cached and
    * rendered; a version change, a mismatched read, or a missing pin never renders
    * a mixed-version comparison, and the card never falls back to an unpinned chat
    * request.
    */
   const fetchComparison = useCallback(
     async (fromClick = false) => {
+      if (findingsRecoveryInFlightRef.current) return;
       const version = displayedVersionRef.current;
       const bound = boundTopThree();
       if (!version || !bound) {
         if (fromClick) {
-          setComparison({ status: "idle" });
-          setStaleNotice(true);
+          setComparison({
+            status: "error",
+            message: "We couldn't verify this comparison. Try again.",
+          });
         }
         return;
       }
@@ -2197,10 +2281,11 @@ export function DnaImportApp({
           arguments: { limit: COMPARISON_LIMIT, analysis_version: version },
         });
         const envelope = envelopeOf(result);
+        // A newer snapshot may have replaced this one while the read was in flight.
+        if (displayedVersionRef.current !== version) return;
         if (result.isError || !envelope || !envelope.ok) {
           if (envelope?.error?.code === "ANALYSIS_VERSION_CHANGED") {
-            setComparison({ status: "idle" });
-            setStaleNotice(true);
+            await reloadOverview();
             return;
           }
           const consentBlocked = enterConsentRecovery(
@@ -2214,20 +2299,26 @@ export function DnaImportApp({
             },
           );
           setComparison(
-            consentBlocked ? { status: "idle" } : { status: "error", message: errorMessage(envelope?.error) },
+            consentBlocked
+              ? { status: "idle" }
+              : { status: "error", message: errorMessage(envelope?.error) },
           );
           return;
         }
         // The read must describe the same revision the card is displaying.
         if (envelope.analysis_version !== version) {
-          setComparison({ status: "idle" });
-          setStaleNotice(true);
+          setComparison({
+            status: "error",
+            message: "We couldn't verify this comparison. Try again.",
+          });
           return;
         }
         const items = findingsFrom(envelope.data);
         if (!matchesBoundTopThree(items, bound)) {
-          setComparison({ status: "idle" });
-          setStaleNotice(true);
+          setComparison({
+            status: "error",
+            message: "We couldn't verify this comparison. Try again.",
+          });
           return;
         }
         comparisonCacheRef.current.set(version, items);
@@ -2239,7 +2330,7 @@ export function DnaImportApp({
         if (comparisonInFlightRef.current === version) comparisonInFlightRef.current = null;
       }
     },
-    [app, boundTopThree, enterConsentRecovery],
+    [app, boundTopThree, enterConsentRecovery, reloadOverview],
   );
 
   // The overview route opens directly on its findings and follow-up hints.
@@ -2283,21 +2374,17 @@ export function DnaImportApp({
   const handoffPendingRef = useRef(false);
   const askChatGpt = useCallback(
     async (action: CardAction) => {
-      if (handoffPendingRef.current) return;
+      if (handoffPendingRef.current || findingsRecoveryInFlightRef.current) return;
       handoffPendingRef.current = true;
       setHandoffError(null);
-      setStaleNotice(false);
       setPendingActionId(action.id);
       try {
         const check = await verifyBoundVersion(app, action.boundVersion);
         if (check === "stale") {
-          setStaleNotice(true);
+          await reloadOverview();
           return;
         }
-        const outcome = await deliverFollowUp(
-          app,
-          withCardHeading(action.prompt, action.heading),
-        );
+        const outcome = await deliverFollowUp(app, withCardHeading(action.prompt, action.heading));
         if (outcome === "sent") {
           const next: SentAction = { id: action.id, label: action.label };
           setSentAction(next);
@@ -2312,19 +2399,7 @@ export function DnaImportApp({
         handoffPendingRef.current = false;
       }
     },
-    [app],
-  );
-
-  /** Fixed recovery action for a stale card; carries no revision pin. */
-  const currentFindingsAction = useCallback(
-    (): CardAction => ({
-      id: "current-findings",
-      label: "Current findings",
-      prompt: STALE_CARD_RECOVERY_PROMPT,
-      heading: STALE_CARD_RECOVERY_HEADING,
-      boundVersion: null,
-    }),
-    [],
+    [app, reloadOverview],
   );
 
   /**
@@ -2644,7 +2719,7 @@ export function DnaImportApp({
                 <button
                   type="button"
                   style={styles.subtleButton}
-                  disabled={pendingActionId === `explain-finding-${finding.rank}`}
+                  disabled={pendingActionId === `explain-finding-${finding.rank}` || findingsRecovery === "loading"}
                   onClick={() =>
                     void askChatGpt({
                       id: `explain-finding-${finding.rank}`,
@@ -2670,9 +2745,9 @@ export function DnaImportApp({
           </p>
         )}
 
-        {findings.status === "error" ? <ErrorPanel message={findings.message} /> : null}
+        {findings.status === "error" && findingsRecovery !== "error" ? <ErrorPanel message={findings.message} /> : null}
 
-        {loaded ? null : (
+        {loaded || findingsRecovery === "loading" || findingsRecovery === "error" ? null : (
           <div style={styles.buttonRow}>
             <button
               type="button"
@@ -2695,18 +2770,24 @@ export function DnaImportApp({
           </p>
         ) : null}
 
-        {staleNotice ? (
+        {findingsRecovery === "error" ? (
           <div role="alert" style={styles.handoffError}>
-            <p style={{ margin: "0 0 8px" }}>{STALE_CARD_MESSAGE}</p>
+            <p style={{ margin: "0 0 8px" }}>We couldn't update your findings. Try again.</p>
             <button
               type="button"
               style={styles.secondaryButton}
-              disabled={pendingActionId === "current-findings"}
-              onClick={() => void askChatGpt(currentFindingsAction())}
+              onClick={() => void reloadOverview()}
             >
-              {pendingActionId === "current-findings" ? "Sending…" : "Open your current findings"}
+              Try again
             </button>
           </div>
+        ) : null}
+        {findingsRecovery === "loading" || findingsRecovery === "updated" ? (
+          <p role="status" style={styles.small}>
+            {findingsRecovery === "loading"
+              ? "Updating your findings…"
+              : "Findings updated. Select an action to continue."}
+          </p>
         ) : null}
 
         {primaryPrompt ? (
@@ -2714,7 +2795,7 @@ export function DnaImportApp({
             <button
               type="button"
               style={{ ...styles.primaryButton, width: "100%" }}
-              disabled={pendingActionId === primaryPrompt.id}
+              disabled={pendingActionId === primaryPrompt.id || findingsRecovery === "loading"}
               onClick={() =>
                 void askChatGpt({
                   id: primaryPrompt.id,
@@ -2738,7 +2819,7 @@ export function DnaImportApp({
                 key={chip.id}
                 type="button"
                 style={styles.chip}
-                disabled={pendingActionId === chip.id}
+                disabled={pendingActionId === chip.id || findingsRecovery === "loading"}
                 onClick={() =>
                   void askChatGpt({
                     id: chip.id,
@@ -2762,6 +2843,7 @@ export function DnaImportApp({
               style={styles.chip}
               aria-expanded={comparisonOpen}
               aria-controls={COMPARISON_PANEL_ID}
+              disabled={findingsRecovery === "loading"}
               onClick={() => {
                 const next = !comparisonOpen;
                 setComparisonOpen(next);
@@ -2770,7 +2852,7 @@ export function DnaImportApp({
             >
               {compareTopThreePrompt.label}
             </button>
-            {comparisonOpen && !staleNotice ? (
+            {comparisonOpen ? (
               <div
                 id={COMPARISON_PANEL_ID}
                 role="region"
@@ -2867,11 +2949,11 @@ export function DnaImportApp({
             <button
               type="button"
               style={styles.secondaryButton}
-              disabled={pendingActionId === "summarize-results"}
+              disabled={pendingActionId === "summarize-results" || findingsRecovery === "loading"}
               onClick={() => {
                 const version = displayedVersionRef.current;
                 if (!version) {
-                  setStaleNotice(true);
+                  setHandoffError("We couldn't verify these findings. Try again.");
                   return;
                 }
                 const topFindings = loaded.slice(0, 3);
