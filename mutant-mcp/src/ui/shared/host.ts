@@ -223,6 +223,34 @@ export function persistSentAction(action: SentAction): void {
 export type BoundVersionCheck = "current" | "stale" | "unknown";
 
 /**
+ * Read the account's current `analysis_version` from the app-only status channel.
+ *
+ * `null` means the check could not be completed (no bridge, a scope gap, an
+ * unready analysis, or a transient error). The status channel is not a content
+ * read: it returns no findings, genotypes, or health history.
+ */
+export async function fetchCurrentAnalysisVersion(app: App | null): Promise<string | null> {
+  if (!app || typeof app.callServerTool !== "function") return null;
+  const startedAt = Date.now();
+  try {
+    const result = await app.callServerTool({ name: "poll_analysis_status", arguments: {} });
+    if ((result as { isError?: boolean }).isError === true) return null;
+    const structured = (result as { structuredContent?: unknown }).structuredContent;
+    const envelope =
+      structured && typeof structured === "object"
+        ? (structured as Record<string, unknown>)
+        : null;
+    if (!envelope || envelope.ok !== true) return null;
+    return typeof envelope.analysis_version === "string" ? envelope.analysis_version : null;
+  } catch (err) {
+    logBridgeError(err);
+    return null;
+  } finally {
+    logTiming("follow-up version check", Date.now() - startedAt);
+  }
+}
+
+/**
  * Compare a card's bound analysis version with the account's current analysis.
  *
  * The host handoff only transmits a prompt string, so a card's pinned
@@ -237,24 +265,8 @@ export async function verifyBoundVersion(
   app: App | null,
   boundVersion: string | null,
 ): Promise<BoundVersionCheck> {
-  if (!app || typeof app.callServerTool !== "function" || !boundVersion) return "unknown";
-  const startedAt = Date.now();
-  try {
-    const result = await app.callServerTool({ name: "poll_analysis_status", arguments: {} });
-    if ((result as { isError?: boolean }).isError === true) return "unknown";
-    const structured = (result as { structuredContent?: unknown }).structuredContent;
-    const envelope =
-      structured && typeof structured === "object"
-        ? (structured as Record<string, unknown>)
-        : null;
-    if (!envelope || envelope.ok !== true) return "unknown";
-    const version = typeof envelope.analysis_version === "string" ? envelope.analysis_version : null;
-    if (!version) return "unknown";
-    return version === boundVersion ? "current" : "stale";
-  } catch (err) {
-    logBridgeError(err);
-    return "unknown";
-  } finally {
-    logTiming("follow-up version check", Date.now() - startedAt);
-  }
+  if (!boundVersion) return "unknown";
+  const version = await fetchCurrentAnalysisVersion(app);
+  if (!version) return "unknown";
+  return version === boundVersion ? "current" : "stale";
 }

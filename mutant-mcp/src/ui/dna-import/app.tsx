@@ -40,6 +40,7 @@ import {
   STALE_CARD_RECOVERY_HEADING,
   STALE_CARD_RECOVERY_PROMPT,
   deliverFollowUp,
+  fetchCurrentAnalysisVersion,
   logBridgeError,
   logConsentEvent,
   logTiming,
@@ -1953,7 +1954,28 @@ export function DnaImportApp({
     if (findingsRef.current.status === "loading" || findingsRef.current.status === "loaded") return;
     setFindingsState({ status: "loading" });
     try {
-      const version = displayedVersionRef.current;
+      let version = displayedVersionRef.current;
+      // Confirm the pin before reading. A revision the card only read from a
+      // status poll is not content the user has seen: if it moved (a deployment
+      // bumps the global revision for every account, and a regeneration bumps
+      // the account's own), adopt the current revision and read it instead of
+      // sending a pin the server must refuse as ANALYSIS_VERSION_CHANGED -- a
+      // refusal the host surfaces in the conversation as an error the user
+      // cannot act on. A revision bound to a displayed overview snapshot is not
+      // silently swapped: a moved revision there is a stale card, so the stale
+      // recovery notice is shown rather than mixed-revision findings.
+      if (version) {
+        const current = await fetchCurrentAnalysisVersion(app);
+        if (current && current !== version) {
+          if (pinnedSnapshotRef.current) {
+            setFindingsState({ status: "idle" });
+            setStaleNotice(true);
+            return;
+          }
+          version = current;
+          displayedVersionRef.current = current;
+        }
+      }
       const result = await app.callServerTool({
         name: "list_health_hypotheses",
         arguments: {
@@ -1962,6 +1984,16 @@ export function DnaImportApp({
         },
       });
       const envelope = envelopeOf(result);
+      // The revision moved between the confirmation above and this read, so the
+      // card is holding a revision the server no longer serves. That is the
+      // stale-card state -- findings from the old revision were never rendered --
+      // so the recovery notice ("Open your current findings") is shown, never an
+      // error panel the user cannot act on.
+      if (envelope?.error?.code === "ANALYSIS_VERSION_CHANGED") {
+        setFindingsState({ status: "idle" });
+        setStaleNotice(true);
+        return;
+      }
       if (result.isError || !envelope || !envelope.ok) {
         const consentBlocked = enterConsentRecovery(
           result,

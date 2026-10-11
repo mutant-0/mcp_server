@@ -1014,10 +1014,57 @@ describe("DNA import component", () => {
     const bridge = renderWith({ poll_analysis_status: statusResponse("ready") });
 
     await screen.findByText(/Analysis ready/i);
-    bridge.sendToolResult(makeSuccessResponse({ ui_rendered: true, mode: "overview" }));
+    // The bound result carries the revision the status reports, as the real
+    // display tool does: a card must never be pinned to a different revision
+    // than the account's current one.
+    bridge.sendToolResult(makeSuccessResponse({ ui_rendered: true, mode: "overview" }, "analysis_1"));
 
     await screen.findByText(/Alpha finding/i);
     expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
+  });
+
+  it("adopts the current revision when a status-pinned card's analysis moved", async () => {
+    // Only the status channel reported the revision: no findings were displayed
+    // from it, so a moved revision is refreshed rather than refused. Without the
+    // refresh the pinned read is refused as ANALYSIS_VERSION_CHANGED, which the
+    // host surfaces in the conversation as an error the user cannot act on.
+    const bridge = renderWith({
+      poll_analysis_status: (_args, call) =>
+        statusResponse("ready", {}, call === 1 ? "analysis_1" : "analysis_2"),
+      list_health_hypotheses: FINDINGS,
+    });
+
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+
+    await screen.findByText(/Alpha finding/i);
+    const read = bridge.callsTo("list_health_hypotheses")[0];
+    expect(read?.arguments.analysis_version).toBe("analysis_2");
+    // The recovered read is findings, never an error or a stale-card notice.
+    expect(screen.queryByText(/These results have changed/i)).toBeNull();
+    expect(screen.queryByText(/Something went wrong/i)).toBeNull();
+  });
+
+  it("offers the stale recovery notice when a bound card's analysis moved", async () => {
+    // The bound overview result is what the model displayed, so a moved revision
+    // must not be silently swapped for a different one. The card shows the
+    // recovery notice instead of sending a read the server must refuse.
+    const bridge = renderWith(
+      {
+        poll_analysis_status: (_args, call) =>
+          statusResponse("ready", {}, call === 1 ? "analysis_1" : "analysis_2"),
+      },
+      { mode: "overview" },
+    );
+
+    await screen.findByText(/Analysis ready/i);
+    bridge.sendToolResult(
+      makeSuccessResponse({ ui_rendered: true, mode: "overview" }, "analysis_1"),
+    );
+
+    await screen.findByText(/These results have changed/i);
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: /open your current findings/i })).toBeDefined();
   });
 
   it("shows hints from the bound overview snapshot without a second list read", async () => {
