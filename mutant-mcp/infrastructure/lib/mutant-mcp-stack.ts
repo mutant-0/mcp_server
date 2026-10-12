@@ -187,7 +187,7 @@ export class MutantMcpStack extends Stack {
         MUTANT_ONBOARDING_URL: props.onboardingUrl ?? "https://mutantgenomics.com/onboarding",
         MUTANT_CONSENT_URL: props.consentUrl ?? "https://mutantgenomics.com/consent",
         MUTANT_OPENAI_DOMAIN_VERIFICATION_TOKEN: props.openAiDomainVerificationToken ?? "",
-        MUTANT_REQUEST_TIMEOUT_MS: String(props.requestTimeoutMs ?? 20000),
+        MUTANT_REQUEST_TIMEOUT_MS: String(props.requestTimeoutMs ?? 25000),
         MUTANT_MAX_RESPONSE_BYTES: String(props.maxResponseBytes ?? 512000),
         MUTANT_SNP_CATALOG_MAX_BYTES: String(props.snpCatalogMaxBytes ?? 2000000),
         // Defaults below the 6 MiB synchronous lambda:InvokeFunction limit.

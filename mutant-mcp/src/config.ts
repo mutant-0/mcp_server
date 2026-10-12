@@ -33,7 +33,8 @@ const EnvSchema = z.object({
   // can review the current notice and record acceptance server-side. Must be an
   // https mutantgenomics.com URL; an invalid value is omitted from the envelope.
   MUTANT_CONSENT_URL: z.string().trim().default("https://mutantgenomics.com/consent"),
-  MUTANT_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
+  // Leave response/auth overhead below the HTTP API and Lambda deadlines.
+  MUTANT_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(25000),
   MUTANT_MAX_RESPONSE_BYTES: z.coerce.number().int().positive().default(512000),
   // The SNP catalog is application data for the DNA import component, not model
   // context, so it is allowed a much larger response than the default cap.
