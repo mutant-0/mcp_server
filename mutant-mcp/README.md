@@ -374,12 +374,13 @@ Required GitHub **secrets**: `AWS_ROLE_ARN`, `MUTANT_SERVICE_LAMBDA_ARN`,
 Required GitHub **variables**: `MUTANT_MCP_RESOURCE_URI`, `MUTANT_CORS_ORIGINS`,
 `MUTANT_PLAN_INFO_URL`, `MUTANT_REQUEST_TIMEOUT_MS`, `MUTANT_MAX_RESPONSE_BYTES`
 (optional: `MUTANT_SNP_CATALOG_MAX_BYTES`, `MUTANT_MAX_REQUEST_BYTES`).
-`MUTANT_OAUTH_SCOPE` and `MUTANT_OAUTH_SCOPE_DNA_IMPORT` are optional: leave them
-unset (or blank) to derive `<MUTANT_MCP_RESOURCE_URI>/analysis.read` and
-`<MUTANT_MCP_RESOURCE_URI>/dna.import`; if either exists in the environment's
-variables, it must contain the full scope (e.g.
-`https://dev-api.mutantbiotech.com/mcp/analysis.read`) or it will win over the
-derived default.
+The GitHub deployment leaves `MUTANT_OAUTH_SCOPE` and
+`MUTANT_OAUTH_SCOPE_DNA_IMPORT` blank so the server derives
+`<MUTANT_MCP_RESOURCE_URI>/analysis.read` and
+`<MUTANT_MCP_RESOURCE_URI>/dna.import`. Repository-level scope variables do not
+override this deployment behavior. The dev deployment uses the dedicated public
+OAuth client `2hllbsed5pthtr8tjmlhu6i8tp`; other environments use the
+`MUTANT_OAUTH_CLIENT_ID` secret.
 
 ## Documentation
 

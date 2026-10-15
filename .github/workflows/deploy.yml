@@ -126,9 +126,14 @@ jobs:
           MUTANT_SERVICE_LAMBDA_ARN: ${{ secrets.MUTANT_SERVICE_LAMBDA_ARN }}
           MUTANT_OAUTH_ISSUER: ${{ secrets.MUTANT_OAUTH_ISSUER }}
           MUTANT_OAUTH_AUDIENCE: ${{ secrets.MUTANT_OAUTH_AUDIENCE }}
-          MUTANT_OAUTH_CLIENT_ID: ${{ secrets.MUTANT_OAUTH_CLIENT_ID }}
-          MUTANT_OAUTH_SCOPE: ${{ vars.MUTANT_OAUTH_SCOPE }}
-          MUTANT_OAUTH_SCOPE_DNA_IMPORT: ${{ vars.MUTANT_OAUTH_SCOPE_DNA_IMPORT }}
+          # The dev OAuth client has only dev resource scopes. Its public client
+          # ID is pinned here so a repository-level secret cannot select prod.
+          MUTANT_OAUTH_CLIENT_ID: ${{ steps.env.outputs.target == 'dev' && '2hllbsed5pthtr8tjmlhu6i8tp' || secrets.MUTANT_OAUTH_CLIENT_ID }}
+          # Cognito resource-binding requires each custom scope to belong to the
+          # requested resource. Let the server derive both from the resource URI
+          # instead of inheriting repository-level scope variables.
+          MUTANT_OAUTH_SCOPE: ""
+          MUTANT_OAUTH_SCOPE_DNA_IMPORT: ""
           MUTANT_MCP_RESOURCE_URI: ${{ vars.MUTANT_MCP_RESOURCE_URI }}
           MUTANT_CORS_ORIGINS: ${{ vars.MUTANT_CORS_ORIGINS }}
           MUTANT_UPGRADE_URL: ${{ vars.MUTANT_UPGRADE_URL }}
