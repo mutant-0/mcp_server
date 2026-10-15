@@ -160,10 +160,10 @@ export function makeStatusData(overrides: Record<string, unknown> = {}): Record<
   };
 }
 
-/** The 2.6 interpretation contract, matching `report-generator/mcp/interpretation.py`. */
+/** The 2.7 interpretation contract, matching `report-generator/mcp/interpretation.py`. */
 export function makeInterpretation(): Record<string, unknown> {
   return {
-    version: "2.6",
+    version: "2.7",
     purpose:
       "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
     response_rules: [
@@ -192,6 +192,8 @@ export function makeInterpretation(): Record<string, unknown> {
       pattern_convergence: "How strongly independent patterns agree.",
       module_support: "Support contributed by score-eligible variants through modules.",
       pattern_support: "Additional retained support from a defined combination of variants.",
+      evo2_adjustment:
+        "Evo 2 adjusts existing SNP weights using DNA sequence context. A sequence-context weight adjustment, not a separate evidence source and not a disease-risk measure.",
     },
     evidence_boundaries: {
       genetics_is_not_diagnosis: true,

@@ -163,7 +163,7 @@ export const analysisStatusDataSchema = z.looseObject({
 });
 
 const interpretationSchema = z.looseObject({
-  version: z.literal("2.6"),
+  version: z.literal("2.7"),
   purpose: z.string(),
   response_rules: z.array(z.string()),
   evidence_explanation_rules: z.looseObject({
@@ -189,6 +189,12 @@ const interpretationSchema = z.looseObject({
     pattern_convergence: z.string(),
     module_support: z.string(),
     pattern_support: z.string(),
+    evo2_adjustment: z
+      .string()
+      .optional()
+      .describe(
+        "Evo 2 adjusts existing SNP weights using DNA sequence context. A sequence-context weight adjustment, not a separate evidence source and not a disease-risk measure; never translate its multiplier into a risk percentage.",
+      ),
   }),
   evidence_boundaries: z.record(z.string(), z.literal(true)),
   health_context_usage: z.looseObject({
@@ -206,6 +212,33 @@ const interpretationSchema = z.looseObject({
     })
     .describe("The evidence units Mutant explanations are built from, in presentation order."),
 });
+
+/**
+ * Saved Evo 2 provenance. Report-specific and stored in the analysis, never
+ * inferred from the current overlay file. Present only when the saved result
+ * carries it, so a report created before Evo 2 provenance existed projects
+ * nothing. `multiplier` is a weight factor, never a disease-risk percentage.
+ */
+export const evo2AdjustmentSchema = z
+  .looseObject({
+    applied: z.boolean().optional(),
+    affected_score: z
+      .boolean()
+      .optional()
+      .describe(
+        "True only when the adjustment reached this hypothesis's displayed score. An unmatched storm or non-contributing marker never sets it.",
+      ),
+    scope: z
+      .string()
+      .optional()
+      .describe("Machine-readable scope label; 'sequence_context_weight_adjustment'."),
+    notice: z.string().optional(),
+    base_weight: z.number().optional(),
+    multiplier: z.number().optional(),
+    adjusted_weight: z.number().optional(),
+    adjusted_variant_ids: z.array(z.string()).optional(),
+  })
+  .describe("Evo 2 sequence-context adjustment to existing SNP weights, as saved in the analysis.");
 
 export const geneticConfidenceSchema = z
   .looseObject({
@@ -368,6 +401,11 @@ export const explainHypothesisDataSchema = z.looseObject({
         ),
       convergence: z.string().nullable(),
     }),
+    evo2: evo2AdjustmentSchema
+      .optional()
+      .describe(
+        "Saved Evo 2 provenance for this hypothesis. Present only when the analysis recorded it; affected_score is true only when the adjustment reached the displayed score.",
+      ),
   }),
   bottom_line: z.string().nullable().optional(),
   evidence_shape: z
@@ -395,6 +433,12 @@ export const explainHypothesisDataSchema = z.looseObject({
     bottom_line: z.string().optional(),
     why_ranked: z.string(),
     interpretation_boundary: z.string().optional(),
+    evo2_note: z
+      .string()
+      .optional()
+      .describe(
+        "Present only when the saved result says the Evo 2 adjustment reached the displayed score; say 'this score includes Evo 2 weighting' briefly, never a risk percentage.",
+      ),
     top_contributing_patterns: z.array(z.record(z.string(), z.unknown())),
   }),
   score_breakdown: z.looseObject({
@@ -491,6 +535,11 @@ const variantEvidenceSchema = z.looseObject({
       retained_contribution: z.number().nullable(),
     })
     .optional(),
+  evo2: evo2AdjustmentSchema
+    .optional()
+    .describe(
+      "Saved Evo 2 provenance for this marker. Present only when the analysis recorded an adjustment; a called non-risk or missing marker never carries one.",
+    ),
   pattern_memberships: z.array(patternMembershipSchema),
 });
 
@@ -555,6 +604,11 @@ const patternEvidenceSchema = z.looseObject({
     .nullable()
     .optional()
     .describe("Genetics-only sentence stating the one-of-N rule and the two coverage scopes; never claims full marker coverage or convergence."),
+  evo2: evo2AdjustmentSchema
+    .optional()
+    .describe(
+      "Saved Evo 2 provenance, present only when a contributing participant was adjusted. An unmatched or non-contributing pattern carries none.",
+    ),
 });
 
 const moduleEvidenceSchema = z.looseObject({
@@ -570,6 +624,11 @@ const moduleEvidenceSchema = z.looseObject({
   module_scoring_variant_count: z.number().int().optional(),
   summary: z.string().nullable().optional(),
   caveats: z.array(z.string()).optional(),
+  evo2: evo2AdjustmentSchema
+    .optional()
+    .describe(
+      "Saved Evo 2 provenance, present only when a contributing driver in this module was adjusted.",
+    ),
   scoring_drivers: z.array(z.record(z.string(), z.unknown())).optional(),
   contextual_markers: z.array(z.record(z.string(), z.unknown())).optional(),
 });

@@ -14,7 +14,11 @@ export const getSupportingEvidenceTool: MutantToolDefinition = {
     "concise module breakdown is already in explain_health_hypothesis); pass include_context true " +
     "only when contextual, non-contributing markers are also needed. Use kind \"tests\" for " +
     'detailed assay guidance ("show me every relevant test" or "what should I discuss with my ' +
-    'clinician").',
+    'clinician"). Detailed variant, module, and pattern rows may carry an evo2 field when the ' +
+    "saved result adjusted that evidence: Evo 2 adjusts existing SNP weights using DNA sequence " +
+    "context. Report it only as a sequence-context weighting of an existing SNP weight, never as " +
+    "a separate evidence source or a risk percentage; an unmatched pattern or non-contributing " +
+    "marker carries none.",
   scope: "analysis.read",
   inputSchema: getSupportingEvidenceInputSchema,
   outputSchema: supportingEvidenceOutputSchema,

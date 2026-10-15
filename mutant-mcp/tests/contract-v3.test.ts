@@ -62,7 +62,7 @@ const MINIMAL_ARGS: Record<ToolName, Record<string, unknown>> = {
 /** The `get_analysis_context` payload: the interpretation contract plus previews. */
 function interpretation(): Record<string, unknown> {
   return {
-    version: "2.6",
+    version: "2.7",
     purpose:
       "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
     response_rules: [
@@ -92,6 +92,8 @@ function interpretation(): Record<string, unknown> {
       module_support: "Genetic support from the underlying biological modules.",
       pattern_support:
         "Additional retained support from cross-module patterns; comparable to module_support on the same 0-100 scale.",
+      evo2_adjustment:
+        "Evo 2 adjusts existing SNP weights using DNA sequence context. A sequence-context weight adjustment, not a separate evidence source and not a disease-risk measure.",
     },
     evidence_boundaries: {
       genetics_is_not_diagnosis: true,
@@ -715,7 +717,7 @@ describe("contract v3.0 acceptance", () => {
     const contract = (envelopeOf(result).data as { interpretation: Record<string, unknown> })
       .interpretation;
 
-    expect(contract.version).toBe("2.6");
+    expect(contract.version).toBe("2.7");
     const rules = contract.evidence_explanation_rules as {
       organizing_level: string;
       rules: string[];
@@ -730,6 +732,7 @@ describe("contract v3.0 acceptance", () => {
     expect(semantics.assessment).toBeTruthy();
     expect(semantics.marker_coverage).toBeTruthy();
     expect(semantics.assessability).toBeTruthy();
+    expect(semantics.evo2_adjustment).toContain("Evo 2 adjusts existing SNP weights");
 
     const model = contract.evidence_model as {
       primary_units: string[];

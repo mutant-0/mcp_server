@@ -543,12 +543,12 @@ three hypotheses, and next-question prompts. It is not a listing tool.
 ```json
 {
   "interpretation": {
-    "version": "2.6",
+    "version": "2.7",
     "purpose": "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
     "response_rules": ["… (1-6)"],
     "evidence_explanation_rules": {
       "organizing_level": "modules_then_patterns_then_variants",
-      "rules": ["… (1-15)"],
+      "rules": ["… (1-16)"],
       "module_first_instruction": "When explaining a hypothesis, do not begin with a gene or SNP. First state whether support is multi-module, single-module, pattern-led, or concentrated in one locus. Explain the contributing modules and retained patterns next. Mention individual genes and variants only after their actual scoring route is clear. If one driver dominates, disclose that concentration prominently."
     },
     "score_semantics": {
@@ -562,7 +562,8 @@ three hypotheses, and next-question prompts. It is not a listing tool.
       "assessability": "…",
       "pattern_convergence": "…",
       "module_support": "Genetic support from the underlying biological modules.",
-      "pattern_support": "Additional retained support from cross-module patterns, comparable to module_support on the same 0-100 scale."
+      "pattern_support": "Additional retained support from cross-module patterns, comparable to module_support on the same 0-100 scale.",
+      "evo2_adjustment": "Evo 2 adjusts existing SNP weights using DNA sequence context. A sequence-context weight adjustment, not a separate evidence source and not a disease-risk measure."
     },
     "evidence_boundaries": {
       "genetics_is_not_diagnosis": true,
@@ -612,14 +613,14 @@ three hypotheses, and next-question prompts. It is not a listing tool.
 }
 ```
 
-- `interpretation` is server-owned and versioned (`"2.6"`). It is global product
+- `interpretation` is server-owned and versioned (`"2.7"`). It is global product
   behavior, never per-hypothesis catalog prose and never LLM-generated.
   `response_rules` is 1-6 unique strings; `limitations` is 0-4 unique strings;
   the boundary flags are literal `true`; `score_semantics` has exactly the
   published keys (`priority_score`, `genetic_support`, `assessment`,
   `genetic_evidence`, `genetic_confidence`, `coverage_confidence`,
   `marker_coverage`, `assessability`, `pattern_convergence`, `module_support`,
-  `pattern_support`);
+  `pattern_support`, `evo2_adjustment`);
   `presentation_order` is the fixed order above; `evidence_model` names the
   evidence units explanations are built from.
 - `evidence_explanation_rules` is the module-first contract: `organizing_level`
@@ -807,6 +808,7 @@ scoring drivers.
     "bottom_line": "…",
     "why_ranked": "It ranked #1 on priority score, which reflects strong genetic support, module support and retained pattern support; priority orders findings and is not a disease probability.",
     "interpretation_boundary": "…",
+    "evo2_note": "This score includes Evo 2 weighting. Evo 2 adjusts existing SNP weights using DNA sequence context; it is a sequence-context adjustment to those weights, not a separate evidence source and not a disease-risk measure.",
     "top_contributing_patterns": [
       {
         "id": "P1",
@@ -929,6 +931,11 @@ scoring drivers.
   without descending into `explanation`.
 - `explanation.bottom_line` and `interpretation_boundary` prefer curated
   `presentation` copy, then the catalog, and are omitted when no source exists.
+- `explanation.evo2_note` is present only when the saved result says the Evo 2
+  adjustment reached this hypothesis's displayed score (`hypothesis.evo2.
+  affected_score`). Say briefly that the score includes Evo 2 weighting; never
+  present Evo 2 as a separate evidence source or turn its multiplier into a risk
+  percentage. See [Evo 2 provenance](#evo-2-provenance).
 - `explanation.top_contributing_patterns` lists at most three matched or
   provisional patterns, strongest impact first. Each row also carries the
   explicit pattern fields (`required_group_coverage`, `marker_call_coverage`,
@@ -1086,7 +1093,8 @@ explicit `source_state: "not_provided"` signal.
   zero-weight module variant can still be a retained-pattern participant
   without either role being flattened. A marker in several patterns appears
   once, preferring its called genotype/status. Fields the stored data cannot
-  support are omitted rather than invented.
+  support are omitted rather than invented. A row may also carry `evo2` (see
+  [Evo 2 provenance](#evo-2-provenance)).
 
 - `modules` → the expanded module scoring trace (the concise module breakdown is
   already in `explain_health_hypothesis`):
@@ -1180,6 +1188,32 @@ Output:
 - The v1 top-level module-support totals
   (`combined_module_support`, `module_base_support`, `module_supporting_lift`)
   are not part of `data`; the widget derives what it needs from `modules`.
+
+### Evo 2 provenance
+
+The saved analysis records whether the Evo 2 sequence-context adjustment reached
+the displayed score. Evo 2 adjusts existing SNP weights using DNA sequence
+context; it is a sequence-context adjustment to those weights, not a separate
+evidence source and not a disease-risk measure. The MCP layer only projects what
+the analysis stored — it never reads the current overlay file, so a report
+created before this provenance existed makes no Evo 2 claim.
+
+- `explain_health_hypothesis` → `hypothesis.evo2` (`{ applied, affected_score,
+  scope }`), plus `explanation.evo2_note`, which is present only when
+  `affected_score` is true. An answer may then say briefly that the score
+  includes Evo 2 weighting.
+- `get_supporting_evidence` → `variants`, `patterns`, and `modules` detail rows
+  may carry `evo2`. Pattern/module claims come only from saved contributing
+  participants; a contextual or non-contributing marker carries none, so an
+  unmatched storm stays unmatched.
+- `get_genetic_context` → marker rows may carry `evo2`; a missing or unscored
+  marker carries none.
+- `get_analysis_context` → `score_semantics.evo2_adjustment` is the shared rule.
+
+`evo2` fields: `applied`, `affected_score`, `scope`, `notice`, `base_weight`,
+`multiplier`, `adjusted_weight`, `adjusted_variant_ids` (pattern rows). A
+multiplier is a weight factor; never translate it into a disease-risk
+percentage.
 
 ## Snapshot consistency
 
@@ -1792,6 +1826,12 @@ scale, so they are directly comparable. `pattern_support` is the engine's
 (`converging_pattern_adjustment`) is priority-only and must **never** be summed
 into either value.
 
+Evo 2 is not a separate support channel: it adjusts existing SNP weights using
+DNA sequence context (`score_semantics.evo2_adjustment`). Report it only as a
+sequence-context weighting of a weight already in the score, and only when the
+saved result says it was applied. Never translate its multiplier into a
+disease-risk percentage. See [Evo 2 provenance](#evo-2-provenance).
+
 ### `SupportArchitecture`
 
 ```ts
@@ -1991,9 +2031,10 @@ purpose, response rules, score semantics, literal evidence boundaries, and globa
 limitations. It states that scores are model support, not diagnosis; that genetic
 support does not establish current status; that missing calls are not reassuring;
 that catalog clinical correlation is guidance, not evidence from the user's
-records; and that different `analysis_version` values must not be silently
-combined. Health-context relevance is performed by ChatGPT
-(`performed_by: "chatgpt"`) and is never sent to Mutant.
+records; that Evo 2 is a sequence-context adjustment to existing SNP weights, not
+a separate evidence source or a risk measure; and that different
+`analysis_version` values must not be silently combined. Health-context relevance
+is performed by ChatGPT (`performed_by: "chatgpt"`) and is never sent to Mutant.
 
 The static MCP server instructions route tools; they do not replace
 `interpretation`. The contract supplies the analysis-specific interpretation and
@@ -2013,13 +2054,18 @@ The contract is covered by:
   `resolve_analysis_followups` (bound actions, stale pin, locked/unknown id,
   Free/Full `plan_notice` visibility and gating, argument validation, and that the
   card carries no evidence or history), the context
-  interpretation-contract shape (version `2.6` incl. `evidence_explanation_rules`
-  and `evidence_model`), access-summary counts and the neutral Free scope message,
+  interpretation-contract shape (version `2.7` incl. `evidence_explanation_rules`,
+  `evo2_adjustment`, and `evidence_model`), access-summary counts and the neutral
+  Free scope message,
   the notice copy and its optional validated link, locked-hypothesis non-leakage, `EVIDENCE_NOT_AVAILABLE`, `kind: "modules"` with
   and without `include_context`, dual module/pattern roles on `kind: "variants"`,
   the legacy `unknown` fallback, genetic-context rsID dedupe with
   `pattern_memberships`, the renamed plan/scope codes, and that every lifecycle
-  state is an `ok: false` envelope rather than an exception.
+  state is an `ok: false` envelope rather than an exception. Evo 2 provenance:
+  an adjusted result exposes `evo2` on module, variant, and pattern details and
+  in `score_interpretation`, an unscored variant makes no claim, an unmatched
+  storm stays unmatched, and a report created before the provenance existed
+  projects nothing (never inferred from the current overlay).
 - `report-generator/test/test_scoring_v3_trace.py` — retained module/pattern
   reconciliation, context-only variants excluded from module drivers while still
   allowed as retained-pattern participants, duplicate pattern memberships not

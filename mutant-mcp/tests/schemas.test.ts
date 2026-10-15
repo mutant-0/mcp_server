@@ -210,6 +210,84 @@ describe("per-tool output schemas (contract 3.0.0)", () => {
     });
     expect(supportingEvidenceOutputSchema.safeParse(envelope).success).toBe(false);
   });
+
+  it("accepts saved Evo 2 provenance on variant, pattern, and module rows", () => {
+    const evo2 = {
+      applied: true,
+      affected_score: true,
+      scope: "sequence_context_weight_adjustment",
+      base_weight: 1.0,
+      multiplier: 1.31,
+      adjusted_weight: 1.31,
+    };
+    const variants = makeSuccessResponse({
+      kind: "variants",
+      items: [
+        {
+          rsid: "rs4680",
+          call_state: "called",
+          contribution_status: "contributes",
+          pattern_memberships: [],
+          evo2,
+        },
+      ],
+    });
+    expect(supportingEvidenceOutputSchema.safeParse(variants).success).toBe(true);
+
+    const patterns = makeSuccessResponse({
+      kind: "patterns",
+      items: [
+        {
+          id: "PAT_A",
+          name: "Pattern A",
+          state: "matched",
+          contribution_status: "contributes",
+          evo2: { applied: true, adjusted_variant_ids: ["rs4680"] },
+        },
+      ],
+    });
+    expect(supportingEvidenceOutputSchema.safeParse(patterns).success).toBe(true);
+
+    const modules = makeSuccessResponse({
+      kind: "modules",
+      items: [
+        {
+          module_id: "histamine",
+          module_name: "Histamine",
+          scoring_status: "active",
+          retained_support: 12.0,
+          evo2: { applied: true },
+          scoring_drivers: [{ rsid: "rs4680", module_contribution_status: "contributes", evo2 }],
+        },
+      ],
+    });
+    expect(supportingEvidenceOutputSchema.safeParse(modules).success).toBe(true);
+  });
+
+  it("accepts a report with no Evo 2 provenance and rejects a malformed evo2 block", () => {
+    const absent = makeSuccessResponse({
+      kind: "variants",
+      items: [
+        { rsid: "rs4680", call_state: "called", contribution_status: "excluded", pattern_memberships: [] },
+      ],
+    });
+    expect(supportingEvidenceOutputSchema.safeParse(absent).success).toBe(true);
+
+    const malformed = makeSuccessResponse({
+      kind: "variants",
+      items: [
+        {
+          rsid: "rs4680",
+          call_state: "called",
+          contribution_status: "contributes",
+          pattern_memberships: [],
+          // multiplier must be numeric, not prose.
+          evo2: { multiplier: "31% higher risk" },
+        },
+      ],
+    });
+    expect(supportingEvidenceOutputSchema.safeParse(malformed).success).toBe(false);
+  });
 });
 
 describe("genetic confidence object (contract 3.0.0)", () => {
@@ -283,6 +361,30 @@ describe("explain_health_hypothesis output envelope", () => {
     });
     expect(interpretation.assessability).toBe("assessed");
     expect(explainHypothesisOutputSchema.safeParse(makeSuccessResponse(data)).success).toBe(true);
+  });
+
+  it("validates the hypothesis evo2 block and the evo2_note on the explanation", () => {
+    const withEvo2 = makeDetailsData();
+    (withEvo2.hypothesis as Record<string, unknown>).evo2 = {
+      applied: true,
+      affected_score: true,
+      scope: "sequence_context_weight_adjustment",
+    };
+    (withEvo2.explanation as Record<string, unknown>).evo2_note =
+      "This score includes Evo 2 weighting, which adjusts existing SNP weights using DNA sequence context.";
+    expect(explainHypothesisOutputSchema.safeParse(makeSuccessResponse(withEvo2)).success).toBe(true);
+
+    // A pre-Evo-2 report: no hypothesis.evo2 and no explanation.evo2_note.
+    const withoutEvo2 = makeDetailsData();
+    expect(explainHypothesisOutputSchema.safeParse(makeSuccessResponse(withoutEvo2)).success).toBe(
+      true,
+    );
+
+    const malformed = makeDetailsData();
+    (malformed.hypothesis as Record<string, unknown>).evo2 = { affected_score: "yes" };
+    expect(explainHypothesisOutputSchema.safeParse(makeSuccessResponse(malformed)).success).toBe(
+      false,
+    );
   });
 });
 

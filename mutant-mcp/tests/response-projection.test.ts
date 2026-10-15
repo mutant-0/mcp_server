@@ -147,6 +147,79 @@ describe("response projection", () => {
     expect(membership.pattern_id).toBe("PAT_A");
   });
 
+  it("keeps declared Evo 2 provenance and drops an undeclared evo2 sibling", async () => {
+    const { client } = await connect(() =>
+      makeSuccessResponse({
+        kind: "variants",
+        items: [
+          {
+            rsid: "rs4680",
+            call_state: "called",
+            contribution_status: "contributes",
+            pattern_memberships: [],
+            evo2: {
+              applied: true,
+              affected_score: true,
+              scope: "sequence_context_weight_adjustment",
+              base_weight: 1.0,
+              multiplier: 1.31,
+              adjusted_weight: 1.31,
+              internal_overlay_path: SENTINEL,
+            },
+          },
+        ],
+        next_cursor: null,
+      }),
+    );
+    const result = await client.callTool({
+      name: "get_supporting_evidence",
+      arguments: { hypothesis_id: "HYP_A", kind: "variants" },
+    });
+    const out = dataOf(result);
+    const item = (out.items as Array<Record<string, unknown>>)[0]!;
+    const evo2 = item.evo2 as Record<string, unknown>;
+
+    // The declared provenance survives the allowlist; the undeclared field does not.
+    expect(evo2.multiplier).toBe(1.31);
+    expect(evo2.base_weight).toBe(1.0);
+    expect(evo2.adjusted_weight).toBe(1.31);
+    expect(evo2.affected_score).toBe(true);
+    expect(JSON.stringify(out)).not.toContain(SENTINEL);
+  });
+
+  it("keeps declared Evo 2 provenance on a pattern row", async () => {
+    const { client } = await connect(() =>
+      makeSuccessResponse({
+        kind: "patterns",
+        items: [
+          {
+            id: "PAT_A",
+            name: "Pattern A",
+            state: "matched",
+            contribution_status: "contributes",
+            evo2: {
+              applied: true,
+              adjusted_variant_ids: ["rs4680"],
+              internal_note: SENTINEL,
+            },
+          },
+        ],
+        next_cursor: null,
+      }),
+    );
+    const result = await client.callTool({
+      name: "get_supporting_evidence",
+      arguments: { hypothesis_id: "HYP_A", kind: "patterns" },
+    });
+    const out = dataOf(result);
+    const item = (out.items as Array<Record<string, unknown>>)[0]!;
+    const evo2 = item.evo2 as Record<string, unknown>;
+
+    expect(evo2.applied).toBe(true);
+    expect(evo2.adjusted_variant_ids).toEqual(["rs4680"]);
+    expect(JSON.stringify(out)).not.toContain(SENTINEL);
+  });
+
   it("keeps the catalog's declared application data and drops unknown provenance", async () => {
     const { client } = await connect(() =>
       makeSuccessResponse({

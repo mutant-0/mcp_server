@@ -339,7 +339,7 @@ function mockContext(): Record<string, unknown> {
   const hypotheses = mockHypotheses();
   return {
     interpretation: {
-      version: "2.6",
+      version: "2.7",
       purpose:
         "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
       response_rules: [
@@ -371,6 +371,8 @@ function mockContext(): Record<string, unknown> {
           "Support contributed by score-eligible variants aggregated through biological modules and hypothesis-specific module weights.",
         pattern_support:
           "Additional retained support from a defined combination of modules or variants. Pattern participation does not imply module-score contribution.",
+        evo2_adjustment:
+          "Evo 2 adjusts existing SNP weights using DNA sequence context. A sequence-context weight adjustment, not a separate evidence source and not a disease-risk measure.",
       },
       evidence_boundaries: {
         genetics_is_not_diagnosis: true,
