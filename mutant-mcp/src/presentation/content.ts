@@ -237,9 +237,11 @@ function searchMissContent(scope: JsonObject, outcome: string): string {
 }
 
 /**
- * Concise, decision-relevant explanation (~150-220 words) in three sections:
- * What it means, Why it appeared, What could clarify it. Everything else the
- * explanation could say (module list, retained patterns, key genes, converging
+ * Concise, decision-relevant explanation in three core sections:
+ * What it means, Why it appeared, What could clarify it. A brief Evo 2 section
+ * appears when the saved result says its weighting reached the displayed score.
+ * Everything else the explanation could say (module list, retained patterns,
+ * key genes, converging
  * patterns, stronger/weakening prose, the guardrail list, exact scores) stays in
  * `structuredContent` and is reachable through `get_supporting_evidence`.
  */
@@ -268,6 +270,21 @@ function detailsContent(data: JsonObject): string {
   const whyRanked = explanation ? asText(explanation.why_ranked) : null;
   if (whyRanked) whyParts.push(clampText(whyRanked, 240));
   if (whyParts.length > 0) sections.push(`Why it appeared: ${whyParts.join(" ")}`);
+
+  // Saved provenance gates this explanation; old and unaffected reports must
+  // not acquire an Evo 2 claim from the current model or overlay.
+  const evo2 = hypothesis ? asRecord(hypothesis.evo2) : null;
+  const evo2Note = explanation ? asText(explanation.evo2_note) : null;
+  if (evo2?.affected_score === true && evo2Note) {
+    sections.push(
+      "How Evo 2 was used: Evo 2 is a research AI model trained to recognize patterns in DNA sequences. " +
+        "For selected SNPs (single-letter DNA variants), Mutant uses precomputed Evo 2 estimates " +
+        "of sequence context to adjust the variants' existing weights in its internal score. " +
+        "The saved analysis records that this adjustment affected this finding's displayed score. " +
+        "This is a computational weighting step, not a new biological observation or an estimate " +
+        "of disease risk.",
+    );
+  }
 
   // What could clarify it: the interpretation boundary, any material data gap,
   // and at most two primary checks. Uncertainty is never dropped for brevity.

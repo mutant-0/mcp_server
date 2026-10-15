@@ -933,9 +933,13 @@ scoring drivers.
   `presentation` copy, then the catalog, and are omitted when no source exists.
 - `explanation.evo2_note` is present only when the saved result says the Evo 2
   adjustment reached this hypothesis's displayed score (`hypothesis.evo2.
-  affected_score`). Say briefly that the score includes Evo 2 weighting; never
-  present Evo 2 as a separate evidence source or turn its multiplier into a risk
-  percentage. See [Evo 2 provenance](#evo-2-provenance).
+  affected_score`). The model-facing Explain summary then defines Evo 2 in plain
+  language as a research AI model trained on DNA sequences and explains that
+  Mutant uses precomputed sequence-context estimates to adjust existing weights
+  for selected SNPs. It makes no Evo 2 claim for an old or unaffected report.
+  Never present Evo 2 as a separate evidence source or turn its multiplier into
+  a risk percentage. See [Evo 2 provenance](#evo-2-provenance) and the
+  [Evo 2 model publication](https://www.nature.com/articles/s41586-026-10176-5).
 - `explanation.top_contributing_patterns` lists at most three matched or
   provisional patterns, strongest impact first. Each row also carries the
   explicit pattern fields (`required_group_coverage`, `marker_call_coverage`,

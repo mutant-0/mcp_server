@@ -817,6 +817,44 @@ describe("contract v3.0 acceptance", () => {
     expect(text).not.toMatch(/^\s*[{[]/);
   });
 
+  it("defines Evo 2 for an adjusted finding without claiming it for unaffected reports", async () => {
+    const adjusted = dataFor("explain_health_hypothesis") as Record<string, any>;
+    adjusted.hypothesis.evo2 = {
+      applied: true,
+      affected_score: true,
+      scope: "sequence_context_weight_adjustment",
+    };
+    adjusted.explanation.evo2_note =
+      "This score includes Evo 2 weighting, not a separate evidence source or disease-risk measure.";
+    const { client } = await connect((operation) =>
+      makeSuccessResponse(
+        operation === "explain_health_hypothesis" ? adjusted : dataFor(operation),
+      ),
+    );
+    const result = await client.callTool({
+      name: "explain_health_hypothesis",
+      arguments: { hypothesis_id: "HYP_A" },
+    });
+    const text = textOf(result);
+    expect(text).toContain("How Evo 2 was used:");
+    expect(text).toContain("research AI model trained to recognize patterns in DNA sequences");
+    expect(text).toContain("precomputed Evo 2 estimates of sequence context");
+    expect(text).toContain("not a new biological observation or an estimate of disease risk");
+
+    const unaffected = structuredClone(adjusted);
+    unaffected.hypothesis.evo2.affected_score = false;
+    const { client: unaffectedClient } = await connect((operation) =>
+      makeSuccessResponse(
+        operation === "explain_health_hypothesis" ? unaffected : dataFor(operation),
+      ),
+    );
+    const unaffectedResult = await unaffectedClient.callTool({
+      name: "explain_health_hypothesis",
+      arguments: { hypothesis_id: "HYP_A" },
+    });
+    expect(textOf(unaffectedResult)).not.toContain("How Evo 2 was used:");
+  });
+
   it("derives content and structured fields from one canonical assessment", async () => {
     const { client } = await connect();
     const result = await client.callTool({

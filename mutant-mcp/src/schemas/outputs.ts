@@ -437,7 +437,7 @@ export const explainHypothesisDataSchema = z.looseObject({
       .string()
       .optional()
       .describe(
-        "Present only when the saved result says the Evo 2 adjustment reached the displayed score; say 'this score includes Evo 2 weighting' briefly, never a risk percentage.",
+        "Present only when the saved result says the Evo 2 adjustment reached the displayed score. Explain in plain language that Evo 2 is a research AI model of DNA sequence patterns and Mutant uses precomputed estimates to adjust existing SNP weights; never a separate observation or disease-risk percentage.",
       ),
     top_contributing_patterns: z.array(z.record(z.string(), z.unknown())),
   }),
