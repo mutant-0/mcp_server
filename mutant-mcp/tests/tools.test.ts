@@ -50,6 +50,18 @@ describe("tool definitions", () => {
     expect(details?.description).toContain("authorized context source");
     expect(details?.description).toContain("catalog cofactors, confounders, cautions");
     expect(details?.description).toContain("disease probability");
+    expect(details?.description).toContain("hypothesis's declared mechanism");
+    expect(details?.description).toContain("marker coverage and evidence quality");
+    expect(details?.description).toContain("order investigations");
+    expect(details?.description).toContain("exact ClinGen condition curation");
+    expect(details?.description).toContain("variant and inheritance fit");
+    expect(details?.description).toContain("related condition curation is context");
+    expect(details?.description).toContain("functional assay");
+    expect(details?.description).toContain("functional claims can have strong evidence without ClinGen curation");
+    expect(details?.description).toContain("provisional storm is a partial rule match");
+    expect(details?.description).toContain("missing markers as unmeasured");
+    expect(details?.description).toContain("modeled sequence-context estimates");
+    expect(details?.description).toContain("independent proof");
     expect(details?.description).toContain("get_supporting_evidence");
 
     const evidence = TOOL_DEFINITIONS.find((tool) => tool.name === "get_supporting_evidence");

@@ -17,20 +17,35 @@ export const explainHealthHypothesisTool: MutantToolDefinition = {
     "two primary confirmation checks). Explain the support architecture before individual genes " +
     "or variants. Pattern-led support describes how support was calculated, not that it is " +
     "broadly distributed; use the dominant driver, its share, and participating-variant counts " +
-    "rather than implying breadth. Use get_supporting_evidence when the user asks for detailed " +
+    "rather than implying breadth. Support is specific to this hypothesis's declared mechanism " +
+    "and qualifying relevant markers, not every variant in a linked module. Genetic confidence " +
+    "reflects marker coverage and evidence quality, independently of risk direction. A provisional " +
+    "storm is a partial rule match, not a complete pattern or independent proof; disclose missing " +
+    "markers as unmeasured, never as non-risk or supporting calls, and do not count a shared marker " +
+    "twice. Use get_supporting_evidence when the user asks for detailed " +
     "modules, patterns, variants, sources, tests, or exact scores. " +
     "Personal history, symptoms, laboratory results, medications, and prior reactions may be " +
     "attributed to the user only when the user or an authorized context source supplied them; " +
     "catalog cofactors, confounders, cautions, and guardrails are general guidance and must " +
     "never be restated as the user's history or experience. Keep genetic findings distinct " +
-    "from symptoms or test results the user has not reported, and use priority_score only for " +
-    "ordering and genetic_support only for strength within the analyzed evidence; neither is a " +
-    "disease probability. For an Explain request, when the saved result says Evo 2 weighting " +
+    "from symptoms or test results the user has not reported. Use priority_score to order " +
+    "investigations and genetic_support for hypothesis-specific strength within the analyzed " +
+    "evidence; neither estimates disease probability. An exact ClinGen condition curation can " +
+    "strengthen the evidence assessment only when the variant and inheritance fit this claim; " +
+    "a related condition curation is context and cannot validate a different functional claim. " +
+    "ClinGen curation alone does not create user-specific genetic support. Name non-ClinGen " +
+    "evidence by its actual cited source, such as a human association or replication cohort, " +
+    "functional assay, clinical phenotype study, or ancestry study. Well-supported functional " +
+    "claims can have strong evidence without ClinGen curation; never imply a curation or " +
+    "independent validation that the stored citations do not show. For an Explain request, when " +
+    "the saved result says Evo 2 weighting " +
     "reached this finding's score (hypothesis.evo2.affected_score and explanation.evo2_note), " +
     "briefly explain what Evo 2 is: a research AI model trained on DNA sequences. Mutant uses " +
-    "precomputed sequence-context estimates to adjust the existing weights of selected SNPs " +
+    "precomputed, modeled sequence-context estimates to adjust the existing weights of selected " +
+    "SNPs " +
     "before calculating its internal score. Use the returned How Evo 2 was used summary; " +
-    "do not imply another biological observation or a disease-risk estimate, and never turn " +
+    "do not present the model estimate as an observed effect, independent proof, or a disease-risk " +
+    "estimate, and never turn " +
     "the weight multiplier into a risk percentage. Only when the request itself asked to explain this finding (by rank " +
     "or name, including a deliberate \"Explain\" click), when the host supports Apps SDK UI, " +
     "call show_analysis_followups once with the same analysis_version and this hypothesis id so " +
