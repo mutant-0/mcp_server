@@ -1301,6 +1301,12 @@ describe("DNA import component", () => {
               prompt: "Compare my accessible findings with the health history I have shared.",
               intent: "comparison",
             },
+            {
+              id: "compare-family-history",
+              label: "Compare family history",
+              prompt: "Compare my findings with an authorized relative record available here.",
+              intent: "comparison",
+            },
           ],
         }),
       ),
@@ -1311,9 +1317,10 @@ describe("DNA import component", () => {
     await screen.findByRole("button", { name: "Explain #1" });
     expect(screen.getByRole("button", { name: "Compare top 3" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Compare with my history" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Compare family history" })).toBeDefined();
     // Comparison leads the card and spells out the data boundary.
     expect(
-      screen.getByText(/Uses only health history or records you share in this chat\./),
+      screen.getByText(/relative records require authorized sharing\./),
     ).toBeDefined();
     expect(screen.queryByRole("button", { name: "Compare all with Full" })).toBeNull();
     expect(

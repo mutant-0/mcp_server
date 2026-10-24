@@ -214,7 +214,8 @@ interface CardAction {
  * prompt and action, and the copy below only explains the data boundary.
  */
 const COMPARISON_PROMPT_ID = "compare-medical-records";
-const COMPARISON_HELPER = "Uses only health history or records you share in this chat.";
+const COMPARISON_HELPER =
+  "Uses only health information available in this chat; relative records require authorized sharing.";
 
 /**
  * The server's top-three comparison chip. Unlike the other chip actions, its

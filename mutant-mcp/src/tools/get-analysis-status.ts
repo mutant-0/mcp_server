@@ -32,6 +32,11 @@ export const getAnalysisStatusTool: MutantToolDefinition = {
     "conversation; when none were shared, ask what the user wants to share and do not imply access " +
     "to records. Pass only catalog-topic keywords to list_health_hypotheses, never the user's " +
     "health-history prose. For the add-DNA prompt, call show_dna_import.\n\n" +
+    "For a request about a biological relative, first establish that their records are actually " +
+    "available in this conversation through authorized sharing and identify the record's subject. " +
+    "This tool checks only the connected user's Mutant analysis; it does not access or verify " +
+    "relative records or sharing consent. Keep all relative health information out of Mutant " +
+    "tool arguments and omit list_health_hypotheses.query for this comparison.\n\n" +
     'If the result has experience_state="NO_DNA", do not answer with import instructions: call ' +
     "show_dna_import in the same turn so the DNA import UI is rendered.\n\n" +
     'When experience_state is "READY", "READY_REFRESH_AVAILABLE", or ' +

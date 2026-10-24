@@ -16,9 +16,6 @@ describe("scoring v3.4 descriptions", () => {
   });
 });
 
-import { analysisContextDataSchema } from "../src/schemas/outputs.js";
-import { makeContextData } from "./helpers.js";
-
 it("accepts historical and new interpretation contracts during rollout", () => {
   const data = makeContextData({ suggested_prompts: [] });
   const interpretation = data.interpretation as Record<string, unknown>;

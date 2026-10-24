@@ -484,7 +484,7 @@ describe("contract v3.0 acceptance", () => {
     }
   });
 
-  it("caps suggested prompts at five natural-language follow-ups", async () => {
+  it("caps suggested prompts at six natural-language follow-ups", async () => {
     const { client } = await connect();
     const withPrompts = [
       "get_analysis_status",
@@ -496,7 +496,7 @@ describe("contract v3.0 acceptance", () => {
       const data = envelopeOf(result).data as { suggested_prompts?: Array<Record<string, unknown>> };
       const prompts = data.suggested_prompts ?? [];
       expect(prompts.length, `${name} prompt count`).toBeGreaterThan(0);
-      expect(prompts.length, `${name} prompt count`).toBeLessThanOrEqual(5);
+      expect(prompts.length, `${name} prompt count`).toBeLessThanOrEqual(6);
       for (const prompt of prompts) {
         expect(typeof prompt.id).toBe("string");
         expect(typeof prompt.label).toBe("string");
@@ -574,6 +574,7 @@ describe("contract v3.0 acceptance", () => {
     expect(ids).toContain("explain-first");
     expect(ids).toContain("connect-findings");
     expect(ids).toContain("compare-all");
+    expect(ids).toContain("compare-family-history");
     expect(ids).not.toContain("full-scope");
     expect(ids).not.toContain("search-all");
 
@@ -637,6 +638,7 @@ describe("contract v3.0 acceptance", () => {
       suggested_prompts?: Array<{
         id: string;
         label: string;
+        prompt: string;
         heading?: string;
         action?: { analysis_version?: string; hypothesis_id?: string; intent?: string };
       }>;
@@ -649,6 +651,7 @@ describe("contract v3.0 acceptance", () => {
     expect(ids).toContain("explain-first");
     expect(ids).toContain("compare-top-three");
     expect(ids).toContain("compare-medical-records");
+    expect(ids).toContain("compare-family-history");
     expect(ids).not.toContain("full-scope");
     expect(ids).not.toContain("connect-findings");
     expect(ids).not.toContain("compare-all");
@@ -660,6 +663,14 @@ describe("contract v3.0 acceptance", () => {
     expect(history?.label).toBe("Compare with my history");
     expect(history?.action?.analysis_version).toBe("rev42-v3.0.0");
     expect(history?.action?.intent).toBe("comparison");
+
+    const family = prompts.find((prompt) => prompt.id === "compare-family-history");
+    expect(family?.label).toBe("Compare family history");
+    expect(family?.action?.analysis_version).toBe("rev42-v3.0.0");
+    expect(family?.action?.intent).toBe("comparison");
+    expect(family?.prompt).toMatch(/authorized sharing/);
+    expect(family?.prompt).toMatch(/without a search query/);
+    expect(family?.prompt).not.toMatch(/list_health_hypotheses/);
 
     const compareTop = prompts.find((prompt) => prompt.id === "compare-top-three");
     expect(compareTop?.action?.analysis_version).toBe("rev42-v3.0.0");

@@ -247,7 +247,7 @@ there is no `plugin.json`, `.codex-plugin/plugin.json`, `.mcp.json`, or
 Enter this copy when creating or editing the connector:
 
 - **Display name:** `Mutant Genomics`
-- **Description:** `Compare your DNA findings with health history you share, explore results, or add DNA data. Ask which Mutant findings best fit the health history or records you share in this ChatGPT conversation. You can also explore findings or add DNA data. Mutant does not automatically access your medical records; genetic findings are hypotheses, not diagnoses.`
+- **Description:** `Compare your Mutant DNA findings with personal history or a biological relative's records available in this conversation through authorized sharing. Mutant does not access health accounts or receive family records. Genetic findings are hypotheses, not diagnoses.`
 - **Try asking:** `Which of my Mutant findings best fits the health history or records I've shared here?` — this is what makes at least one first question discoverable before any message on a surface with no starter-prompt field.
 
 Character limits (OpenAI plugin submission reference): display name ≤ 30; short
@@ -299,6 +299,18 @@ conversation and confirm on each supported surface:
   the prose. If it renders the card before the answer, confirm the copy still
   reads correctly in that position - the labels ("Explore this finding" / "Keep
   exploring") are deliberately not phrased as an after-answer element.
+- **Family-record comparison:** with synthetic accounts, confirm that the host
+  can expose an authorized biological relative's records and the Mutant plugin
+  in the same conversation. Use the `Compare family history` action with a
+  confirmed condition and a separately marked suspected issue. Verify that the
+  answer identifies whose record each fact came from, respects the account's
+  Free/Full finding scope, and does not infer the relative's genotype or
+  diagnosis. Repeat with no accessible record, an unclear record subject, and
+  revoked sharing. Inspect every Mutant tool payload and ordinary audit log for
+  the synthetic relative's sentinel name, diagnosis, date, and record excerpt;
+  none may cross the Mutant boundary. If the host cannot make an authorized
+  relative record available in this conversation, do not claim this workflow is
+  supported merely because the prompt exists.
 - **Enter on an empty composer:** record what happens. If a blank "Worked for …"
   turn occurs with **no** Mutant tool call, that is a ChatGPT host/composer edge
   case, not an MCP failure — report it as such.

@@ -27,6 +27,7 @@ export const explainHealthHypothesisTool: MutantToolDefinition = {
     "modules, patterns, variants, sources, tests, or exact scores. " +
     "Personal history, symptoms, laboratory results, medications, and prior reactions may be " +
     "attributed to the user only when the user or an authorized context source supplied them; " +
+    "a relative's records describe that relative and must not be attributed to the user. " +
     "catalog cofactors, confounders, cautions, and guardrails are general guidance and must " +
     "never be restated as the user's history or experience. Keep genetic findings distinct " +
     "from symptoms or test results the user has not reported. Use priority_score to order " +

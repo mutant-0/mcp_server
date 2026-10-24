@@ -348,6 +348,14 @@ describe("MCP server integration", () => {
     );
   });
 
+  it("keeps authorized family records in ChatGPT and separate from the user's DNA", () => {
+    expect(SERVER_INSTRUCTIONS).toContain("records actually available to this conversation");
+    expect(SERVER_INSTRUCTIONS).toContain("Establish whose record each fact comes from");
+    expect(SERVER_INSTRUCTIONS).toContain("never attribute a relative's condition to the user");
+    expect(SERVER_INSTRUCTIONS).toContain("omit list_health_hypotheses.query");
+    expect(SERVER_INSTRUCTIONS).toContain("Do not infer the relative's genotype or diagnosis");
+  });
+
   it("passes the modules evidence kind and include_context to the backend", async () => {
     const { client, backendClient } = await connectServer();
     await client.callTool({

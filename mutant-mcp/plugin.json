@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "mutant-genomics",
   "version": "1.0.0",
-  "description": "Compare Mutant DNA findings with health history you share, explore findings, or add DNA data.",
+  "description": "Compare Mutant DNA findings with available personal or authorized family health history, explore findings, or add DNA data.",
   "homepage": "https://mutantgenomics.com",
   "author": {
     "name": "Mutant Biotech LLC",
@@ -22,7 +22,7 @@
       "interface": {
         "displayName": "Mutant Genomics",
         "shortDescription": "Compare DNA to health history",
-        "longDescription": "Ask which Mutant findings best fit the health history or records you share in this ChatGPT conversation. You can also explore findings or add DNA data. Mutant does not automatically access your medical records; genetic findings are hypotheses, not diagnoses.",
+        "longDescription": "Ask which Mutant findings best fit personal history or a relative's records available to this ChatGPT conversation through authorized sharing. You can also explore findings or add DNA data. Mutant does not access health accounts or receive family records; genetic findings are hypotheses, not diagnoses.",
         "developerName": "Mutant Biotech LLC",
         "category": "Healthcare",
         "websiteURL": "https://mutantgenomics.com",
