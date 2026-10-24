@@ -416,6 +416,27 @@ surfaces without a starter-prompt field. Every one of them calls
 - A processing state shows only the current processing experience, with no
   promised future results and no extra polling instructions.
 
+### Family health history available in ChatGPT
+
+The `Compare family history` suggestion is an instruction-led comparison, not a
+Mutant family-record tool. It uses a biological relative's records only when an
+authorized connected health source has actually made them available to the same
+ChatGPT conversation and their subject and relationship are clear. The Mutant
+MCP server cannot grant, inspect, or verify access to that source. If access or
+identity is missing, the assistant says what is missing rather than claiming it
+read a record. A relative's conditions are never attributed to the DNA owner.
+
+The assistant calls Mutant only for the DNA owner's accessible findings, with
+`get_analysis_status` first when readiness is unknown. It omits
+`list_health_hypotheses.query` in this workflow and does not send names,
+relationships, diagnoses, symptoms, dates, or record text in Mutant tool
+arguments. The comparison is produced in ChatGPT, separating genetic evidence,
+confirmed relative diagnoses, reported or suspected issues, and uncertainty.
+It does not infer the relative's genotype or diagnosis, change Mutant scores,
+or calculate disease probabilities. No family health record is stored by Mutant.
+These are model instructions; host access and the absence of family data in
+actual tool payloads require an observed synthetic-account check before release.
+
 ### `get_analysis_status`
 
 Input: `{}`. A successful call even with no analysis.
@@ -1628,18 +1649,20 @@ add a `suggested_prompts` array to their `data`
 }
 ```
 
-- At most **five**, ordered by likely usefulness.
+- At most **six**, ordered by likely usefulness.
 - State-aware, driven by `experience_state` and `capabilities` (never the removed
   `analysis_status` / `regenerate`): `NO_DNA` (import format/privacy),
   `can_query_analysis` (overview / explain / compare / clinician, plus
   why-refresh and start-refresh in the refresh states), the two no-usable-analysis
   processing states (**none** — the component owns those states), `PROCESSING_FAILED`
   (regenerate), analysis context
-  (compare with the health history shared in the chat **first**, then explain #1
-  and compare top three, plus connect-findings and compare-all for Full; the ready
+  (compare with the health history shared in the chat **first**, then explain #1,
+  compare top three, and compare authorized family history, plus connect-findings
+  and compare-all for Full; the ready
   card renders the
   comparison chip as its visually primary action with the helper line `Uses only
-  health history or records you share in this chat.`, and the card sends the
+  health information available in this chat; relative records require authorized
+  sharing.`, and the card sends the
   server-selected prompt once per click; Free accounts with locked findings get no
   Full-scope chip, and the separate element is the factual `Learn about Mutant
   plans` link from the notice), and
@@ -2173,3 +2196,27 @@ The contract is covered by:
   the parameterized target-state assertions (property absence, exact text, false
   capability flags, preserved success envelope, and the model-path/component-path
   `next_action` split).
+
+
+## Scoring v3.4 / interpretation 2.8 migration
+
+The wrapper accepts interpretation 2.7 and 2.8 for rolling compatibility; the
+backend now emits 2.8. Scoring v3.4 removes the separate converging-pattern
+priority bonus and limits numerical module support to explicitly scoped,
+curated evidence. Shared module/storm evidence is counted once. Scoped numeric
+support uses its mechanism denominator, not unrelated broad-module variants.
+Existing strict-storm qualification and curated partial-support gates remain.
+
+Perfect storms can supply genetic support; the separate converging-pattern
+family is explanatory. `converging_pattern_adjustment` remains in compatible
+payloads as zero for v3.4. Earlier examples with nonzero values describe
+historical reports and must not be used to reconstruct new scores. Descriptions
+of an additive converging-pattern contribution elsewhere in this document apply
+only to those historical results. Confidence modulates genetic priority rather
+than providing a separate coverage bonus. Storm and Evo 2 production calibration
+are unchanged. Evo 2 is an adjustment to existing evidence weights.
+
+Read old reports from their saved components and provenance. Never relabel an
+older report as v3.4 or remove its actual retained historical bonus. Deploy this
+compatible wrapper before the backend; rollback must retain acceptance of both
+interpretation versions while v3.4 reports remain accessible.

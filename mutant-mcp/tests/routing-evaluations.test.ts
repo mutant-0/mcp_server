@@ -198,6 +198,16 @@ const SPECIFIC_PROMPTS: Scenario[] = [
     ],
     noUiOn: ["get_analysis_context", "list_health_hypotheses"],
   },
+  {
+    name: "Authorized family-record comparison",
+    prompt: "Compare my DNA with my mother's authorized health record.",
+    tools: [
+      { name: "get_analysis_status" },
+      { name: "get_analysis_context" },
+      { name: "list_health_hypotheses", arguments: { limit: 3 } },
+    ],
+    noUiOn: ["get_analysis_status", "get_analysis_context", "list_health_hypotheses"],
+  },
 ];
 
 async function runScenario(
@@ -733,6 +743,30 @@ describe("starter prompt routing", () => {
     const search = callTo(calls, "list_health_hypotheses");
     expect(search?.arguments.query).toBe("b12");
     expect(JSON.stringify(calls.map((call) => call.arguments))).not.toContain(SHARED_HISTORY);
+  });
+
+  it("passes no relative record details to Mutant in a family comparison", async () => {
+    const relativeRecord =
+      "Mother Jane Example had a confirmed diagnosis of Example Syndrome at age 41.";
+    const calls = await runScenario(
+      [
+        { name: "get_analysis_status" },
+        { name: "get_analysis_context" },
+        { name: "list_health_hypotheses", arguments: { limit: 3 } },
+      ],
+      (operation) =>
+        operation === "get_analysis_status"
+          ? makeSuccessResponse(READY_FREE)
+          : makeToolResponse(operation),
+    );
+    expect(calls.map((call) => call.name)).toEqual([
+      "get_analysis_status",
+      "get_analysis_context",
+      "list_health_hypotheses",
+    ]);
+    expect(callTo(calls, "list_health_hypotheses")?.arguments).not.toHaveProperty("query");
+    expect(JSON.stringify(calls.map((call) => call.arguments))).not.toContain(relativeRecord);
+    expect(calls.every((call) => !carriesUi(call))).toBe(true);
   });
 
   it("mounts no compact follow-up card for the history-comparison starter prompt", async () => {

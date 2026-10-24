@@ -8,14 +8,14 @@
  *
  * Each chip also carries a structured `action` bound to the snapshot it was
  * rendered from (`{ analysis_version, hypothesis_id, intent }`), so a follow-up
- * click references the exact revision the user was looking at. At most five are
+ * click references the exact revision the user was looking at. At most six are
  * returned, ordered by likely usefulness.
  */
 import type { PromptAction, PromptSuggestion, ToolName, ToolResponse } from "../contract.js";
 
 type JsonObject = Record<string, unknown>;
 
-const MAX_SUGGESTIONS = 5;
+const MAX_SUGGESTIONS = 6;
 
 /**
  * `promptSuggestionSchema.heading` is capped at 80 characters. A hypothesis
@@ -180,7 +180,8 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
   // Comparison with the history shared in the chat is the primary opening
   // action, so it leads the list; the ready card renders the first entry as its
   // prominent action and the rest as secondary. Explain and compare-top-three
-  // stay available, and Full keeps its separate broader comparison option.
+  // and family comparison stay available, and Full keeps its separate broader
+  // comparison option.
   const out: PromptSuggestion[] = [
     {
       id: "compare-medical-records",
@@ -210,6 +211,15 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
       intent: "comparison",
       action: action("comparison", analysisVersion, firstId),
     },
+    {
+      id: "compare-family-history",
+      label: "Compare family history",
+      prompt:
+        "Compare my accessible Mutant DNA findings with a biological relative's health records only if those records are actually available to you in this conversation through authorized sharing. Identify whose records they are and our biological relationship before comparing. Keep my DNA evidence separate from the relative's confirmed diagnoses and reported or suspected issues. Do the comparison in ChatGPT; do not send names, relationship, diagnoses, symptoms, dates, or record text to Mutant, and retrieve my accessible findings without a search query. Do not infer the relative's genotype or diagnosis, change Mutant scores, or state disease probabilities. If the records or their subject are unavailable, tell me what is missing rather than claiming access.",
+      heading: "Mutant follow-up: Compare family history",
+      intent: "comparison",
+      action: action("comparison", analysisVersion),
+    },
   ];
 
   if (isFull) {
@@ -229,7 +239,7 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
       id: "compare-all",
       label: "Compare all findings",
       prompt:
-        "Compare all findings in my complete Mutant analysis with medical records you can actually access in this conversation, including connected health records if available. First check what records are accessible; do not infer access from my account or claim to have read records you cannot see. If none are accessible, ask me to provide records here. Keep genetic findings separate from my clinical records.",
+        "Compare all findings in my complete Mutant analysis with medical records you can actually access in this conversation, including connected health records if available. A relative's records may be used only when they are available through authorized sharing and their subject and biological relationship are clear. First check what records are accessible; do not infer access from my account or claim to have read records you cannot see. If none are accessible, ask me to make relevant records available here. Keep my genetic findings separate from my records and any relative's records; do not send medical or family history to Mutant tools.",
       heading: "Mutant follow-up: Compare all findings",
       intent: "comparison",
       action: action("comparison", analysisVersion),

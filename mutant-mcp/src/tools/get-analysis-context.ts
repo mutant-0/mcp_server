@@ -20,7 +20,9 @@ export const getAnalysisContextTool: MutantToolDefinition = {
     'my health?" call get_analysis_status, then show_analysis_overview; "Show or compare my top ' +
     'three" and "Find thyroid-related hypotheses" call list_health_hypotheses (with a query when ' +
     'searching); "Explain the B12 finding" calls explain_health_hypothesis. Never ask the user ' +
-    "for an analysis ID; the current analysis is resolved from the connection.",
+    "for an analysis ID; the current analysis is resolved from the connection. For a family-record " +
+    "comparison, use this tool only for the user's accessible genetic interpretation context; " +
+    "compare with authorized relative records in ChatGPT, never in Mutant tool arguments.",
   scope: "analysis.read",
   inputSchema: getAnalysisContextInputSchema,
   outputSchema: analysisContextOutputSchema,
