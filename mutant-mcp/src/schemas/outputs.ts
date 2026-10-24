@@ -163,7 +163,7 @@ export const analysisStatusDataSchema = z.looseObject({
 });
 
 const interpretationSchema = z.looseObject({
-  version: z.literal("2.7"),
+  version: z.enum(["2.7", "2.8"]),
   purpose: z.string(),
   response_rules: z.array(z.string()),
   evidence_explanation_rules: z.looseObject({

@@ -2173,3 +2173,27 @@ The contract is covered by:
   the parameterized target-state assertions (property absence, exact text, false
   capability flags, preserved success envelope, and the model-path/component-path
   `next_action` split).
+
+
+## Scoring v3.4 / interpretation 2.8 migration
+
+The wrapper accepts interpretation 2.7 and 2.8 for rolling compatibility; the
+backend now emits 2.8. Scoring v3.4 removes the separate converging-pattern
+priority bonus and limits numerical module support to explicitly scoped,
+curated evidence. Shared module/storm evidence is counted once. Scoped numeric
+support uses its mechanism denominator, not unrelated broad-module variants.
+Existing strict-storm qualification and curated partial-support gates remain.
+
+Perfect storms can supply genetic support; the separate converging-pattern
+family is explanatory. `converging_pattern_adjustment` remains in compatible
+payloads as zero for v3.4. Earlier examples with nonzero values describe
+historical reports and must not be used to reconstruct new scores. Descriptions
+of an additive converging-pattern contribution elsewhere in this document apply
+only to those historical results. Confidence modulates genetic priority rather
+than providing a separate coverage bonus. Storm and Evo 2 production calibration
+are unchanged. Evo 2 is an adjustment to existing evidence weights.
+
+Read old reports from their saved components and provenance. Never relabel an
+older report as v3.4 or remove its actual retained historical bonus. Deploy this
+compatible wrapper before the backend; rollback must retain acceptance of both
+interpretation versions while v3.4 reports remain accessible.

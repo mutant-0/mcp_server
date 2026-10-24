@@ -7,6 +7,7 @@ export const getSupportingEvidenceTool: MutantToolDefinition = {
   name: "get_supporting_evidence",
   title: "Get Supporting Evidence",
   description:
+    "Scoring v3.4 uses only scoped module evidence and retained storm support, counting shared evidence once. Converging patterns explain relationships without a separate ranking bonus; perfect storms can contribute support. Use the saved components for historical reports, which may include a converging-pattern bonus. Confidence modulates genetic priority; Evo 2 remains an adjustment to existing weights, not independent evidence. " +
     "Return one focused evidence layer for a hypothesis: matched patterns, unique supporting " +
     "variants, module scoring traces, source citations, or detailed test guidance. Use only after " +
     "the hypothesis is known and only for the evidence type the user requested; do not return all " +

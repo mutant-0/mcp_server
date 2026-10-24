@@ -7,6 +7,7 @@ export const listHealthHypothesesTool: MutantToolDefinition = {
   name: "list_health_hypotheses",
   title: "List Health Hypotheses",
   description:
+    "Priority orders investigations and is not disease probability. For scoring v3.4, converging patterns add no separate ranking bonus. Interpret historical results using saved components. " +
     "List or search the health hypotheses in the current analysis. Send catalog-topic keywords " +
     "only, never patient-specific health information. Free accounts see their fixed top three; " +
     "Full accounts can search the whole analyzed set. This is never the initial display route: " +

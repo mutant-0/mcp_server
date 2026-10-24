@@ -339,7 +339,7 @@ function mockContext(): Record<string, unknown> {
   const hypotheses = mockHypotheses();
   return {
     interpretation: {
-      version: "2.7",
+      version: "2.8",
       purpose:
         "Mutant returns ranked, genetically supported health hypotheses for exploration and clinical discussion, not diagnoses.",
       response_rules: [

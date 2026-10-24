@@ -9,6 +9,7 @@ export const explainHealthHypothesisTool: MutantToolDefinition = {
   name: "explain_health_hypothesis",
   title: "Explain Health Hypothesis",
   description:
+    "Scoring v3.4 uses only scoped module evidence and retained storm support, counting shared evidence once. Converging patterns explain relationships without a separate ranking bonus; perfect storms can contribute support. Use the saved components for historical reports, which may include a converging-pattern bonus. Confidence modulates genetic priority; Evo 2 remains an adjustment to existing weights, not independent evidence. " +
     "Explain one ranked Mutant finding. Use when the user asks what a finding means, why it " +
     "ranked, how strong it is, what supports it, what would strengthen or weaken it, or asks " +
     'questions such as "What is the B12 one?" or "Explain my #1 finding." Returns a concise, ' +
