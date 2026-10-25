@@ -1320,7 +1320,7 @@ describe("DNA import component", () => {
     expect(screen.getByRole("button", { name: "Compare family history" })).toBeDefined();
     // Comparison leads the card and spells out the data boundary.
     expect(
-      screen.getByText(/relative records require authorized sharing\./),
+      screen.getByText(/a relative's connected Health records stay in their own account\./),
     ).toBeDefined();
     expect(screen.queryByRole("button", { name: "Compare all with Full" })).toBeNull();
     expect(

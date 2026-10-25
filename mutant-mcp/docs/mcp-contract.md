@@ -416,15 +416,22 @@ surfaces without a starter-prompt field. Every one of them calls
 - A processing state shows only the current processing experience, with no
   promised future results and no extra polling instructions.
 
-### Family health history available in ChatGPT
+### Family health history shared in ChatGPT
 
 The `Compare family history` suggestion is an instruction-led comparison, not a
-Mutant family-record tool. It uses a biological relative's records only when an
-authorized connected health source has actually made them available to the same
-ChatGPT conversation and their subject and relationship are clear. The Mutant
-MCP server cannot grant, inspect, or verify access to that source. If access or
-identity is missing, the assistant says what is missing rather than claiming it
-read a record. A relative's conditions are never attributed to the DNA owner.
+Mutant family-record tool. ChatGPT Health connected medical records are intended
+for the record owner's own account; connecting Mutant in the DNA owner's account
+does not expose a relative's Health connection. A relative can review their
+records in their own ChatGPT account and choose what family history or documents
+to share. OpenAI's [Health in ChatGPT](https://help.openai.com/en/articles/20001036-health-in-chatgpt)
+also recommends a separate project with project-only memory and uploaded files
+when exploring someone else's information. The comparison uses only consented
+information actually available in the DNA owner's conversation and identifies
+whose information it is. The Mutant
+MCP server cannot grant, inspect, or verify access to a relative's account. If
+the information or identity is missing, the assistant explains that boundary and
+asks for a consented summary or documents rather than claiming it read a record.
+A relative's conditions are never attributed to the DNA owner.
 
 The assistant calls Mutant only for the DNA owner's accessible findings, with
 `get_analysis_status` first when readiness is unknown. It omits
@@ -1657,12 +1664,12 @@ add a `suggested_prompts` array to their `data`
   processing states (**none** — the component owns those states), `PROCESSING_FAILED`
   (regenerate), analysis context
   (compare with the health history shared in the chat **first**, then explain #1,
-  compare top three, and compare authorized family history, plus connect-findings
+  compare top three, and compare consented family history, plus connect-findings
   and compare-all for Full; the ready
   card renders the
-  comparison chip as its visually primary action with the helper line `Uses only
-  health information available in this chat; relative records require authorized
-  sharing.`, and the card sends the
+  comparison chip as its visually primary action with the helper line `Uses
+  history shared in this chat; a relative's connected Health records stay in
+  their own account.`, and the card sends the
   server-selected prompt once per click; Free accounts with locked findings get no
   Full-scope chip, and the separate element is the factual `Learn about Mutant
   plans` link from the notice), and

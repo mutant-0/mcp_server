@@ -215,7 +215,7 @@ interface CardAction {
  */
 const COMPARISON_PROMPT_ID = "compare-medical-records";
 const COMPARISON_HELPER =
-  "Uses only health information available in this chat; relative records require authorized sharing.";
+  "Uses history shared in this chat; a relative's connected Health records stay in their own account.";
 
 /**
  * The server's top-three comparison chip. Unlike the other chip actions, its

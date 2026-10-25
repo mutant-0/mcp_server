@@ -22,7 +22,9 @@ export const getAnalysisContextTool: MutantToolDefinition = {
     'searching); "Explain the B12 finding" calls explain_health_hypothesis. Never ask the user ' +
     "for an analysis ID; the current analysis is resolved from the connection. For a family-record " +
     "comparison, use this tool only for the user's accessible genetic interpretation context; " +
-    "compare with authorized relative records in ChatGPT, never in Mutant tool arguments.",
+    "compare only with consented relative history or documents available in this ChatGPT " +
+    "conversation, never in Mutant tool arguments. A relative's connected Health records " +
+    "stay in their own ChatGPT account.",
   scope: "analysis.read",
   inputSchema: getAnalysisContextInputSchema,
   outputSchema: analysisContextOutputSchema,
