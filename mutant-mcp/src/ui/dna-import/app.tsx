@@ -310,7 +310,7 @@ const ERROR_MESSAGES: Record<string, string> = {
     "The processed DNA data is too large to submit in one request. Contact support@mutantbiotech.com.",
   service_unavailable: "Mutant is temporarily unavailable. Please try again in a moment.",
   consent_required:
-    "Mutant needs your consent before importing DNA data or sharing findings. Review the privacy choices below to continue.",
+    "Mutant needs your consent before importing DNA data or sharing findings. Review the data permissions below to continue.",
   deletion_in_progress:
     "This account's data is being deleted. Importing and reading findings are paused until it finishes. Try again shortly.",
   data_deleted: "This account's data was deleted. Import your DNA again to start a new analysis.",
@@ -486,7 +486,7 @@ function consentStateFrom(
 /**
  * Whether a display-tool result explicitly asks for the consent view (the
  * `show_dna_import` recovery route). Distinct from a refusal: the tool succeeds,
- * but the component must open the privacy choices instead of the upload UI.
+ * but the component must open the data permissions instead of the upload UI.
  */
 function consentViewRequested(result: { structuredContent?: unknown; _meta?: unknown }): boolean {
   const envelope = envelopeOf(result as Parameters<typeof envelopeOf>[0]);
@@ -2172,7 +2172,7 @@ export function DnaImportApp({
         setFindingsState({
           status: "error",
           message:
-            "Your privacy choices were saved, but the question could not be continued. Please ask your original question again.",
+            "Your data permissions were saved, but the question could not be continued. Please ask your original question again.",
         });
         return false;
       }
@@ -2543,20 +2543,13 @@ export function DnaImportApp({
   // consent. The embedded form saves through the existing authenticated connection;
   // the portal remains a fallback.
   if (consentRequired) {
-    // The refused operation decides the wording: importing DNA needs genetic
-    // processing; any read needs permission to share findings with ChatGPT. The
-    // connection is valid, so the card never asks the user to reconnect, and it
-    // is never styled as an error: consent is a recoverable product state.
-    const importing = consentRequired.purpose === CONSENT_PURPOSE_GENETIC_PROCESSING;
     const outdated = consentRequired.reason === "NOTICE_VERSION_OUTDATED";
     const withdrawn = consentRequired.reason === "WITHDRAWN";
     const reasonText = outdated
-      ? "A newer privacy notice is available. Review and accept it to keep going."
+      ? "A newer privacy notice is available. Review it and update your permissions to continue."
       : withdrawn
-        ? "Sharing was turned off. Accept the current privacy choices to turn it back on."
-        : importing
-          ? "Before Mutant can import your DNA data, review and accept the current privacy choices."
-          : "Before Mutant can share your findings here, review and accept the current privacy choices.";
+        ? "A permission was withdrawn. You can choose to allow it again below."
+        : null;
     return (
       <Shell>
         <section
@@ -2566,17 +2559,15 @@ export function DnaImportApp({
           style={{ width: "100%" }}
         >
           <h1 id="mutant-consent-heading" ref={consentHeadingRef} tabIndex={-1} style={styles.h1}>
-            {analysisReady ? "Analysis ready" : "Privacy review required"}
+            Review your data permissions
           </h1>
           {analysisReady ? <p style={styles.subtitle}>Your DNA analysis is complete.</p> : null}
           <div style={styles.privacy}>
-            <p style={{ margin: "0 0 4px", fontWeight: 600 }}>Privacy review required</p>
-            <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>{reasonText}</p>
-            {consentRequired.noticeVersion ? (
-              <p style={{ margin: "6px 0 0", color: "var(--color-text-secondary, #5f6368)" }}>
-                Notice version {consentRequired.noticeVersion}
-              </p>
-            ) : null}
+            <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>
+              Choose whether Mutant can process your genetic data and share your findings with
+              ChatGPT.
+            </p>
+            {reasonText ? <p style={{ margin: "6px 0 0" }}>{reasonText}</p> : null}
           </div>
           {!consentSyncFailed && !consentChecking ? (
             <EmbeddedConsent
@@ -2590,7 +2581,7 @@ export function DnaImportApp({
             <summary>Use the website instead</summary>
             <div style={styles.buttonRow}>
               <button type="button" style={styles.primaryButton} onClick={openConsent}>
-                Review privacy choices
+                Review data permissions
               </button>
               <button
                 type="button"

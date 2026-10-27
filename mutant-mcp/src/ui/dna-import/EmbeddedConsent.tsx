@@ -33,12 +33,12 @@ async function consentCall(
       envelope?.error?.code === "AUTHENTICATION_REQUIRED"
     ) {
       throw new Error(
-        "Your Mutant connection needs authorization to save privacy choices. Reconnect Mutant in ChatGPT, then try again.",
+        "Your Mutant connection needs authorization to save permissions. Reconnect Mutant in ChatGPT, then try again.",
       );
     }
     if (envelope?.error?.code === "INTEGRATION_REVOKED") {
       throw new Error(
-        "This Mutant connection was disconnected. Reconnect it before saving privacy choices.",
+        "This Mutant connection was disconnected. Reconnect it before saving permissions.",
       );
     }
     if (envelope?.error?.code === "INVALID_ARGUMENT") {
@@ -47,7 +47,7 @@ async function consentCall(
       );
     }
     throw new Error(
-      "Mutant could not confirm your privacy choices. Try again or use the website option below.",
+      "Mutant could not confirm your permissions. Try again or use the website option below.",
     );
   }
   const parsed = consentDataSchema.safeParse(envelope.data);
@@ -131,8 +131,8 @@ export function EmbeddedConsent({ app, requiredPurpose, onComplete, onCancel }: 
       {!data && !error ? <p role="status">Loading privacy notice…</p> : null}
       {data ? (
         <>
-          <p>
-            <strong>Notice version {data.notice.version}</strong>
+          <p style={{ fontSize: "0.8rem", color: "var(--color-text-secondary, #5f6368)" }}>
+            Notice version {data.notice.version}
           </p>
           <p>{data.notice.summary}</p>
           {data.notice.sections.map((section) => (
@@ -142,7 +142,7 @@ export function EmbeddedConsent({ app, requiredPurpose, onComplete, onCancel }: 
             </div>
           ))}
           <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: "16px 0" }}>
-            <legend style={{ fontSize: 16, fontWeight: 600 }}>Your privacy choices</legend>
+            <legend style={{ fontSize: 16, fontWeight: 600 }}>Your permissions</legend>
             {data.purposes.map((row) => (
               <div key={row.purpose} style={{ margin: "12px 0" }}>
                 <label style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -185,7 +185,7 @@ export function EmbeddedConsent({ app, requiredPurpose, onComplete, onCancel }: 
               opacity: !canContinue || busy ? 0.55 : 1,
             }}
           >
-            {busy ? "Saving…" : "Agree and continue"}
+            {busy ? "Saving…" : "Save permissions and continue"}
           </button>
         </>
       ) : null}

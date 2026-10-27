@@ -2074,7 +2074,7 @@ describe("DNA import component", () => {
     fireEvent.click(
       await screen.findByRole("checkbox", { name: "Allow Mutant to process my genetic data" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Agree and continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save permissions and continue" }));
     await waitFor(() => expect(bridge.callsTo("create_report")).toHaveLength(2));
     expect(bridge.callsTo("create_report")[0]?.arguments.import_request_id).toBe(
       bridge.callsTo("create_report")[1]?.arguments.import_request_id,
@@ -2111,7 +2111,7 @@ describe("DNA import component", () => {
         name: "Allow Mutant to share my results with ChatGPT",
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Agree and continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save permissions and continue" }));
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
     expect(bridge.callsTo("explain_health_hypothesis")).toEqual([
       { name: "explain_health_hypothesis", arguments: args },
@@ -2139,10 +2139,10 @@ describe("DNA import component", () => {
 
     // The consent card replaces the review screen: the connection is valid, so it
     // must not ask the user to reconnect, and it names the import purpose.
-    await screen.findByText(/Before Mutant can import your DNA data/i);
+    await screen.findByText(/Choose whether Mutant can process your genetic data/i);
     expect(screen.queryByText(/Ready to submit/i)).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /Review privacy choices/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review data permissions/i }));
     await waitFor(() => expect(bridge.openLinks).toHaveLength(1));
     // Only the consent route, the purpose, and the public client id travel.
     expect(bridge.openLinks[0]).toContain("https://mutantgenomics.com/consent");
@@ -2165,7 +2165,7 @@ describe("DNA import component", () => {
     selectFile(microarrayFile());
     await screen.findByText(/Ready to submit/i);
     fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
-    await screen.findByRole("button", { name: /Review privacy choices/i });
+    await screen.findByRole("button", { name: /Review data permissions/i });
 
     const retry = screen.getByRole("button", { name: /I've accepted/i });
     fireEvent.click(retry);
@@ -2193,10 +2193,10 @@ describe("DNA import component", () => {
 
     // The analysis-ready context is preserved: the card keeps the outcome and
     // adds the privacy review state instead of looking like a fresh import.
-    await screen.findByText(/^Privacy review required$/);
+    await screen.findByText(/^Review your data permissions$/);
     await screen.findByText(/^Your DNA analysis is complete\.$/);
     // The read purpose, not importing DNA: sharing findings needs its own notice.
-    await screen.findByText(/Before Mutant can share your findings here/i);
+    await screen.findByText(/Choose whether Mutant can process your genetic data/i);
     // Consent is not an outage: no generic error copy, and no import CTA.
     expect(screen.queryByText(/Something went wrong/i)).toBeNull();
     expect(screen.queryByText(/temporarily unavailable/i)).toBeNull();
@@ -2216,7 +2216,7 @@ describe("DNA import component", () => {
 
     await screen.findByText(/^Analysis ready$/);
     fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
-    await screen.findByRole("button", { name: /Review privacy choices/i });
+    await screen.findByRole("button", { name: /Review data permissions/i });
     const beforeResume = bridge.callsTo("list_health_hypotheses").length;
 
     fireEvent.click(screen.getByRole("button", { name: /I've accepted/i }));
@@ -2245,7 +2245,7 @@ describe("DNA import component", () => {
 
     await screen.findByText(/^Analysis ready$/);
     fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
-    await screen.findByRole("button", { name: /Review privacy choices/i });
+    await screen.findByRole("button", { name: /Review data permissions/i });
     const beforeResume = bridge.callsTo("list_health_hypotheses").length;
 
     fireEvent.click(screen.getByRole("button", { name: /I've accepted/i }));
@@ -2273,8 +2273,8 @@ describe("DNA import component", () => {
     );
 
     // Recovery opens on consent, never the upload UI.
-    await screen.findByText(/Before Mutant can share your findings here/i);
-    await screen.findByRole("button", { name: /Review privacy choices/i });
+    await screen.findByText(/Choose whether Mutant can process your genetic data/i);
+    await screen.findByRole("button", { name: /Review data permissions/i });
     expect(screen.queryByText(/Drag and drop your DNA file here/i)).toBeNull();
   });
 
@@ -2293,8 +2293,8 @@ describe("DNA import component", () => {
 
       await screen.findByText(/^Analysis ready$/);
       fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
-      await screen.findByRole("button", { name: /Review privacy choices/i });
-      fireEvent.click(screen.getByRole("button", { name: /Review privacy choices/i }));
+      await screen.findByRole("button", { name: /Review data permissions/i });
+      fireEvent.click(screen.getByRole("button", { name: /Review data permissions/i }));
 
       await waitFor(() =>
         expect(

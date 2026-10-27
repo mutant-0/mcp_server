@@ -38,7 +38,9 @@ describe("embedded consent", () => {
     await screen.findByText("Notice version 2026-10-01");
     const choices = screen.getAllByRole("checkbox") as HTMLInputElement[];
     expect(choices.every((choice) => !choice.checked)).toBe(true);
-    const submit = screen.getByRole("button", { name: "Agree and continue" }) as HTMLButtonElement;
+    const submit = screen.getByRole("button", {
+      name: "Save permissions and continue",
+    }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Allow Mutant to share my results with ChatGPT" }),
@@ -71,7 +73,7 @@ describe("embedded consent", () => {
       fireEvent.click(
         screen.getByRole("checkbox", { name: "Allow Mutant to share my results with ChatGPT" }),
       );
-      fireEvent.click(screen.getByRole("button", { name: "Agree and continue" }));
+      fireEvent.click(screen.getByRole("button", { name: "Save permissions and continue" }));
       await screen.findByRole("alert");
       expect(test.completed).not.toHaveBeenCalled();
     },
@@ -106,7 +108,7 @@ describe("embedded consent", () => {
         name: "Allow Mutant to share my results with ChatGPT",
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Agree and continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save permissions and continue" }));
     await screen.findByText("Notice version 2026-11-01");
     expect(
       (
@@ -177,7 +179,7 @@ describe("embedded consent", () => {
         name: "Allow Mutant to share my results with ChatGPT",
       }),
     );
-    const submit = screen.getByRole("button", { name: "Agree and continue" });
+    const submit = screen.getByRole("button", { name: "Save permissions and continue" });
     fireEvent.click(submit);
     fireEvent.click(submit);
     expect(callServerTool.mock.calls.filter(([call]) => call.name === "save_consent")).toHaveLength(
