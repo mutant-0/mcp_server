@@ -816,7 +816,7 @@ describe("DNA import component", () => {
       poll_analysis_status: (_args, call) =>
         call === 1 ? STATUS_MISSING : statusResponse("failed"),
     });
-    await screen.findByText(/We couldn't complete your analysis/i);
+    await screen.findByText(/Your analysis isn't available/i);
     const afterFailed = failed.callsTo("poll_analysis_status").length;
     // Polling stops on failure too.
     await new Promise((resolve) => setTimeout(resolve, 60));
@@ -885,8 +885,8 @@ describe("DNA import component", () => {
         call === 1 ? STATUS_MISSING : statusResponse("failed"),
     });
 
-    await screen.findByText(/We couldn't complete your analysis/i);
-    expect(screen.getByText(/did not finish successfully/i)).toBeDefined();
+    await screen.findByText(/Your analysis isn't available/i);
+    expect(screen.getByText(/DNA data still available in this panel/i)).toBeDefined();
     // A failed analysis is reported as a recovery state, not a stack trace.
     expect(screen.queryByText(/Something went wrong/i)).toBeNull();
 
@@ -902,9 +902,32 @@ describe("DNA import component", () => {
   it("asks for a file again when a resumed session cannot retry in place", async () => {
     const bridge = renderWith({ poll_analysis_status: statusResponse("failed") });
 
-    await screen.findByText(/We couldn't complete your analysis/i);
-    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+    await screen.findByText(/Your analysis isn't available/i);
+    expect(screen.queryByText(/did not finish successfully/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /resubmit DNA file/i }));
 
+    await screen.findByText(/Drag and drop your DNA file here/i);
+    expect(bridge.callsTo("create_report")).toHaveLength(0);
+  });
+
+  it("explains resubmission when a platform update leaves saved results unavailable", async () => {
+    const bridge = renderWith({
+      poll_analysis_status: statusResponse("failed", {
+        active_analysis: { status: "ready", usable: false },
+        pending_analysis: {
+          status: "failed",
+          reason: "platform_refresh",
+          failure: {
+            code: "ANALYSIS_PAYLOAD_UNAVAILABLE",
+            message: "The saved analysis cannot be served; regenerate it.",
+          },
+        },
+      }),
+    });
+
+    await screen.findByText(/Resubmit your DNA file to generate a new analysis/i);
+    expect(screen.queryByText(/did not finish successfully/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /resubmit DNA file/i }));
     await screen.findByText(/Drag and drop your DNA file here/i);
     expect(bridge.callsTo("create_report")).toHaveLength(0);
   });

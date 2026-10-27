@@ -3029,18 +3029,22 @@ export function DnaImportApp({
   if (stage === "analysis_failed") {
     return (
       <Shell>
-        <h1 style={styles.h1}>Analysis couldn't be completed</h1>
-        <p style={styles.subtitle}>We couldn't complete your analysis.</p>
+        <h1 style={styles.h1}>Generate your analysis again</h1>
+        <p style={styles.subtitle}>Your analysis isn't available.</p>
         <p style={styles.meta}>
-          Your DNA file was imported, but analysis generation did not finish successfully.
+          {parsed
+            ? "Try again using the DNA data still available in this panel, or choose another file."
+            : "Resubmit your DNA file to generate a new analysis. Saved results can become unavailable after a scoring update or an unsuccessful analysis."}
         </p>
         <div style={styles.buttonRow}>
           <button type="button" style={styles.primaryButton} onClick={tryAgain}>
-            Try again
+            {parsed ? "Try again" : "Resubmit DNA file"}
           </button>
-          <button type="button" style={styles.secondaryButton} onClick={openFilePicker}>
-            Replace DNA data
-          </button>
+          {parsed ? (
+            <button type="button" style={styles.secondaryButton} onClick={openFilePicker}>
+              Replace DNA data
+            </button>
+          ) : null}
         </div>
         {fileInput}
       </Shell>
