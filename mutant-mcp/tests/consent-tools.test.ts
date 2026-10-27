@@ -31,7 +31,11 @@ describe("consent tool boundaries", () => {
   });
   it("keeps both tools app-only and saving explicitly marked as a write", () => {
     for (const tool of [getConsentTool, saveConsentTool]) {
-      expect(toolMeta(tool, makeConfig()).ui).toEqual({ visibility: ["app"] });
+      expect(toolMeta(tool, makeConfig())).toMatchObject({
+        ui: { visibility: ["app"] },
+        "openai/widgetAccessible": true,
+        "openai/visibility": "private",
+      });
     }
     expect(getConsentTool.annotations.readOnlyHint).toBe(true);
     expect(saveConsentTool.annotations.readOnlyHint).toBe(false);

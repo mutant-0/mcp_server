@@ -71,6 +71,12 @@ export function toolMeta(
   if (definition.uiResourceUri) ui.resourceUri = definition.uiResourceUri;
   if (definition.uiVisibility) ui.visibility = definition.uiVisibility;
 
+  // Match the standard visibility on older ChatGPT widget bridges as well.
+  // These are compatibility hints only; scope and backend guards still apply.
+  const visibility = definition.uiVisibility ?? ["model", "app"];
+  meta["openai/widgetAccessible"] = visibility.includes("app");
+  if (!visibility.includes("model")) meta["openai/visibility"] = "private";
+
   if (Object.keys(ui).length > 0) {
     meta.ui = ui;
   }
