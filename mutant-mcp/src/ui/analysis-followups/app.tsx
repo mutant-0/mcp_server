@@ -13,7 +13,14 @@
  * through the bridge; the history action's prompt explicitly asks the user what
  * they wish to share.
  */
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { useApp, useDocumentTheme, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
 import type { App } from "@modelcontextprotocol/ext-apps";
 import { DARK_PALETTE, LIGHT_PALETTE, paletteVars } from "../shared/theme";
@@ -127,7 +134,12 @@ function envelopeOf(result: {
 export function followupsFrom(data: unknown): FollowupsPayload | null {
   const row = asRecord(data);
   if (!row || row.mode !== "followups") return null;
-  const intent = row.intent === "comparison" ? "comparison" : row.intent === "explanation" ? "explanation" : null;
+  const intent =
+    row.intent === "comparison"
+      ? "comparison"
+      : row.intent === "explanation"
+        ? "explanation"
+        : null;
   if (!intent) return null;
   const plan = row.plan === "mutant_full" ? "mutant_full" : "mutant_free";
 
@@ -316,7 +328,10 @@ export function AnalysisFollowupsApp() {
   const handoffPendingRef = useRef(false);
   const runAction = useCallback(
     async (action: FollowupAction) => {
-      if (handoffPendingRef.current) return;
+      // The tool result can render before the host handshake completes. An
+      // early click would turn the version check into "unknown" and could send
+      // an action for stale findings without checking the current revision.
+      if (!app || !isConnected || handoffPendingRef.current) return;
       handoffPendingRef.current = true;
       setHandoffError(null);
       setStaleNotice(false);
@@ -327,10 +342,7 @@ export function AnalysisFollowupsApp() {
           setStaleNotice(true);
           return;
         }
-        const outcome = await deliverFollowUp(
-          app,
-          withCardHeading(action.prompt, action.heading),
-        );
+        const outcome = await deliverFollowUp(app, withCardHeading(action.prompt, action.heading));
         if (outcome === "sent") {
           const next: SentAction = { id: action.id, label: action.label };
           setSentAction(next);
@@ -345,7 +357,7 @@ export function AnalysisFollowupsApp() {
         handoffPendingRef.current = false;
       }
     },
-    [app],
+    [app, isConnected],
   );
 
   /** Fixed recovery action for a stale card; carries no revision pin. */
@@ -385,7 +397,7 @@ export function AnalysisFollowupsApp() {
           <button
             key={action.id}
             type="button"
-            disabled={pendingActionId === action.id}
+            disabled={!app || !isConnected || pendingActionId === action.id}
             style={index === 0 ? { ...styles.action, ...styles.primaryAction } : styles.action}
             onClick={() => void runAction(action)}
           >
@@ -425,7 +437,7 @@ export function AnalysisFollowupsApp() {
           <button
             type="button"
             style={styles.staleButton}
-            disabled={pendingActionId === "current-findings"}
+            disabled={!app || !isConnected || pendingActionId === "current-findings"}
             onClick={openCurrentFindings}
           >
             {pendingActionId === "current-findings" ? "Sending…" : "Open your current findings"}

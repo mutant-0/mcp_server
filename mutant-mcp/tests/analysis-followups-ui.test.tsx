@@ -45,6 +45,7 @@ function toolResultNotification(structured: ToolResponse, meta?: Record<string, 
 
 interface FollowupsBridge {
   openLinks: string[];
+  completeInitialization(): void;
   sendToolResult(structured: ToolResponse, meta?: Record<string, unknown>): void;
   stop(): void;
 }
@@ -53,12 +54,14 @@ interface FollowupsBridge {
 interface FollowupsBridgeOptions {
   /** When set, `poll_analysis_status` reports this analysis_version. */
   statusVersion?: string;
+  deferInitialization?: boolean;
 }
 
 let activeBridge: FollowupsBridge | null = null;
 
 function installHostBridge(options: FollowupsBridgeOptions = {}): FollowupsBridge {
   const openLinks: string[] = [];
+  let initialize: (() => void) | null = null;
 
   function reply(id: number, result: unknown): void {
     deliverToApp({ jsonrpc: "2.0", id, result });
@@ -75,7 +78,9 @@ function installHostBridge(options: FollowupsBridgeOptions = {}): FollowupsBridg
     if (typeof message.method !== "string" || message.id === undefined) return;
 
     if (message.method === "ui/initialize") {
-      reply(message.id, INITIALIZE_RESULT);
+      const id = message.id;
+      if (options.deferInitialization) initialize = () => reply(id, INITIALIZE_RESULT);
+      else reply(id, INITIALIZE_RESULT);
       return;
     }
     if (message.method === "ui/open-link") {
@@ -99,6 +104,10 @@ function installHostBridge(options: FollowupsBridgeOptions = {}): FollowupsBridg
   window.addEventListener("message", onMessage);
   const bridge: FollowupsBridge = {
     openLinks,
+    completeInitialization: () => {
+      initialize?.();
+      initialize = null;
+    },
     sendToolResult: (structured, meta) => {
       deliverToApp({ jsonrpc: "2.0", ...toolResultNotification(structured, meta) });
     },
@@ -114,6 +123,12 @@ function renderCard(options: FollowupsBridgeOptions = {}): FollowupsBridge {
   const bridge = installHostBridge(options);
   render(<AnalysisFollowupsApp />);
   return bridge;
+}
+
+async function findReadyAction(name: string): Promise<HTMLButtonElement> {
+  const button = (await screen.findByRole("button", { name })) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  return button;
 }
 
 let sendFollowUpMessage: ReturnType<typeof vi.fn>;
@@ -137,10 +152,7 @@ describe("analysis follow-up card", () => {
     // complete rather than showing an empty shell.
     expect(screen.queryByRole("button")).toBeNull();
 
-    bridge.sendToolResult(
-      makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
-      FOLLOWUPS_META,
-    );
+    bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
     await screen.findByText("Explore this finding");
     // The hypothesis name is navigation context for the server, not card copy.
@@ -150,12 +162,9 @@ describe("analysis follow-up card", () => {
 
   it("sends the server-selected prompt, prefixed with its heading, on click", async () => {
     const bridge = renderCard();
-    bridge.sendToolResult(
-      makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
-      FOLLOWUPS_META,
-    );
+    bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    const button = await screen.findByRole("button", { name: "Why this rank?" });
+    const button = await findReadyAction("Why this rank?");
     fireEvent.click(button);
 
     await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
@@ -174,12 +183,9 @@ describe("analysis follow-up card", () => {
 
   it("acknowledges the clicked label without rendering the full prompt", async () => {
     const bridge = renderCard();
-    bridge.sendToolResult(
-      makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
-      FOLLOWUPS_META,
-    );
+    bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Why this rank?" }));
+    fireEvent.click(await findReadyAction("Why this rank?"));
 
     const status = await screen.findByRole("status");
     expect(status.textContent).toContain("Question sent: Why this rank?");
@@ -198,12 +204,9 @@ describe("analysis follow-up card", () => {
         }),
     );
     const bridge = renderCard();
-    bridge.sendToolResult(
-      makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
-      FOLLOWUPS_META,
-    );
+    bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    const button = await screen.findByRole("button", { name: "Why this rank?" });
+    const button = await findReadyAction("Why this rank?");
     fireEvent.click(button);
 
     await waitFor(() => expect(button.textContent).toBe("Sending…"));
@@ -215,12 +218,9 @@ describe("analysis follow-up card", () => {
 
   it("sends exactly one follow-up on a double click", async () => {
     const bridge = renderCard();
-    bridge.sendToolResult(
-      makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
-      FOLLOWUPS_META,
-    );
+    bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    const button = await screen.findByRole("button", { name: "Why this rank?" });
+    const button = await findReadyAction("Why this rank?");
     fireEvent.click(button);
     fireEvent.click(button);
 
@@ -231,32 +231,39 @@ describe("analysis follow-up card", () => {
   it("reports a rejected handoff and never claims the question was sent", async () => {
     sendFollowUpMessage.mockRejectedValue(new Error("host rejected the follow-up"));
     const bridge = renderCard();
-    bridge.sendToolResult(
-      makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
-      FOLLOWUPS_META,
-    );
+    bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Why this rank?" }));
+    fireEvent.click(await findReadyAction("Why this rank?"));
 
     await waitFor(() =>
       expect(screen.getByText(/couldn't send that follow-up message/i)).toBeTruthy(),
     );
     expect(screen.queryByText(/Question sent:/)).toBeNull();
     // The action is usable again after the failure.
-    expect((await screen.findByRole("button", { name: "Why this rank?" })).hasAttribute("disabled")).toBe(
-      false,
-    );
+    expect((await findReadyAction("Why this rank?")).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("waits for the host connection before allowing a stale-card action", async () => {
+    const bridge = renderCard({ statusVersion: "rev43-v3.0.0", deferInitialization: true });
+    bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
+    const button = await screen.findByRole("button", { name: "Why this rank?" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+    expect(sendFollowUpMessage).not.toHaveBeenCalled();
+
+    bridge.completeInitialization();
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+    await screen.findByText(/These results have changed/);
+    expect(sendFollowUpMessage).not.toHaveBeenCalled();
   });
 
   it("stops a stale click and offers the current-findings recovery", async () => {
     // The card is bound to rev42, but the account has moved to rev43.
     const bridge = renderCard({ statusVersion: "rev43-v3.0.0" });
-    bridge.sendToolResult(
-      makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
-      FOLLOWUPS_META,
-    );
+    bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Why this rank?" }));
+    fireEvent.click(await findReadyAction("Why this rank?"));
 
     await screen.findByText(/These results have changed/);
     // The old action never reached the host.
@@ -349,10 +356,9 @@ describe("analysis follow-up card", () => {
     const link = screen.getByRole("link", { name: "Learn about Mutant plans" });
     expect(link.getAttribute("href")).toBe("https://mutantgenomics.com/plans");
     fireEvent.click(link);
-    await waitFor(() =>
-      expect(free.openLinks).toContain("https://mutantgenomics.com/plans"),
-    );
+    await waitFor(() => expect(free.openLinks).toContain("https://mutantgenomics.com/plans"));
 
+    free.stop();
     cleanup();
     activeBridge = null;
 
@@ -406,12 +412,9 @@ describe("analysis follow-up card", () => {
 
   it("stacks its actions in one column for a narrow viewport", async () => {
     const bridge = renderCard();
-    bridge.sendToolResult(
-      makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"),
-      FOLLOWUPS_META,
-    );
+    bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    const button = await screen.findByRole("button", { name: "Why this rank?" });
+    const button = await findReadyAction("Why this rank?");
     const container = button.parentElement as HTMLElement;
     // One full-width track: the buttons never squeeze below the tap target.
     expect(container.style.gridTemplateColumns).toBe("minmax(0, 1fr)");
