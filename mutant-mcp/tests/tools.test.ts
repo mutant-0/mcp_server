@@ -48,7 +48,7 @@ describe("tool definitions", () => {
     expect(details?.description).toContain("support architecture");
     expect(details?.description).toContain("not that it is broadly distributed");
     expect(details?.description).toContain("authorized context source");
-    expect(details?.description).toContain("catalog cofactors, confounders, cautions");
+    expect(details?.description).toMatch(/catalog cofactors, confounders, cautions/i);
     expect(details?.description).toContain("disease probability");
     expect(details?.description).toContain("hypothesis's declared mechanism");
     expect(details?.description).toContain("marker coverage and evidence quality");
