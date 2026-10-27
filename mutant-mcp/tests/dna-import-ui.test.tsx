@@ -1,3 +1,4 @@
+import { makeConsentData } from "./helpers.js";
 // @vitest-environment jsdom
 /**
  * Component tests for the DNA import Apps SDK app.
@@ -134,20 +135,23 @@ function statusResponse(
   const generatedAt = new Date(Date.now() - 30_000).toISOString();
   const base: Record<string, unknown> = { ...FREE_PLAN, ...overrides };
   if (status === "ready") {
-    return makeSuccessResponse({
-      dna_status: "available",
-      experience_state: "READY",
-      active_analysis: {
-        status: "ready",
-        analysis_version: analysisVersion,
-        generated_at: generatedAt,
-        scoring_engine_version: "v3",
-        usable: true,
+    return makeSuccessResponse(
+      {
+        dna_status: "available",
+        experience_state: "READY",
+        active_analysis: {
+          status: "ready",
+          analysis_version: analysisVersion,
+          generated_at: generatedAt,
+          scoring_engine_version: "v3",
+          usable: true,
+        },
+        pending_analysis: null,
+        capabilities: READY_CAPABILITIES,
+        ...base,
       },
-      pending_analysis: null,
-      capabilities: READY_CAPABILITIES,
-      ...base,
-    }, analysisVersion);
+      analysisVersion,
+    );
   }
   if (status === "processing") {
     return makeSuccessResponse({
@@ -465,9 +469,7 @@ function installHostBridge(responders: Responders = {}, options: BridgeOptions =
       const envelope = answer(name, args);
       const metaEntry = options.toolMeta?.[name];
       const meta =
-        typeof metaEntry === "function"
-          ? metaEntry(args, calls.get(name) ?? 1)
-          : metaEntry;
+        typeof metaEntry === "function" ? metaEntry(args, calls.get(name) ?? 1) : metaEntry;
       const result = {
         content: [{ type: "text", text: JSON.stringify(envelope) }],
         structuredContent: envelope,
@@ -1884,9 +1886,10 @@ describe("DNA import component", () => {
     let version = "analysis_1";
     const bridge = renderWith({
       poll_analysis_status: () => readyAt(version),
-      show_analysis_overview: (_args, call) => call === 1
-        ? makeErrorResponse("SERVICE_UNAVAILABLE", "unavailable")
-        : boundOverview("analysis_2"),
+      show_analysis_overview: (_args, call) =>
+        call === 1
+          ? makeErrorResponse("SERVICE_UNAVAILABLE", "unavailable")
+          : boundOverview("analysis_2"),
     });
     await screen.findByText(/Analysis ready/i);
     fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
@@ -2047,6 +2050,79 @@ describe("DNA import component", () => {
       },
     };
   }
+
+  it("saves consent inside ChatGPT and resumes the import with its original idempotency key", async () => {
+    let accepted: string[] = [];
+    const bridge = await renderApp(
+      {
+        get_consent: () => makeSuccessResponse(makeConsentData(accepted)),
+        save_consent: (args) => {
+          accepted = args.purposes as string[];
+          return makeSuccessResponse(makeConsentData(accepted));
+        },
+        create_report: (_args, call) =>
+          call === 1
+            ? consentError()
+            : makeSuccessResponse({ analysis_id: "analysis_1", status: "processing" }),
+      },
+      {},
+      { toolMeta: { create_report: consentMeta("genetic_processing") } },
+    );
+    selectFile(microarrayFile());
+    await screen.findByText(/Ready to submit/i);
+    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: "Allow Mutant to process my genetic data" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Agree and continue" }));
+    await waitFor(() => expect(bridge.callsTo("create_report")).toHaveLength(2));
+    expect(bridge.callsTo("create_report")[0]?.arguments.import_request_id).toBe(
+      bridge.callsTo("create_report")[1]?.arguments.import_request_id,
+    );
+    expect(bridge.callsTo("save_consent")).toHaveLength(1);
+    expect(bridge.openLinks).toHaveLength(0);
+  });
+
+  it("resumes the exact hypothesis question after embedded consent without opening a browser", async () => {
+    let accepted: string[] = [];
+    const args = {
+      hypothesis_id: "RC_B6_PLP_HOMEOSTASIS_FRAGILITY",
+      analysis_version: "analysis_1",
+    };
+    const bridge = await renderApp({
+      get_consent: () => makeSuccessResponse(makeConsentData(accepted)),
+      save_consent: (input) => {
+        accepted = input.purposes as string[];
+        return makeSuccessResponse(makeConsentData(accepted));
+      },
+      explain_health_hypothesis: makeSuccessResponse({
+        name: "B6 finding",
+        summary: "Synthetic result.",
+      }),
+    });
+    bridge.sendToolResult(consentError(), {
+      mutant: {
+        consent: { purpose: "chatgpt_sharing" },
+        pending_action: { tool: "explain_health_hypothesis", args },
+      },
+    });
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: "Allow Mutant to share my results with ChatGPT",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Agree and continue" }));
+    await waitFor(() => expect(bridge.messages).toHaveLength(1));
+    expect(bridge.callsTo("explain_health_hypothesis")).toEqual([
+      { name: "explain_health_hypothesis", arguments: args },
+    ]);
+    expect(bridge.openLinks).toHaveLength(0);
+    expect(
+      bridge.modelContextUpdates.some((value) =>
+        JSON.stringify(value).includes("Synthetic result."),
+      ),
+    ).toBe(true);
+  });
 
   it("routes an import refused for consent to the portal consent page", async () => {
     const bridge = await renderApp(
@@ -2370,7 +2446,9 @@ describe("DNA import component", () => {
     const panel = await screen.findByRole("region", {
       name: "Comparing your top three findings",
     });
-    const rows = within(panel).getAllByRole("listitem").map((row) => row.textContent ?? "");
+    const rows = within(panel)
+      .getAllByRole("listitem")
+      .map((row) => row.textContent ?? "");
     expect(rows).toHaveLength(3);
     expect(rows[0]).toContain("1. Alpha finding");
     expect(rows[1]).toContain("2. Beta finding");

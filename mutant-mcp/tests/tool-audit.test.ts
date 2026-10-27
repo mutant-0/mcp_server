@@ -36,6 +36,11 @@ const SHARED_HISTORY = "I have a rare desease";
 
 /** One valid call per registered tool, so the audit wrapper is exercised for all. */
 const CALLS: Array<{ name: string; arguments: Record<string, unknown> }> = [
+  { name: "get_consent", arguments: {} },
+  {
+    name: "save_consent",
+    arguments: { notice_version: "2026-10-01", purposes: ["chatgpt_sharing"] },
+  },
   { name: "get_analysis_status", arguments: {} },
   { name: "poll_analysis_status", arguments: {} },
   { name: "show_analysis_overview", arguments: {} },
@@ -159,7 +164,9 @@ describe("tool-call audit records", () => {
       "sex_chromosome_confidence",
       "user-1",
     ]) {
-      expect(serialized, `log must not contain ${JSON.stringify(sentinel)}`).not.toContain(sentinel);
+      expect(serialized, `log must not contain ${JSON.stringify(sentinel)}`).not.toContain(
+        sentinel,
+      );
     }
   });
 
@@ -222,7 +229,10 @@ describe("tool-call audit records", () => {
 
   it("captures routing values only in a designated synthetic capture", async () => {
     const { client, audits } = await connect({ capture: true });
-    await client.callTool({ name: "list_health_hypotheses", arguments: { query: "b12", limit: 2 } });
+    await client.callTool({
+      name: "list_health_hypotheses",
+      arguments: { query: "b12", limit: 2 },
+    });
     await client.callTool({ name: "create_report", arguments: CATALOG_MATCHED_IMPORT });
 
     const captured = audits();

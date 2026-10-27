@@ -317,9 +317,21 @@ export function resetMockAnalyses(): void {
 /** Synthetic hypotheses so the ready-state CTA renders in dev mode. */
 function mockHypotheses(): Record<string, unknown>[] {
   const rows = [
-    ["HYP_MOCK_A", "Lipid metabolism", "Model support for how your variants influence lipid handling."],
-    ["HYP_MOCK_B", "Folate metabolism", "Patterns in your variants related to folate and homocysteine."],
-    ["HYP_MOCK_C", "Caffeine clearance", "Reported variant support for how you metabolize caffeine."],
+    [
+      "HYP_MOCK_A",
+      "Lipid metabolism",
+      "Model support for how your variants influence lipid handling.",
+    ],
+    [
+      "HYP_MOCK_B",
+      "Folate metabolism",
+      "Patterns in your variants related to folate and homocysteine.",
+    ],
+    [
+      "HYP_MOCK_C",
+      "Caffeine clearance",
+      "Reported variant support for how you metabolize caffeine.",
+    ],
   ];
   return rows.map(([id, name, summary], index) => ({
     id,
@@ -420,6 +432,8 @@ function mockContext(): Record<string, unknown> {
   };
 }
 
+const mockConsentChoices = new Map<string, Set<string>>();
+
 /** Used when no target ARN is configured, so local development stays self-contained. */
 export class MockMutantBackendClient implements MutantBackendClient {
   private readonly maxRequestBytes: number;
@@ -511,9 +525,7 @@ export class MockMutantBackendClient implements MutantBackendClient {
               usable: true,
             }
           : { status: "none", usable: false },
-        pending_analysis: ready
-          ? null
-          : { status: "processing", reason: "initial_analysis" },
+        pending_analysis: ready ? null : { status: "processing", reason: "initial_analysis" },
         entitlement: {
           plan: "mutant_free",
           hypothesis_scope: "top_three",
@@ -543,6 +555,43 @@ export class MockMutantBackendClient implements MutantBackendClient {
     ctx: MutantUserContext,
     requestId: string,
   ): ToolResponse {
+    if (operation === "get_consent" || operation === "save_consent") {
+      const key = JSON.stringify([ctx.userId, ctx.clientId]);
+      const choices = mockConsentChoices.get(key) ?? new Set<string>();
+      if (operation === "save_consent") {
+        if (
+          args.notice_version !== "2026-10-01" ||
+          !Array.isArray(args.purposes) ||
+          !args.purposes.length ||
+          args.purposes.some((p) => p !== "genetic_processing" && p !== "chatgpt_sharing")
+        ) {
+          return fieldError(ErrorCode.INVALID_ARGUMENT, "Review the current privacy notice.");
+        }
+        for (const purpose of args.purposes) choices.add(purpose as string);
+        mockConsentChoices.set(key, choices);
+      }
+      return {
+        contract_version: CONTRACT_VERSION,
+        analysis_version: null,
+        ok: true,
+        error: null,
+        data: {
+          notice: {
+            version: "2026-10-01",
+            summary: "Development preview only: select permissions for synthetic data.",
+            sections: [],
+          },
+          purposes: ["genetic_processing", "chatgpt_sharing"].map((purpose) => ({
+            purpose,
+            status: choices.has(purpose) ? "accepted" : "none",
+            current: choices.has(purpose),
+            notice_version: choices.has(purpose) ? "2026-10-01" : null,
+            accepted_at: null,
+            withdrawn_at: null,
+          })),
+        },
+      };
+    }
     if (operation === "get_snp_catalog") {
       return {
         contract_version: CONTRACT_VERSION,
@@ -686,7 +735,12 @@ export class MockMutantBackendClient implements MutantBackendClient {
           score_interpretation: {
             status: "qualifying_match",
             summary: "A qualifying genetic result was detected.",
-            marker_coverage: { called: 12, total: 14, level: "partial", missing_markers: ["rs1", "rs2"] },
+            marker_coverage: {
+              called: 12,
+              total: 14,
+              level: "partial",
+              missing_markers: ["rs1", "rs2"],
+            },
             measurement_coverage: "high",
             marker_call_incomplete: true,
             assessability: "assessed",
@@ -706,8 +760,7 @@ export class MockMutantBackendClient implements MutantBackendClient {
               name: "Lipid metabolism",
               contribution_fraction: 0.5,
             },
-            summary:
-              "Support is distributed across 2 contributing modules and 2 scoring genes.",
+            summary: "Support is distributed across 2 contributing modules and 2 scoring genes.",
           },
           modules: [
             {

@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  ANALYSIS_TOOL_NAMES,
-  CONTRACT_VERSION,
-  DNA_IMPORT_TOOL_NAMES,
-  TOOL_NAMES,
-} from "../src/contract.js";
+import { ANALYSIS_TOOL_NAMES, CONTRACT_VERSION, TOOL_NAMES } from "../src/contract.js";
 import { TOOL_DEFINITIONS, toolMeta } from "../src/tools/index.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "../src/tools/types.js";
 import { dnaImportUiMeta, DNA_IMPORT_UI_URI } from "../src/ui/dna-import/resource.js";
@@ -25,9 +20,7 @@ function inputKeys(tool: MutantToolDefinition): string[] {
 describe("tool definitions", () => {
   it("exposes exactly the eleven contract tools in order", () => {
     expect(TOOL_DEFINITIONS.map((tool) => tool.name)).toEqual([...TOOL_NAMES]);
-    expect(TOOL_DEFINITIONS).toHaveLength(
-      ANALYSIS_TOOL_NAMES.length + DNA_IMPORT_TOOL_NAMES.length,
-    );
+    expect(TOOL_DEFINITIONS).toHaveLength(TOOL_NAMES.length);
   });
 
   it("gives every tool a description, schemas, and annotations", () => {
@@ -57,7 +50,9 @@ describe("tool definitions", () => {
     expect(details?.description).toContain("variant and inheritance fit");
     expect(details?.description).toContain("related condition curation is context");
     expect(details?.description).toContain("functional assay");
-    expect(details?.description).toContain("functional claims can have strong evidence without ClinGen curation");
+    expect(details?.description).toContain(
+      "functional claims can have strong evidence without ClinGen curation",
+    );
     expect(details?.description).toContain("provisional storm is a partial rule match");
     expect(details?.description).toContain("missing markers as unmeasured");
     expect(details?.description).toContain("modeled sequence-context estimates");
@@ -72,7 +67,7 @@ describe("tool definitions", () => {
 
   it("keeps every tool except create_report read-only and idempotent", () => {
     for (const tool of TOOL_DEFINITIONS) {
-      if (tool.name === "create_report") continue;
+      if (tool.name === "create_report" || tool.name === "save_consent") continue;
       expect(tool.annotations).toMatchObject(readOnlyAnnotations);
     }
     const createReport = TOOL_DEFINITIONS.find((tool) => tool.name === "create_report");
@@ -97,7 +92,7 @@ describe("tool definitions", () => {
   });
 
   it("requires analysis.read for analysis tools and dna.import for DNA import tools", () => {
-    const analysisNames = new Set<string>(ANALYSIS_TOOL_NAMES);
+    const analysisNames = new Set<string>([...ANALYSIS_TOOL_NAMES, "get_consent"]);
     for (const tool of TOOL_DEFINITIONS) {
       expect(tool.scope).toBe(analysisNames.has(tool.name) ? "analysis.read" : "dna.import");
     }

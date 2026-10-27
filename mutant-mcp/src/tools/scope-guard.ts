@@ -31,9 +31,12 @@ export function enforceScope(tool: ScopedTool, runtime: ToolRuntime): ToolRespon
     data: null,
     error: {
       code: ErrorCode.INSUFFICIENT_SCOPE,
-      message: needsDnaImport
-        ? `Importing DNA requires the '${required}' scope. Reconnect Mutant in ChatGPT to grant DNA import access.`
-        : `This tool requires the '${required}' scope.`,
+      message:
+        tool.name === "save_consent"
+          ? `Saving privacy choices requires the existing '${required}' write permission. Reconnect Mutant in ChatGPT to authorize it.`
+          : needsDnaImport
+            ? `Importing DNA requires the '${required}' scope. Reconnect Mutant in ChatGPT to grant DNA import access.`
+            : `This tool requires the '${required}' scope.`,
       retryable: false,
       required_scope: required,
       app_code: APP_ERROR_CODES.insufficient_scope,

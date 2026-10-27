@@ -69,7 +69,12 @@ export const DNA_IMPORT_TOOL_NAMES = [
   "create_report",
 ] as const;
 
-export const TOOL_NAMES = [...ANALYSIS_TOOL_NAMES, ...DNA_IMPORT_TOOL_NAMES] as const;
+export const CONSENT_TOOL_NAMES = ["get_consent", "save_consent"] as const;
+export const TOOL_NAMES = [
+  ...ANALYSIS_TOOL_NAMES,
+  ...DNA_IMPORT_TOOL_NAMES,
+  ...CONSENT_TOOL_NAMES,
+] as const;
 
 export type AnalysisToolName = (typeof ANALYSIS_TOOL_NAMES)[number];
 export type DnaImportToolName = (typeof DNA_IMPORT_TOOL_NAMES)[number];
@@ -91,9 +96,7 @@ export const RESOLVE_SNAPSHOT_OPERATION = "resolve_analysis_snapshot";
 export const RESOLVE_FOLLOWUPS_OPERATION = "resolve_analysis_followups";
 
 export type BackendOperation =
-  | ToolName
-  | typeof RESOLVE_SNAPSHOT_OPERATION
-  | typeof RESOLVE_FOLLOWUPS_OPERATION;
+  ToolName | typeof RESOLVE_SNAPSHOT_OPERATION | typeof RESOLVE_FOLLOWUPS_OPERATION;
 
 export function isDnaImportTool(name: string): name is DnaImportToolName {
   return (DNA_IMPORT_TOOL_NAMES as readonly string[]).includes(name);

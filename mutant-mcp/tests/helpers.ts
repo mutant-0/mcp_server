@@ -1,11 +1,7 @@
 import type { MutantUserContext } from "../src/auth/user-context.js";
 import type { MutantBackendClient } from "../src/clients/mutant-lambda-client.js";
 import type { AppConfig } from "../src/config.js";
-import {
-  CONTRACT_VERSION,
-  type BackendOperation,
-  type ToolResponse,
-} from "../src/contract.js";
+import { CONTRACT_VERSION, type BackendOperation, type ToolResponse } from "../src/contract.js";
 import { createLogger, type AppLogger, type LogSink } from "../src/logger.js";
 
 /** URI-form scopes for the test resource (derived from MUTANT_MCP_RESOURCE_URI). */
@@ -188,7 +184,8 @@ export function makeInterpretation(): Record<string, unknown> {
       genetic_confidence: "How well the genetic result is measured.",
       coverage_confidence: "How completely the relevant markers were assessed.",
       marker_coverage: "Marker-call completeness scope, distinct from coverage_confidence.",
-      assessability: "Whether the hypothesis could be evaluated: assessed, partial, or not_assessable.",
+      assessability:
+        "Whether the hypothesis could be evaluated: assessed, partial, or not_assessable.",
       pattern_convergence: "How strongly independent patterns agree.",
       module_support: "Support contributed by score-eligible variants through modules.",
       pattern_support: "Additional retained support from a defined combination of variants.",
@@ -261,8 +258,8 @@ export function makeFollowupsData(
       {
         id: "why-ranked",
         label: "Why this rank?",
-        prompt: "Why did my \"Alpha finding\" finding rank where it did?",
-        heading: "Mutant follow-up: Why \"Alpha finding\" ranked",
+        prompt: 'Why did my "Alpha finding" finding rank where it did?',
+        heading: 'Mutant follow-up: Why "Alpha finding" ranked',
         intent: "explain",
         hypothesis_id: "HYP_A",
         action: {
@@ -410,6 +407,9 @@ export function makeDetailsData(overrides: Record<string, unknown> = {}): Record
  */
 export function defaultBackendData(operation: BackendOperation): Record<string, unknown> {
   switch (operation) {
+    case "get_consent":
+    case "save_consent":
+      return makeConsentData();
     case "resolve_analysis_snapshot":
     case "show_analysis_overview":
       return {
@@ -446,4 +446,22 @@ export function defaultBackendData(operation: BackendOperation): Record<string, 
 /** A complete success envelope whose `data` validates for the given operation. */
 export function makeToolResponse(operation: BackendOperation): ToolResponse {
   return makeSuccessResponse(defaultBackendData(operation));
+}
+
+export function makeConsentData(current: string[] = []) {
+  return {
+    notice: {
+      version: "2026-10-01",
+      summary: "Choose how Mutant may use your genetic information.",
+      sections: [{ heading: "Privacy notice", body: "Your raw DNA file stays on your device." }],
+    },
+    purposes: ["genetic_processing", "chatgpt_sharing"].map((purpose) => ({
+      purpose,
+      status: current.includes(purpose) ? "accepted" : "none",
+      notice_version: current.includes(purpose) ? "2026-10-01" : null,
+      accepted_at: current.includes(purpose) ? "2026-10-27T12:00:00Z" : null,
+      withdrawn_at: null,
+      current: current.includes(purpose),
+    })),
+  };
 }

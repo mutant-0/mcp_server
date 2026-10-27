@@ -1,3 +1,4 @@
+import { TOOL_NAMES } from "../src/contract.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -51,16 +52,16 @@ describe("HTTP handler (dev mode)", () => {
     const challenge = response.headers.get("www-authenticate") ?? "";
     expect(challenge).toContain("Bearer");
     expect(challenge).toContain("resource_metadata=");
-    expect(challenge).toContain("error=\"invalid_token\"");
+    expect(challenge).toContain('error="invalid_token"');
     // RFC 9728 places the well-known segment before the resource path, at the
     // resource origin: <origin>/.well-known/oauth-protected-resource<path>.
     expect(challenge).toContain(
-      "resource_metadata=\"https://mcp.mutantgenomics.com/.well-known/oauth-protected-resource/mcp\"",
+      'resource_metadata="https://mcp.mutantgenomics.com/.well-known/oauth-protected-resource/mcp"',
     );
     // Every supported URI-form scope is advertised so a client knows what to
     // request; it only needs the subset covering the tools it intends to call.
     expect(challenge).toContain('scope="https://mcp.mutantgenomics.com/mcp/analysis.read');
-    expect(challenge).toContain("https://mcp.mutantgenomics.com/mcp/dna.import\"");
+    expect(challenge).toContain('https://mcp.mutantgenomics.com/mcp/dna.import"');
   });
 
   it("rejects requests with an invalid bearer token", async () => {
@@ -196,7 +197,7 @@ describe("HTTP handler (dev mode)", () => {
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as { result: { tools: Array<{ name: string }> } };
-    expect(body.result.tools).toHaveLength(12);
+    expect(body.result.tools).toHaveLength(TOOL_NAMES.length);
   });
 
   it("answers CORS preflight for an allowed origin", async () => {

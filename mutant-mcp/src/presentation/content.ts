@@ -64,14 +64,11 @@ function errorContent(response: ToolResponse): string {
         : "Privacy review required.";
     return (
       `${head} Before Mutant can continue, review and accept the current privacy choices. ` +
-      "Call show_dna_import with view \"consent\" to open them; do not retry the failed " +
-      "operation or describe it as an outage."
+      "The embedded form owns consent and continuation. Do not open another card, retry the failed operation, or describe it as an outage. " +
+      'Only if no form is displayed, call show_dna_import with view "consent".'
     );
   }
-  const lines = [
-    `error: ${error?.code ?? "UNKNOWN"}`,
-    error?.message ?? "Unknown error",
-  ];
+  const lines = [`error: ${error?.code ?? "UNKNOWN"}`, error?.message ?? "Unknown error"];
   const nextAction = asRecord(error?.next_action);
   const nextTool = nextAction ? asText(nextAction.tool) : null;
   if (nextTool) {
@@ -104,8 +101,7 @@ function statusContent(data: JsonObject): string {
 
   const parts: string[] = [];
   parts.push(
-    EXPERIENCE_SENTENCES[experience] ??
-      "DNA data is on file, but no analysis is available yet.",
+    EXPERIENCE_SENTENCES[experience] ?? "DNA data is on file, but no analysis is available yet.",
   );
 
   if (
@@ -353,16 +349,11 @@ function evidenceContent(data: JsonObject): string {
   } else if (kind === "modules") {
     for (const entry of items.slice(0, 5)) {
       const module = asRecord(entry);
-      const name = module
-        ? asText(module.module_name) ?? asText(module.module_id)
-        : null;
+      const name = module ? (asText(module.module_name) ?? asText(module.module_id)) : null;
       if (!name) continue;
       const status = module ? asText(module.scoring_status) : null;
       const retained = module ? rounded(module.retained_support) : null;
-      const suffix = [
-        status,
-        retained !== null ? `${retained} retained points` : null,
-      ]
+      const suffix = [status, retained !== null ? `${retained} retained points` : null]
         .filter((part): part is string => part !== null)
         .join(", ");
       parts.push(suffix ? `${name} (${suffix})` : name);
@@ -400,7 +391,9 @@ function geneticContextContent(data: JsonObject): string {
   if (rsids.length > 0) parts.push(rsids.join(", "));
   const modules = asList(data.modules);
   if (modules.length > 0) {
-    parts.push(`${modules.length} module ${modules.length === 1 ? "summary" : "summaries"} included.`);
+    parts.push(
+      `${modules.length} module ${modules.length === 1 ? "summary" : "summaries"} included.`,
+    );
   }
   if (asText(data.next_cursor)) parts.push("More markers are available.");
   return parts.join(" ");
@@ -439,6 +432,10 @@ export function buildContent(operation: ToolName | undefined, response: ToolResp
       return "Analysis overview card displayed.";
     case "show_analysis_followups":
       return "Follow-up card displayed.";
+    case "get_consent":
+      return "Current privacy notice and consent choices returned to the component.";
+    case "save_consent":
+      return "Selected privacy choices saved for this connection.";
     case "get_snp_catalog":
       return "SNP catalog returned for the DNA import component.";
     case "create_report":

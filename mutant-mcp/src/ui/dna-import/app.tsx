@@ -55,6 +55,7 @@ import {
   type SentAction,
 } from "../shared/host";
 import { parseDnaFile } from "./parseFile";
+import { EmbeddedConsent } from "./EmbeddedConsent";
 
 // Kept as a re-export: the prompt handoff is shared with the follow-up card, but
 // existing imports and tests read it from the overview component.
@@ -309,11 +310,10 @@ const ERROR_MESSAGES: Record<string, string> = {
     "The processed DNA data is too large to submit in one request. Contact support@mutantbiotech.com.",
   service_unavailable: "Mutant is temporarily unavailable. Please try again in a moment.",
   consent_required:
-    "Mutant needs your consent before importing DNA data or sharing findings. Open Mutant, review the current notice, and accept it, then try again.",
+    "Mutant needs your consent before importing DNA data or sharing findings. Review the privacy choices below to continue.",
   deletion_in_progress:
     "This account's data is being deleted. Importing and reading findings are paused until it finishes. Try again shortly.",
-  data_deleted:
-    "This account's data was deleted. Import your DNA again to start a new analysis.",
+  data_deleted: "This account's data was deleted. Import your DNA again to start a new analysis.",
   integration_revoked:
     "Your Mutant connection was reset. Reconnect Mutant in ChatGPT, then try again.",
   analysis_failed:
@@ -379,7 +379,10 @@ type DeletionState = "in_progress" | "deleted";
 
 function deletionStateFrom(error: ToolResponse["error"] | undefined): DeletionState | null {
   if (!error) return null;
-  if (error.code === "DELETION_IN_PROGRESS" || error.app_code === APP_ERROR_CODES.deletion_in_progress) {
+  if (
+    error.code === "DELETION_IN_PROGRESS" ||
+    error.app_code === APP_ERROR_CODES.deletion_in_progress
+  ) {
     return "in_progress";
   }
   if (error.code === "DATA_DELETED" || error.app_code === APP_ERROR_CODES.data_deleted) {
@@ -485,14 +488,11 @@ function consentStateFrom(
  * `show_dna_import` recovery route). Distinct from a refusal: the tool succeeds,
  * but the component must open the privacy choices instead of the upload UI.
  */
-function consentViewRequested(result: {
-  structuredContent?: unknown;
-  _meta?: unknown;
-}): boolean {
+function consentViewRequested(result: { structuredContent?: unknown; _meta?: unknown }): boolean {
   const envelope = envelopeOf(result as Parameters<typeof envelopeOf>[0]);
   const dataMode = envelope ? asRecord(envelope.data)?.view : undefined;
   const metaMode = asRecord(asRecord(result._meta)?.mutant)?.view;
-  return dataMode === "consent" || metaMode === "consent";
+  return dataMode === "consent" || metaMode === "consent" || isConsentRequired(envelope?.error);
 }
 
 function formatCount(value: number): string {
@@ -631,8 +631,7 @@ function statusOf(envelope: ToolResponse): StatusInfo {
             : "unknown";
 
   const rawDna = data.dna_status;
-  const dnaStatus: DnaStatus =
-    rawDna === "missing" || rawDna === "available" ? rawDna : "unknown";
+  const dnaStatus: DnaStatus = rawDna === "missing" || rawDna === "available" ? rawDna : "unknown";
 
   const refreshOffered =
     experience === "READY_REFRESH_AVAILABLE" || experience === "READY_REFRESH_PROCESSING";
@@ -692,9 +691,7 @@ function overviewSnapshotFrom(result: {
   // without fetching or appending the rest; a backend that omits it is treated
   // as having shown everything.
   const totalAccessible =
-    typeof data.total_accessible_count === "number"
-      ? data.total_accessible_count
-      : items.length;
+    typeof data.total_accessible_count === "number" ? data.total_accessible_count : items.length;
   return {
     version: firstString(data.displayed_analysis_version, envelope?.analysis_version),
     items,
@@ -1254,7 +1251,23 @@ export function DnaImportApp({
             true,
           );
           if (consent) {
-            pendingActionRef.current = null;
+            const action = asRecord(asRecord(asRecord(result._meta)?.mutant)?.pending_action);
+            const allowed = [
+              "explain_health_hypothesis",
+              "get_supporting_evidence",
+              "get_genetic_context",
+              "list_health_hypotheses",
+              "get_analysis_context",
+              "show_analysis_overview",
+            ];
+            pendingActionRef.current =
+              action && typeof action.tool === "string" && allowed.includes(action.tool)
+                ? {
+                    tool: action.tool,
+                    args: asRecord(action.args) ?? {},
+                    source: "consent_recovery",
+                  }
+                : null;
             consentSyncFailedRef.current = false;
             setConsentSyncFailed(false);
             setConsentLinkError(null);
@@ -1403,33 +1416,36 @@ export function DnaImportApp({
   /** The comparison panel stacks at phone width; three-up otherwise. */
   const narrow = useNarrowViewport();
 
-  const loadCatalog = useCallback(async (client: App) => {
-    setCatalogError(null);
-    try {
-      const result = await client.callServerTool({ name: "get_snp_catalog", arguments: {} });
-      const envelope = envelopeOf(result);
-      if (result.isError || !envelope || !envelope.ok) {
-        enterConsentRecovery(result, envelope?.error, CONSENT_PURPOSE_GENETIC_PROCESSING, {
-          tool: "get_snp_catalog",
-          args: {},
-          source: "catalog",
-        });
-        // Never surface a generic error when consent is the blocker.
-        if (!isConsentRequired(envelope?.error)) {
-          setCatalogError(errorMessage(envelope?.error));
+  const loadCatalog = useCallback(
+    async (client: App) => {
+      setCatalogError(null);
+      try {
+        const result = await client.callServerTool({ name: "get_snp_catalog", arguments: {} });
+        const envelope = envelopeOf(result);
+        if (result.isError || !envelope || !envelope.ok) {
+          enterConsentRecovery(result, envelope?.error, CONSENT_PURPOSE_GENETIC_PROCESSING, {
+            tool: "get_snp_catalog",
+            args: {},
+            source: "catalog",
+          });
+          // Never surface a generic error when consent is the blocker.
+          if (!isConsentRequired(envelope?.error)) {
+            setCatalogError(errorMessage(envelope?.error));
+          }
+          return;
         }
-        return;
+        const next = toCatalog(envelope);
+        if (!next) {
+          setCatalogError(messageFor("catalog_unavailable"));
+          return;
+        }
+        setCatalog(next);
+      } catch {
+        setCatalogError(messageFor("service_unavailable"));
       }
-      const next = toCatalog(envelope);
-      if (!next) {
-        setCatalogError(messageFor("catalog_unavailable"));
-        return;
-      }
-      setCatalog(next);
-    } catch {
-      setCatalogError(messageFor("service_unavailable"));
-    }
-  }, [enterConsentRecovery]);
+    },
+    [enterConsentRecovery],
+  );
 
   /**
    * Ask the server where this account stands. This is the component's only
@@ -1908,7 +1924,7 @@ export function DnaImportApp({
   const startedAt = startedAtRef.current;
   const elapsedMs = startedAt === null ? 0 : Math.max(0, now - startedAt);
   const isFull = isFullAccount(analysis);
-  const planNotice = isFull ? null : analysis?.planNotice ?? null;
+  const planNotice = isFull ? null : (analysis?.planNotice ?? null);
 
   /** Resume polling after the ceiling or a run of transient failures. */
   const checkAgain = useCallback(() => {
@@ -2136,6 +2152,32 @@ export function DnaImportApp({
   const resumePendingAction = useCallback(async (): Promise<boolean> => {
     if (!app) return false;
     const pending = pendingActionRef.current;
+    if (pending?.source === "consent_recovery") {
+      const result = await app.callServerTool({ name: pending.tool, arguments: pending.args });
+      const envelope = envelopeOf(result);
+      if (!envelope?.ok) {
+        if (
+          !enterConsentRecovery(result, envelope?.error, CONSENT_PURPOSE_CHATGPT_SHARING, pending)
+        ) {
+          setFindingsState({ status: "error", message: errorMessage(envelope?.error) });
+        }
+        return false;
+      }
+      await app.updateModelContext({ content: [{ type: "text", text: JSON.stringify(envelope) }] });
+      const delivered = await deliverFollowUp(
+        app,
+        "Continue my previous Mutant request using the result just retrieved.",
+      );
+      if (delivered !== "sent") {
+        setFindingsState({
+          status: "error",
+          message:
+            "Your privacy choices were saved, but the question could not be continued. Please ask your original question again.",
+        });
+        return false;
+      }
+      return true;
+    }
     switch (pending?.tool) {
       case "show_analysis_overview":
         await reloadOverview();
@@ -2162,6 +2204,7 @@ export function DnaImportApp({
   }, [
     app,
     catalog,
+    enterConsentRecovery,
     loadCatalog,
     loadFindings,
     loadPromptChips,
@@ -2172,7 +2215,7 @@ export function DnaImportApp({
   ]);
 
   /**
-   * Re-attempt the refused operation after the user has accepted in the portal.
+   * Re-attempt the refused operation after confirmed embedded or portal acceptance.
    * The card never trusts a local checkbox: it clears the consent state and lets
    * the authoritative backend answer again, so an unchecked or withdrawn grant
    * returns the consent card instead of a success. A double click is single-flight.
@@ -2497,8 +2540,8 @@ export function DnaImportApp({
 
   // A server-side consent rejection outranks every stage: the connection is
   // valid, but the sensitive operation cannot proceed until the account grants
-  // consent. The card must not ask the user to reconnect. PRIV-05 owns the
-  // hosted flow and final wording.
+  // consent. The embedded form saves through the existing authenticated connection;
+  // the portal remains a fallback.
   if (consentRequired) {
     // The refused operation decides the wording: importing DNA needs genetic
     // processing; any read needs permission to share findings with ChatGPT. The
@@ -2522,17 +2565,10 @@ export function DnaImportApp({
           aria-live="polite"
           style={{ width: "100%" }}
         >
-          <h1
-            id="mutant-consent-heading"
-            ref={consentHeadingRef}
-            tabIndex={-1}
-            style={styles.h1}
-          >
+          <h1 id="mutant-consent-heading" ref={consentHeadingRef} tabIndex={-1} style={styles.h1}>
             {analysisReady ? "Analysis ready" : "Privacy review required"}
           </h1>
-          {analysisReady ? (
-            <p style={styles.subtitle}>Your DNA analysis is complete.</p>
-          ) : null}
+          {analysisReady ? <p style={styles.subtitle}>Your DNA analysis is complete.</p> : null}
           <div style={styles.privacy}>
             <p style={{ margin: "0 0 4px", fontWeight: 600 }}>Privacy review required</p>
             <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>{reasonText}</p>
@@ -2542,26 +2578,37 @@ export function DnaImportApp({
               </p>
             ) : null}
           </div>
-          <div style={styles.buttonRow}>
-            <button type="button" style={styles.primaryButton} onClick={openConsent}>
-              Review privacy choices
-            </button>
-            <button
-              type="button"
-              style={styles.secondaryButton}
-              onClick={retryAfterConsent}
-              disabled={consentChecking || consentSyncFailed}
-            >
-              {consentChecking ? "Checking…" : "I've accepted — check again"}
-            </button>
-            <button type="button" style={styles.subtleButton} onClick={cancelConsent}>
-              Not now
-            </button>
-          </div>
+          {!consentSyncFailed && !consentChecking ? (
+            <EmbeddedConsent
+              app={app}
+              requiredPurpose={consentRequired.purpose}
+              onComplete={retryAfterConsent}
+              onCancel={cancelConsent}
+            />
+          ) : null}
+          <details style={{ marginTop: 16 }}>
+            <summary>Use the website instead</summary>
+            <div style={styles.buttonRow}>
+              <button type="button" style={styles.primaryButton} onClick={openConsent}>
+                Review privacy choices
+              </button>
+              <button
+                type="button"
+                style={styles.secondaryButton}
+                onClick={retryAfterConsent}
+                disabled={consentChecking || consentSyncFailed}
+              >
+                {consentChecking ? "Checking…" : "I've accepted — check again"}
+              </button>
+              <button type="button" style={styles.subtleButton} onClick={cancelConsent}>
+                Not now
+              </button>
+            </div>
+          </details>
           {consentSyncFailed ? (
             <div style={styles.notice} role="status">
-              Consent is saved, but Mutant still can't confirm it for this session. Reopen the
-              panel or reconnect ChatGPT to Mutant, then try again.
+              Consent is saved, but Mutant still can't confirm it for this session. Reopen the panel
+              or reconnect ChatGPT to Mutant, then try again.
             </div>
           ) : null}
           {consentLinkError ? <ErrorPanel message={consentLinkError} /> : null}
@@ -2680,9 +2727,7 @@ export function DnaImportApp({
     // hands its server-authored prompt to ChatGPT on click.
     const compareTopThreePrompt =
       prompts.find((chip) => chip.id === COMPARE_TOP_THREE_PROMPT_ID) ?? null;
-    const otherPrompts = secondaryPrompts.filter(
-      (chip) => chip.id !== COMPARE_TOP_THREE_PROMPT_ID,
-    );
+    const otherPrompts = secondaryPrompts.filter((chip) => chip.id !== COMPARE_TOP_THREE_PROMPT_ID);
     return (
       <Shell>
         <h1 style={styles.h1}>Analysis ready</h1>
@@ -2711,7 +2756,8 @@ export function DnaImportApp({
 
         {showOverviewCountCue ? (
           <p style={styles.meta}>
-            Showing your top {formatCount(loaded!.length)} of {formatCount(totalAccessible!)} findings.
+            Showing your top {formatCount(loaded!.length)} of {formatCount(totalAccessible!)}{" "}
+            findings.
           </p>
         ) : null}
 
@@ -2726,7 +2772,10 @@ export function DnaImportApp({
                 <button
                   type="button"
                   style={styles.subtleButton}
-                  disabled={pendingActionId === `explain-finding-${finding.rank}` || findingsRecovery === "loading"}
+                  disabled={
+                    pendingActionId === `explain-finding-${finding.rank}` ||
+                    findingsRecovery === "loading"
+                  }
                   onClick={() =>
                     void askChatGpt({
                       id: `explain-finding-${finding.rank}`,
@@ -2752,7 +2801,9 @@ export function DnaImportApp({
           </p>
         )}
 
-        {findings.status === "error" && findingsRecovery !== "error" ? <ErrorPanel message={findings.message} /> : null}
+        {findings.status === "error" && findingsRecovery !== "error" ? (
+          <ErrorPanel message={findings.message} />
+        ) : null}
 
         {loaded || findingsRecovery === "loading" || findingsRecovery === "error" ? null : (
           <div style={styles.buttonRow}>
@@ -2895,10 +2946,7 @@ export function DnaImportApp({
                       }}
                     >
                       {comparison.items.map((finding) => (
-                        <li
-                          key={`${finding.rank}-${finding.title}`}
-                          style={styles.comparisonItem}
-                        >
+                        <li key={`${finding.rank}-${finding.title}`} style={styles.comparisonItem}>
                           <p style={styles.findingTitle}>
                             {finding.rank}. {finding.title}
                           </p>
@@ -2912,9 +2960,7 @@ export function DnaImportApp({
                               {finding.geneticEvidence ? ` (${finding.geneticEvidence})` : ""}
                             </p>
                           ) : finding.geneticEvidence ? (
-                            <p style={styles.small}>
-                              Genetic evidence: {finding.geneticEvidence}
-                            </p>
+                            <p style={styles.small}>Genetic evidence: {finding.geneticEvidence}</p>
                           ) : null}
                         </li>
                       ))}
@@ -3230,9 +3276,9 @@ export function DnaImportApp({
         </p>
         <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>
           Only variants used by Mutant are submitted
-          {totalMarkers ? ` (${formatCount(totalMarkers)} markers in the Mutant panel)` : ""}. Mutant
-          stores those selected genetic calls and your analysis; your raw DNA file is never uploaded
-          or stored.
+          {totalMarkers ? ` (${formatCount(totalMarkers)} markers in the Mutant panel)` : ""}.
+          Mutant stores those selected genetic calls and your analysis; your raw DNA file is never
+          uploaded or stored.
         </p>
       </div>
 

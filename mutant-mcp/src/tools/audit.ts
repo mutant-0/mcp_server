@@ -33,6 +33,8 @@ export type ToolCallStatus = "ok" | "error" | "scope_denied";
  * a sender-invented key is never persisted. Values are never recorded here.
  */
 const KNOWN_ARGUMENTS: Record<ToolName, readonly string[]> = {
+  get_consent: [],
+  save_consent: ["notice_version", "purposes"],
   get_analysis_status: [],
   poll_analysis_status: [],
   show_analysis_overview: [],
@@ -78,6 +80,8 @@ const KNOWN_ARGUMENTS: Record<ToolName, readonly string[]> = {
  * capture cannot persist genotypes, filenames, or the transient context.
  */
 const ROUTING_ARGUMENTS: Record<ToolName, readonly string[]> = {
+  get_consent: [],
+  save_consent: ["notice_version", "purposes"],
   get_analysis_status: [],
   poll_analysis_status: [],
   show_analysis_overview: [],
@@ -143,18 +147,12 @@ export interface AuditOutcome {
 }
 
 /** The known argument names present, drawn from the tool's schema keys. */
-export function knownArgumentNames(
-  tool: ToolName,
-  args: Record<string, unknown>,
-): string[] {
+export function knownArgumentNames(tool: ToolName, args: Record<string, unknown>): string[] {
   return KNOWN_ARGUMENTS[tool].filter((key) => key in args).sort();
 }
 
 /** Routing-relevant values only, and only for a designated synthetic capture. */
-function capturedArguments(
-  tool: ToolName,
-  args: Record<string, unknown>,
-): Record<string, unknown> {
+function capturedArguments(tool: ToolName, args: Record<string, unknown>): Record<string, unknown> {
   const captured: Record<string, unknown> = {};
   for (const key of ROUTING_ARGUMENTS[tool]) {
     if (key in args) captured[key] = args[key];

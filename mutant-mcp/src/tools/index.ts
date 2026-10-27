@@ -12,6 +12,8 @@ import {
   responseErrorCode,
   type AuditContext,
 } from "./audit.js";
+import { getConsentTool, saveConsentTool } from "./consent.js";
+import { attachConsentPendingAction } from "./consent-pending.js";
 import { createReportTool } from "./create-report.js";
 import { getAnalysisContextTool } from "./get-analysis-context.js";
 import { getAnalysisStatusTool } from "./get-analysis-status.js";
@@ -41,6 +43,8 @@ export const TOOL_DEFINITIONS: MutantToolDefinition[] = [
   showDnaImportTool,
   getSnpCatalogTool,
   createReportTool,
+  getConsentTool,
+  saveConsentTool,
 ];
 
 /**
@@ -141,7 +145,11 @@ export function registerTools(
         }
 
         try {
-          const result = await definition.handler(callArgs, runtime);
+          const result = attachConsentPendingAction(
+            await definition.handler(callArgs, runtime),
+            definition,
+            callArgs,
+          );
           const failed = result.isError === true;
           runtime.logger.info(
             auditToolCall(definition.name, callArgs, auditContext, {

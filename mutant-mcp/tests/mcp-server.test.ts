@@ -35,7 +35,7 @@ describe("MCP server integration", () => {
     const { client } = await connectServer();
     const result = await client.listTools();
     expect(result.tools.map((tool) => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
-    expect(result.tools).toHaveLength(12);
+    expect(result.tools).toHaveLength(TOOL_NAMES.length);
     for (const tool of result.tools) {
       expect(tool.inputSchema).toBeDefined();
       expect(tool.outputSchema).toBeDefined();
@@ -45,7 +45,12 @@ describe("MCP server integration", () => {
   it("advertises each tool's own OAuth scope", async () => {
     const { client } = await connectServer();
     const result = await client.listTools();
-    const dnaTools = new Set(["show_dna_import", "get_snp_catalog", "create_report"]);
+    const dnaTools = new Set([
+      "show_dna_import",
+      "get_snp_catalog",
+      "create_report",
+      "save_consent",
+    ]);
     for (const tool of result.tools) {
       const meta = tool._meta as { securitySchemes?: Array<{ scopes: string[] }> } | undefined;
       const expected = dnaTools.has(tool.name) ? DNA_SCOPE : ANALYSIS_SCOPE;
@@ -95,8 +100,7 @@ describe("MCP server integration", () => {
     const result = await client.callTool({ name: "show_analysis_overview", arguments: {} });
     expect(result.isError).toBe(true);
     const meta = result._meta as
-      | { ui?: unknown; mutant?: unknown; "openai/outputTemplate"?: unknown }
-      | undefined;
+      { ui?: unknown; mutant?: unknown; "openai/outputTemplate"?: unknown } | undefined;
     // An unready analysis is a structured error, never a card: the overview
     // component must not mount from a failed snapshot resolution.
     expect(meta?.ui).toBeUndefined();
@@ -142,7 +146,10 @@ describe("MCP server integration", () => {
               upgrade_url: "http://localhost:3000/cart",
               plan_notice: {
                 text: "Your Mutant Free plan includes your top three ranked findings.",
-                learn_more: { label: "Learn about Mutant plans", url: "http://localhost:3000/cart" },
+                learn_more: {
+                  label: "Learn about Mutant plans",
+                  url: "http://localhost:3000/cart",
+                },
               },
             })
           : makeStatusData({
@@ -244,15 +251,16 @@ describe("MCP server integration", () => {
     // Status is a routing read, never a UI response: no UI descriptor is carried
     // even when a refresh is available, so a status-only path cannot imply a card.
     const meta = result._meta as
-      | { ui?: unknown; mutant?: unknown; "openai/outputTemplate"?: unknown }
-      | undefined;
+      { ui?: unknown; mutant?: unknown; "openai/outputTemplate"?: unknown } | undefined;
     expect(meta?.ui).toBeUndefined();
     expect(meta?.mutant).toBeUndefined();
     expect(meta?.["openai/outputTemplate"]).toBeUndefined();
     expect((result.content as Array<{ text: string }>)[0]?.text).toContain(
       "refreshing is optional and your current results remain usable",
     );
-    expect((result.content as Array<{ text: string }>)[0]?.text).toContain("show_analysis_overview");
+    expect((result.content as Array<{ text: string }>)[0]?.text).toContain(
+      "show_analysis_overview",
+    );
   });
 
   it("advertises the overview UI descriptor on the display tool", async () => {
@@ -260,15 +268,13 @@ describe("MCP server integration", () => {
     const tools = await client.listTools();
     const overview = tools.tools.find((tool) => tool.name === "show_analysis_overview");
     const meta = overview?._meta as
-      | { ui?: { resourceUri?: string }; "openai/outputTemplate"?: string }
-      | undefined;
+      { ui?: { resourceUri?: string }; "openai/outputTemplate"?: string } | undefined;
     expect(meta?.ui?.resourceUri).toBe("ui://mutant/dna-import/v1.html");
     expect(meta?.["openai/outputTemplate"]).toBe("ui://mutant/dna-import/v1.html");
     // The general-purpose status tool declares no UI resource at all.
     const status = tools.tools.find((tool) => tool.name === "get_analysis_status");
     const statusMeta = status?._meta as
-      | { ui?: unknown; "openai/outputTemplate"?: unknown }
-      | undefined;
+      { ui?: unknown; "openai/outputTemplate"?: unknown } | undefined;
     expect(statusMeta?.ui).toBeUndefined();
     expect(statusMeta?.["openai/outputTemplate"]).toBeUndefined();
   });
@@ -350,7 +356,9 @@ describe("MCP server integration", () => {
 
   it("keeps consented family history in ChatGPT and separate from the user's DNA", () => {
     expect(SERVER_INSTRUCTIONS).toContain("record owner's own account");
-    expect(SERVER_INSTRUCTIONS).toContain("Never tell the user to connect a relative's medical records");
+    expect(SERVER_INSTRUCTIONS).toContain(
+      "Never tell the user to connect a relative's medical records",
+    );
     expect(SERVER_INSTRUCTIONS).toContain("establish whose information each fact comes from");
     expect(SERVER_INSTRUCTIONS).toContain("never attribute a relative's condition to the user");
     expect(SERVER_INSTRUCTIONS).toContain("omit list_health_hypotheses.query");
@@ -435,7 +443,9 @@ function processingStatusData(state: string): Record<string, unknown> {
 describe("processing-state UX (component-owned)", () => {
   for (const { state, text } of PROCESSING_STATES) {
     it(`omits prompts, shortens content, and keeps flags false for ${state}`, async () => {
-      const { client } = await connectServer(() => makeSuccessResponse(processingStatusData(state)));
+      const { client } = await connectServer(() =>
+        makeSuccessResponse(processingStatusData(state)),
+      );
       for (const tool of ["get_analysis_status", "poll_analysis_status"]) {
         const result = await client.callTool({ name: tool, arguments: {} });
         expect(result.isError).toBe(false);
@@ -458,7 +468,9 @@ describe("processing-state UX (component-owned)", () => {
     });
 
     it(`keeps the polling next_action only on the model path (${state})`, async () => {
-      const { client } = await connectServer(() => makeSuccessResponse(processingStatusData(state)));
+      const { client } = await connectServer(() =>
+        makeSuccessResponse(processingStatusData(state)),
+      );
       const model = (await client.callTool({ name: "get_analysis_status", arguments: {} }))
         .structuredContent as ToolResponse;
       expect((model.data as Record<string, unknown>).next_action).toEqual({

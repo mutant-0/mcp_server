@@ -1,3 +1,4 @@
+import { makeConsentData } from "./helpers.js";
 import { describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -37,6 +38,8 @@ import {
 
 /** Minimal arguments that satisfy each tool's input schema. */
 const MINIMAL_ARGS: Record<ToolName, Record<string, unknown>> = {
+  get_consent: {},
+  save_consent: { notice_version: "2026-10-01", purposes: ["chatgpt_sharing"] },
   get_analysis_status: {},
   poll_analysis_status: {},
   show_analysis_overview: {},
@@ -170,6 +173,9 @@ function contextData(): Record<string, unknown> {
 /** A response with the 3.0.0 shape the content builders expect for each tool. */
 function dataFor(operation: BackendOperation): Record<string, unknown> {
   switch (operation) {
+    case "get_consent":
+    case "save_consent":
+      return makeConsentData();
     case "resolve_analysis_snapshot":
     case "show_analysis_overview":
       return {
@@ -493,7 +499,9 @@ describe("contract v3.0 acceptance", () => {
     ] as const;
     for (const name of withPrompts) {
       const result = await client.callTool({ name, arguments: MINIMAL_ARGS[name] });
-      const data = envelopeOf(result).data as { suggested_prompts?: Array<Record<string, unknown>> };
+      const data = envelopeOf(result).data as {
+        suggested_prompts?: Array<Record<string, unknown>>;
+      };
       const prompts = data.suggested_prompts ?? [];
       expect(prompts.length, `${name} prompt count`).toBeGreaterThan(0);
       expect(prompts.length, `${name} prompt count`).toBeLessThanOrEqual(6);
@@ -942,16 +950,12 @@ describe("contract v3.0 acceptance", () => {
 
   it("rejects a stale analysis_version with ANALYSIS_VERSION_CHANGED", async () => {
     const { client } = await connect(() =>
-      makeErrorResponse(
-        "ANALYSIS_VERSION_CHANGED",
-        "The analysis changed since that revision.",
-        {
-          next_action: {
-            tool: "show_analysis_overview",
-            reason: "Re-resolve the current analysis revision.",
-          },
+      makeErrorResponse("ANALYSIS_VERSION_CHANGED", "The analysis changed since that revision.", {
+        next_action: {
+          tool: "show_analysis_overview",
+          reason: "Re-resolve the current analysis revision.",
         },
-      ),
+      }),
     );
     const result = await client.callTool({
       name: "explain_health_hypothesis",
@@ -968,7 +972,12 @@ describe("contract v3.0 acceptance", () => {
     const { client } = await connect(() =>
       makeErrorResponse("CONSENT_REQUIRED", "Consent is required.", {
         app_code: "consent_required",
-        consent: { required: true, current: false, reason: "NOTICE_REQUIRED", notice_version: "2026-10-01" },
+        consent: {
+          required: true,
+          current: false,
+          reason: "NOTICE_REQUIRED",
+          notice_version: "2026-10-01",
+        },
         next_action: { tool: "show_dna_import", arguments: { view: "consent" } },
       }),
     );
@@ -1068,9 +1077,7 @@ describe("contract v3.0 acceptance", () => {
   });
 
   it("maps INTEGRATION_REVOKED to the component application code", () => {
-    expect(appErrorCode(ErrorCode.INTEGRATION_REVOKED)).toBe(
-      APP_ERROR_CODES.integration_revoked,
-    );
+    expect(appErrorCode(ErrorCode.INTEGRATION_REVOKED)).toBe(APP_ERROR_CODES.integration_revoked);
     expect(ErrorCode.INTEGRATION_REVOKED).toBe("INTEGRATION_REVOKED");
   });
 
