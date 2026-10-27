@@ -170,6 +170,19 @@ function statusPrompts(data: JsonObject, analysisVersion: string | null): Prompt
   return out.slice(0, MAX_SUGGESTIONS);
 }
 
+/** Also available to the ready card when interpretation context cannot load. */
+export function historyComparisonPrompt(analysisVersion: string | null): PromptSuggestion {
+  return {
+    id: "compare-medical-records",
+    label: "Compare with my history",
+    prompt:
+      "Which of my top three Mutant findings seems most relevant to the health history I've shared? What supports or argues against each? If I have not shared any health history in this conversation, ask me what I want to share before comparing; do not imply access to records I have not provided, and do not assume symptoms or test results I have not given you.",
+    heading: "Mutant follow-up: Compare with my history",
+    intent: "comparison",
+    action: action("comparison", analysisVersion),
+  };
+}
+
 function contextPrompts(data: JsonObject, analysisVersion: string | null): PromptSuggestion[] {
   const access = asRecord(data.access);
   const isFull = access ? asText(access.hypothesis_scope) === "all" : false;
@@ -183,15 +196,7 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
   // and family comparison stay available, and Full keeps its separate broader
   // comparison option.
   const out: PromptSuggestion[] = [
-    {
-      id: "compare-medical-records",
-      label: "Compare with my history",
-      prompt:
-        "Which of my top three Mutant findings seems most relevant to the health history I've shared? What supports or argues against each? If I have not shared any health history in this conversation, ask me what I want to share before comparing; do not imply access to records I have not provided, and do not assume symptoms or test results I have not given you.",
-      heading: "Mutant follow-up: Compare with my history",
-      intent: "comparison",
-      action: action("comparison", analysisVersion),
-    },
+    historyComparisonPrompt(analysisVersion),
     {
       id: "explain-first",
       label: "Explain #1",

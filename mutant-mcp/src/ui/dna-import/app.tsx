@@ -38,6 +38,7 @@ import {
   type ToolResponse,
 } from "../../contract";
 import { DARK_PALETTE, LIGHT_PALETTE, paletteVars } from "../shared/theme";
+import { historyComparisonPrompt } from "../../presentation/prompts";
 import {
   FOLLOW_UP_FAILED_MESSAGE,
   FOLLOW_UP_UNAVAILABLE_MESSAGE,
@@ -2665,10 +2666,15 @@ export function DnaImportApp({
         : null;
     const showOverviewCountCue =
       isFull && loaded !== null && totalAccessible !== null && totalAccessible > loaded.length;
-    // The server orders comparison first; the card renders that one entry as its
-    // most prominent action and the rest as secondary chips, without rebuilding
-    // the request. A card that cannot identify it falls back to plain chips.
-    const primaryPrompt = prompts.find((chip) => chip.id === COMPARISON_PROMPT_ID) ?? null;
+    // The card renders history comparison as its most prominent action and the
+    // remaining context suggestions as secondary chips.
+    // The main comparison action must survive an unavailable context read. Use
+    // the shared server-authored request, pinned to the findings on this card.
+    const primaryPrompt =
+      prompts.find((chip) => chip.id === COMPARISON_PROMPT_ID) ??
+      (loaded?.length && displayedVersionRef.current
+        ? historyComparisonPrompt(displayedVersionRef.current)
+        : null);
     const secondaryPrompts = prompts.filter((chip) => chip.id !== COMPARISON_PROMPT_ID);
     // The compare chip owns an in-card panel; every other secondary chip still
     // hands its server-authored prompt to ChatGPT on click.
@@ -2802,7 +2808,7 @@ export function DnaImportApp({
                   id: primaryPrompt.id,
                   label: primaryPrompt.label,
                   prompt: primaryPrompt.prompt,
-                  heading: primaryPrompt.heading,
+                  heading: primaryPrompt.heading ?? null,
                   boundVersion: firstString(primaryPrompt.action?.analysis_version),
                 })
               }

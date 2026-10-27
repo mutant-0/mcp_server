@@ -23,6 +23,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DnaImportApp, deliverFollowUp, type DnaImportAppProps } from "../src/ui/dna-import/app";
 import { makeContextData, makeErrorResponse, makeSuccessResponse } from "./helpers.js";
+import { historyComparisonPrompt } from "../src/presentation/prompts.js";
 
 type ToolResponse = ReturnType<typeof makeSuccessResponse>;
 
@@ -1331,6 +1332,50 @@ describe("DNA import component", () => {
     expect(planLink.getAttribute("target")).toBe("_blank");
     fireEvent.click(planLink);
     await waitFor(() => expect(bridge.openLinks).toEqual(["https://mutantgenomics.com/plans"]));
+  });
+
+  it.each(["import", "overview"])(
+    "keeps the Free history comparison available after a failed context read on the %s route",
+    async (route) => {
+      const bridge = renderWith({
+        poll_analysis_status: statusResponse("ready"),
+        get_analysis_context: makeErrorResponse("SERVICE_UNAVAILABLE", "Context unavailable"),
+      });
+      await screen.findByText(/Analysis ready/i);
+      if (route === "overview") {
+        bridge.sendToolResult(boundOverview(), { mutant: { mode: "overview" } });
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+      }
+      await screen.findByText(/Alpha finding/i);
+      await waitFor(() => expect(bridge.callsTo("get_analysis_context")).toHaveLength(1));
+
+      const compare = screen.getByRole("button", { name: "Compare with my history" });
+      fireEvent.click(compare);
+      fireEvent.click(compare);
+      await waitFor(() => expect(bridge.messages).toHaveLength(1));
+      const sent = JSON.stringify(bridge.messages[0]);
+      expect(sent).toContain(historyComparisonPrompt("analysis_1").prompt);
+      expect(bridge.callsTo("poll_analysis_status").length).toBeGreaterThan(1);
+      expect(screen.getByText(/Alpha finding/i)).toBeDefined();
+    },
+  );
+
+  it("blocks the fallback history comparison when the displayed analysis has changed", async () => {
+    let version = "analysis_1";
+    const bridge = renderWith({
+      poll_analysis_status: () => readyAt(version),
+      get_analysis_context: makeErrorResponse("SERVICE_UNAVAILABLE", "Context unavailable"),
+      show_analysis_overview: boundOverview("analysis_2"),
+    });
+    await screen.findByText(/Analysis ready/i);
+    fireEvent.click(screen.getByRole("button", { name: /view my top 3 findings/i }));
+    await screen.findByText(/Alpha finding/i);
+
+    version = "analysis_2";
+    fireEvent.click(screen.getByRole("button", { name: "Compare with my history" }));
+    await screen.findByText(/Findings updated/);
+    expect(bridge.messages).toHaveLength(0);
   });
 
   it("sends the server-selected comparison prompt once, even on a double click", async () => {
