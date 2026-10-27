@@ -10,7 +10,7 @@ export const listHealthHypothesesTool: MutantToolDefinition = {
     "Priority orders investigations and is not disease probability. For scoring v3.4, converging patterns add no separate ranking bonus. Interpret historical results using saved components. " +
     "List or search the health hypotheses in the current analysis. Send catalog-topic keywords " +
     "only, never patient-specific or family-member health information. Omit query entirely when " +
-    "comparing the user's findings with a relative's records in ChatGPT. Free accounts see their fixed top three; " +
+    "comparing the user's findings with consented family history shared in ChatGPT. Free accounts see their fixed top three; " +
     "Full accounts can search the whole analyzed set. This is never the initial display route: " +
     "for a broad opening question (\"What are my top hypotheses?\", \"Show my results\", \"What did " +
     'Mutant find?"), call get_analysis_status then show_analysis_overview so the card presents ' +

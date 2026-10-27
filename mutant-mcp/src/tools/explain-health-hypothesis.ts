@@ -27,8 +27,11 @@ export const explainHealthHypothesisTool: MutantToolDefinition = {
     "modules, patterns, variants, sources, tests, or exact scores. " +
     "Personal history, symptoms, laboratory results, medications, and prior reactions may be " +
     "attributed to the user only when the user or an authorized context source supplied them; " +
-    "a relative's records describe that relative and must not be attributed to the user. " +
-    "catalog cofactors, confounders, cautions, and guardrails are general guidance and must " +
+    "use a biological relative's health information only when they have consented to share " +
+    "it and it is actually available in this ChatGPT conversation. Their connected ChatGPT " +
+    "Health records remain in their own account; never imply access to that account or " +
+    "attribute their conditions or lab results to the user. " +
+    "Catalog cofactors, confounders, cautions, and guardrails are general guidance and must " +
     "never be restated as the user's history or experience. Keep genetic findings distinct " +
     "from symptoms or test results the user has not reported. Use priority_score to order " +
     "investigations and genetic_support for hypothesis-specific strength within the analyzed " +

@@ -668,7 +668,8 @@ describe("contract v3.0 acceptance", () => {
     expect(family?.label).toBe("Compare family history");
     expect(family?.action?.analysis_version).toBe("rev42-v3.0.0");
     expect(family?.action?.intent).toBe("comparison");
-    expect(family?.prompt).toMatch(/authorized sharing/);
+    expect(family?.prompt).toMatch(/own medical records in their own account/);
+    expect(family?.prompt).toMatch(/consented to share/);
     expect(family?.prompt).toMatch(/without a search query/);
     expect(family?.prompt).not.toMatch(/list_health_hypotheses/);
 
