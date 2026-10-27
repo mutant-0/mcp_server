@@ -523,7 +523,34 @@ describe("contract v3.0 acceptance", () => {
     }
   });
 
-  it("bounds the why-ranked heading when the finding name is very long", async () => {
+  it("replaces the legacy rank follow-up with bound clinician questions", async () => {
+    const { client } = await connect();
+    const result = await client.callTool({
+      name: "show_analysis_followups",
+      arguments: {
+        intent: "explanation",
+        analysis_version: "rev42-v3.0.0",
+        hypothesis_ids: ["HYP_A"],
+      },
+    });
+    expect(result.isError).toBe(false);
+    const data = envelopeOf(result).data as { actions: Array<Record<string, unknown>> };
+    expect(data.actions[0]).toMatchObject({
+      id: "clinician-questions",
+      label: "Questions for my clinician",
+      intent: "clinician_questions",
+      hypothesis_id: "HYP_A",
+      action: {
+        analysis_version: "rev42-v3.0.0",
+        hypothesis_id: "HYP_A",
+        intent: "clinician_questions",
+      },
+    });
+    expect(data.actions[0]?.prompt).toContain('"Alpha finding"');
+    expect(data.actions[0]?.prompt).toContain("rather than repeating the ranking");
+  });
+
+  it("bounds the clinician question heading when the finding name is very long", async () => {
     const base = makeDetailsData();
     const longName =
       "Extremely long backend-authored hypothesis name that would otherwise overflow the cap";
@@ -543,7 +570,9 @@ describe("contract v3.0 acceptance", () => {
     const data = envelopeOf(result).data as {
       suggested_prompts?: Array<{ id: string; heading?: string }>;
     };
-    const whyRanked = (data.suggested_prompts ?? []).find((prompt) => prompt.id === "why-ranked");
+    const whyRanked = (data.suggested_prompts ?? []).find(
+      (prompt) => prompt.id === "clinician-questions",
+    );
     expect(whyRanked?.heading).toBeTruthy();
     expect(whyRanked?.heading).toMatch(/^Mutant follow-up: /);
     expect(whyRanked?.heading?.length).toBeLessThanOrEqual(80);

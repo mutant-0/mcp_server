@@ -1319,13 +1319,13 @@ only when a Free account has locked hypotheses:
   "displayed_hypotheses": [{ "id": "RC_A", "rank": 1, "name": "Alpha" }],
   "actions": [
     {
-      "id": "why-ranked",
-      "label": "Why this rank?",
-      "prompt": "Why did my \"Alpha\" finding rank where it did?",
-      "heading": "Mutant follow-up: Why \"Alpha\" ranked",
-      "intent": "explain",
+      "id": "clinician-questions",
+      "label": "Questions for my clinician",
+      "prompt": "What questions should I ask my clinician about my \"Alpha\" finding?",
+      "heading": "Mutant follow-up: Questions about \"Alpha\"",
+      "intent": "clinician_questions",
       "hypothesis_id": "RC_A",
-      "action": { "analysis_version": "rev42-v3.0.0", "hypothesis_id": "RC_A", "intent": "explain" }
+      "action": { "analysis_version": "rev42-v3.0.0", "hypothesis_id": "RC_A", "intent": "clinician_questions" }
     }
   ],
   "plan_notice": {
@@ -1337,7 +1337,7 @@ only when a Free account has locked hypotheses:
 
 The card is navigation only: it never carries the generated answer, hypothesis
 prose, evidence rows, genotypes, or the user's health history. Both intents offer
-the "Compare with my history" action — an explanation offers `Why this rank?`
+the "Compare with my history" action — an explanation offers `Questions for my clinician`
 then history, a comparison offers `Explain #1` then history — and its prompt
 explicitly asks the user what they wish to share before comparing.
 `resolve_analysis_followups` is internal-only: it is accepted by `parse_request`

@@ -23,18 +23,19 @@ const MAX_SUGGESTIONS = 6;
  * be built to fit instead of interpolated raw.
  */
 const MAX_HEADING_CHARS = 80;
-const RANK_HEADING_PREFIX = "Mutant follow-up: Why ";
-const RANK_HEADING_SUFFIX = " ranked";
-const RANK_HEADING_FALLBACK = "Mutant follow-up: Why this finding ranked";
+const CLINICIAN_HEADING_PREFIX = "Mutant follow-up: Questions about ";
+const CLINICIAN_HEADING_SUFFIX = "";
+const CLINICIAN_HEADING_FALLBACK = "Mutant follow-up: Questions for my clinician";
 
-/** Build the `why-ranked` heading, truncating a long finding name to fit. */
-function rankHeading(name: string | null): string {
-  if (!name) return RANK_HEADING_FALLBACK;
+/** Build the clinician discussion heading, truncating a long finding name to fit. */
+function clinicianHeading(name: string | null): string {
+  if (!name) return CLINICIAN_HEADING_FALLBACK;
   // The name renders quoted, so two characters are reserved for the quotes.
-  const budget = MAX_HEADING_CHARS - RANK_HEADING_PREFIX.length - RANK_HEADING_SUFFIX.length - 2;
+  const budget =
+    MAX_HEADING_CHARS - CLINICIAN_HEADING_PREFIX.length - CLINICIAN_HEADING_SUFFIX.length - 2;
   const bounded =
     name.length <= budget ? name : `${name.slice(0, Math.max(0, budget - 1)).trimEnd()}…`;
-  return `${RANK_HEADING_PREFIX}"${bounded}"${RANK_HEADING_SUFFIX}`;
+  return `${CLINICIAN_HEADING_PREFIX}"${bounded}"${CLINICIAN_HEADING_SUFFIX}`;
 }
 
 function asRecord(value: unknown): JsonObject | null {
@@ -104,10 +105,7 @@ function statusPrompts(data: JsonObject, analysisVersion: string | null): Prompt
       intent: "explain",
       action: action("explain", analysisVersion),
     });
-    if (
-      experience === "READY_REFRESH_AVAILABLE" ||
-      experience === "READY_REFRESH_PROCESSING"
-    ) {
+    if (experience === "READY_REFRESH_AVAILABLE" || experience === "READY_REFRESH_PROCESSING") {
       out.push({
         id: "why-refresh",
         label: "Why refresh?",
@@ -254,21 +252,29 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
   return out.slice(0, MAX_SUGGESTIONS);
 }
 
+export function clinicianQuestionsPrompt(
+  name: string | null,
+  id: string | null,
+  analysisVersion: string | null,
+): PromptSuggestion {
+  const ref = name ? `"${name}"` : "this";
+  return {
+    id: "clinician-questions",
+    label: "Questions for my clinician",
+    prompt: `Help me prepare a short list of questions for my clinician about my ${ref} finding. Build on the explanation already given rather than repeating the ranking. Focus on the main uncertainties, what history or existing results would help assess its relevance, and whether further evaluation is warranted. Use only the returned evidence and history I have actually shared; do not invent a validated confirmatory test, recommend treatment, or assume this finding requires testing.`,
+    heading: clinicianHeading(name),
+    intent: "clinician_questions",
+    action: action("clinician_questions", analysisVersion, id),
+  };
+}
+
 function detailsPrompts(data: JsonObject, analysisVersion: string | null): PromptSuggestion[] {
   const hypothesis = asRecord(data.hypothesis);
   const id = hypothesis ? asText(hypothesis.id) : null;
   const name = hypothesis ? asText(hypothesis.name) : null;
   const ref = name ? `"${name}"` : "top";
-  const heading = rankHeading(name);
   const base: PromptSuggestion[] = [
-    {
-      id: "why-ranked",
-      label: "Why this rank?",
-      prompt: `Why did my ${ref} finding rank where it did?`,
-      heading,
-      intent: "explain",
-      action: action("explain", analysisVersion, id),
-    },
+    clinicianQuestionsPrompt(name, id, analysisVersion),
     {
       id: "support-architecture",
       label: "Broad or concentrated?",

@@ -6,8 +6,15 @@ import {
   type ToolResponse,
 } from "../contract.js";
 import { withValidatedPlanNotice } from "../presentation/plan-notice.js";
-import { showAnalysisFollowupsInputSchema, showAnalysisFollowupsOutputSchema } from "../schemas/index.js";
-import { ANALYSIS_FOLLOWUPS_UI_URI, analysisFollowupsUiMeta } from "../ui/analysis-followups/resource.js";
+import { clinicianQuestionsPrompt } from "../presentation/prompts.js";
+import {
+  showAnalysisFollowupsInputSchema,
+  showAnalysisFollowupsOutputSchema,
+} from "../schemas/index.js";
+import {
+  ANALYSIS_FOLLOWUPS_UI_URI,
+  analysisFollowupsUiMeta,
+} from "../ui/analysis-followups/resource.js";
 import { respond } from "./respond.js";
 import { readOnlyAnnotations, type MutantToolDefinition } from "./types.js";
 
@@ -31,12 +38,12 @@ export const showAnalysisFollowupsTool: MutantToolDefinition = {
   description:
     "Display a compact follow-up card with context-specific next steps. Call this once only " +
     "when the user's request itself asked to explain, interpret, or understand one identified " +
-    "finding (by rank or name, including a deliberate \"Explain\" action), or to compare two or " +
-    "more accessible findings (for example \"Compare my top three\"). Decide this from the " +
+    'finding (by rank or name, including a deliberate "Explain" action), or to compare two or ' +
+    'more accessible findings (for example "Compare my top three"). Decide this from the ' +
     "user's requested task, not from which tools you called: do not infer eligibility because " +
     "explain_health_hypothesis or list_health_hypotheses was used as supporting research. Do " +
-    "not call it for an open-ended topic or symptom question (for example \"What can you say " +
-    "about my thyroid issues?\" or \"What about histamine?\") even if the answer discusses one " +
+    'not call it for an open-ended topic or symptom question (for example "What can you say ' +
+    'about my thyroid issues?" or "What about histamine?") even if the answer discusses one ' +
     "ranked finding; nor for a catalog search, a no-match answer, an evidence or marker lookup, " +
     "a broad overview, a processing/import/recovery turn, an incidental mention, or a request " +
     "that already compares findings with the user's health history or records. When eligible, " +
@@ -102,7 +109,22 @@ export const showAnalysisFollowupsTool: MutantToolDefinition = {
       plan: resolved.plan === "mutant_full" ? "mutant_full" : "mutant_free",
       displayed_analysis_version: resolved.displayed_analysis_version ?? null,
       displayed_hypotheses: resolved.displayed_hypotheses ?? [],
-      actions: resolved.actions ?? [],
+      actions: (resolved.actions ?? []).map((entry) => {
+        // Older backends still select the redundant rank question. Replace only
+        // that action, retaining the backend's authorized finding and revision.
+        if (resolved.intent !== "explanation" || entry.id !== "why-ranked") return entry;
+        const id = entry.hypothesis_id ?? entry.action?.hypothesis_id;
+        const hypothesis = resolved.displayed_hypotheses?.find((item) => item.id === id);
+        if (!hypothesis?.id) return entry;
+        return {
+          ...clinicianQuestionsPrompt(
+            hypothesis.name,
+            hypothesis.id,
+            resolved.displayed_analysis_version ?? response.analysis_version,
+          ),
+          hypothesis_id: hypothesis.id,
+        };
+      }),
     };
     if (resolved.plan_notice) data.plan_notice = resolved.plan_notice;
     if (resolved.source) data.source = resolved.source;

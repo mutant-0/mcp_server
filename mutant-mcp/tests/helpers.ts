@@ -256,16 +256,16 @@ export function makeFollowupsData(
     displayed_hypotheses: [{ id: "HYP_A", rank: 1, name: "Alpha finding" }],
     actions: [
       {
-        id: "why-ranked",
-        label: "Why this rank?",
-        prompt: 'Why did my "Alpha finding" finding rank where it did?',
-        heading: 'Mutant follow-up: Why "Alpha finding" ranked',
-        intent: "explain",
+        id: "clinician-questions",
+        label: "Questions for my clinician",
+        prompt: 'Help me prepare questions for my clinician about my "Alpha finding" finding.',
+        heading: 'Mutant follow-up: Questions about "Alpha finding"',
+        intent: "clinician_questions",
         hypothesis_id: "HYP_A",
         action: {
           analysis_version: "rev42-v3.0.0",
           hypothesis_id: "HYP_A",
-          intent: "explain",
+          intent: "clinician_questions",
         },
       },
       {

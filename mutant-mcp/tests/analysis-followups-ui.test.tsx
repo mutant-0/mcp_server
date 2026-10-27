@@ -164,7 +164,7 @@ describe("analysis follow-up card", () => {
     const bridge = renderCard();
     bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    const button = await findReadyAction("Why this rank?");
+    const button = await findReadyAction("Questions for my clinician");
     fireEvent.click(button);
 
     await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
@@ -174,10 +174,10 @@ describe("analysis follow-up card", () => {
     };
     expect(args.scrollToBottom).toBe(true);
     // The heading instruction comes first; the server prompt is unchanged after it.
-    expect(args.prompt).toContain('Mutant follow-up: Why "Alpha finding" ranked');
-    expect(args.prompt).toContain("rank where it did");
+    expect(args.prompt).toContain('Mutant follow-up: Questions about "Alpha finding"');
+    expect(args.prompt).toContain("questions for my clinician");
     expect(args.prompt.indexOf("Mutant follow-up:")).toBeLessThan(
-      args.prompt.indexOf("rank where it did"),
+      args.prompt.indexOf("questions for my clinician"),
     );
   });
 
@@ -185,13 +185,13 @@ describe("analysis follow-up card", () => {
     const bridge = renderCard();
     bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    fireEvent.click(await findReadyAction("Why this rank?"));
+    fireEvent.click(await findReadyAction("Questions for my clinician"));
 
     const status = await screen.findByRole("status");
-    expect(status.textContent).toContain("Question sent: Why this rank?");
+    expect(status.textContent).toContain("Question sent: Questions for my clinician");
     expect(status.textContent).toContain("See the latest reply below");
     // The handoff prompt itself is never rendered in the card.
-    expect(screen.queryByText(/rank where it did/)).toBeNull();
+    expect(screen.queryByText(/questions for my clinician/)).toBeNull();
     expect(screen.queryByText(/Start your reply with this heading/)).toBeNull();
   });
 
@@ -206,21 +206,21 @@ describe("analysis follow-up card", () => {
     const bridge = renderCard();
     bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    const button = await findReadyAction("Why this rank?");
+    const button = await findReadyAction("Questions for my clinician");
     fireEvent.click(button);
 
     await waitFor(() => expect(button.textContent).toBe("Sending…"));
     expect((button as HTMLButtonElement).disabled).toBe(true);
 
     resolveSend();
-    await waitFor(() => expect(button.textContent).toBe("Why this rank?"));
+    await waitFor(() => expect(button.textContent).toBe("Questions for my clinician"));
   });
 
   it("sends exactly one follow-up on a double click", async () => {
     const bridge = renderCard();
     bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    const button = await findReadyAction("Why this rank?");
+    const button = await findReadyAction("Questions for my clinician");
     fireEvent.click(button);
     fireEvent.click(button);
 
@@ -233,20 +233,22 @@ describe("analysis follow-up card", () => {
     const bridge = renderCard();
     bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    fireEvent.click(await findReadyAction("Why this rank?"));
+    fireEvent.click(await findReadyAction("Questions for my clinician"));
 
     await waitFor(() =>
       expect(screen.getByText(/couldn't send that follow-up message/i)).toBeTruthy(),
     );
     expect(screen.queryByText(/Question sent:/)).toBeNull();
     // The action is usable again after the failure.
-    expect((await findReadyAction("Why this rank?")).hasAttribute("disabled")).toBe(false);
+    expect((await findReadyAction("Questions for my clinician")).hasAttribute("disabled")).toBe(
+      false,
+    );
   });
 
   it("waits for the host connection before allowing a stale-card action", async () => {
     const bridge = renderCard({ statusVersion: "rev43-v3.0.0", deferInitialization: true });
     bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
-    const button = await screen.findByRole("button", { name: "Why this rank?" });
+    const button = await screen.findByRole("button", { name: "Questions for my clinician" });
     expect((button as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(button);
     expect(sendFollowUpMessage).not.toHaveBeenCalled();
@@ -263,7 +265,7 @@ describe("analysis follow-up card", () => {
     const bridge = renderCard({ statusVersion: "rev43-v3.0.0" });
     bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    fireEvent.click(await findReadyAction("Why this rank?"));
+    fireEvent.click(await findReadyAction("Questions for my clinician"));
 
     await screen.findByText(/These results have changed/);
     // The old action never reached the host.
@@ -414,7 +416,7 @@ describe("analysis follow-up card", () => {
     const bridge = renderCard();
     bridge.sendToolResult(makeSuccessResponse(makeFollowupsData(), "rev42-v3.0.0"), FOLLOWUPS_META);
 
-    const button = await findReadyAction("Why this rank?");
+    const button = await findReadyAction("Questions for my clinician");
     const container = button.parentElement as HTMLElement;
     // One full-width track: the buttons never squeeze below the tap target.
     expect(container.style.gridTemplateColumns).toBe("minmax(0, 1fr)");
