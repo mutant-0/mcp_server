@@ -104,6 +104,25 @@ report-generator Lambda:
 `ENTITLEMENTS_TABLE` and its IAM already exist. The MCP role intentionally has
 **no** `UserEntitlements` read permission: entitlement is resolved in the backend.
 
+### Pagination deployment check
+
+The deployment workflow runs `npm run verify:backend` against
+`MUTANT_SERVICE_LAMBDA_ARN` before CDK deployment. The deployment role needs
+`lambda:GetFunctionConfiguration` on that backend, including the configured
+version or alias. This permission is not added to the MCP runtime role. The check
+prints no environment values and fails if the backend's `MCP_CURSOR_SECRET` is
+missing, empty, or whitespace, or if its configuration cannot be read.
+
+`Pagination is temporarily unavailable.` means the backend cannot sign or
+validate a pagination cursor because that secret is blank. This can break the
+first findings page when more results exist. Configure the report-generator
+stack's `McpCursorSecret` parameter with a persistent random value per environment;
+setting it on the MCP Lambda does not fix the backend. Preserve the stack
+parameter across deployments, and ensure any GitHub `MCP_CURSOR_SECRET` override
+for that environment uses the same value. Rotating it invalidates existing page
+cursors. The check can also be run manually with the target backend ARN in
+`MUTANT_SERVICE_LAMBDA_ARN`; it reads configuration only and does not access findings.
+
 ## 3. Verifying discovery and auth
 
 The MCP API is mounted behind an API Gateway mapping key (`/mcp`), which strips

@@ -115,6 +115,11 @@ jobs:
             echo "target=dev" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Verify backend pagination configuration
+        env:
+          MUTANT_SERVICE_LAMBDA_ARN: ${{ secrets.MUTANT_SERVICE_LAMBDA_ARN }}
+        run: npm run verify:backend
+
       - name: CDK bootstrap (idempotent)
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)

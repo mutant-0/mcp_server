@@ -23,6 +23,7 @@
     "apply:retention": "tsx scripts/apply-retention.ts",
     "verify:retention": "tsx scripts/verify-retention.ts",
     "verify:privacy": "tsx scripts/verify-privacy-gate.ts",
+    "verify:backend": "tsx scripts/verify-backend.ts",
     "dev": "tsx watch src/handler.ts",
     "start": "node dist/index.mjs",
     "test": "vitest run",
