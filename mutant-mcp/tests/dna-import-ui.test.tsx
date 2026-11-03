@@ -431,6 +431,7 @@ function installHostBridge(responders: Responders = {}, options: BridgeOptions =
   const messages: Array<Record<string, unknown>> = [];
   const openLinks: string[] = [];
   const calls = new Map<string, number>();
+  const acceptedPurposes = new Set<string>();
   /** Replies held back until the test releases them, in arrival order. */
   const deferred: Array<() => void> = [];
 
@@ -440,6 +441,13 @@ function installHostBridge(responders: Responders = {}, options: BridgeOptions =
     const entry = responders[name];
     if (typeof entry === "function") return entry(args, call);
     if (entry) return entry;
+    if (name === "get_consent") return makeSuccessResponse(makeConsentData([...acceptedPurposes]));
+    if (name === "save_consent") {
+      for (const purpose of Array.isArray(args.purposes) ? args.purposes : []) {
+        if (typeof purpose === "string") acceptedPurposes.add(purpose);
+      }
+      return makeSuccessResponse(makeConsentData([...acceptedPurposes]));
+    }
     return defaultRespond(name);
   }
 
@@ -559,21 +567,33 @@ async function renderApp(
   return bridge;
 }
 
-/** Render, select a file, and wait for the review screen. */
+/** Render, select a file, and wait for the permission choices in the upload panel. */
 async function renderToReview(
   responders: Responders = {},
   file = microarrayFile(),
 ): Promise<HostBridge> {
   const bridge = await renderApp(responders);
   selectFile(file);
-  await screen.findByText(/Ready to submit/i);
+  await screen.findByRole("button", { name: /Continue with this DNA file/i });
   return bridge;
+}
+
+async function acceptImportConsent(): Promise<void> {
+  const processing = await screen.findByRole("checkbox", {
+    name: /Allow Mutant to process my genetic data/i,
+  });
+  if (!(processing as HTMLInputElement).checked) fireEvent.click(processing);
+  const sharing = screen.getByRole("checkbox", {
+    name: /Allow Mutant to share my results with ChatGPT/i,
+  });
+  if (!(sharing as HTMLInputElement).checked) fireEvent.click(sharing);
+  fireEvent.click(await screen.findByRole("button", { name: /Continue with this DNA file/i }));
 }
 
 /** Render, select a file, and submit it, waiting for the processing card. */
 async function renderToProcessing(responders: Responders = {}): Promise<HostBridge> {
   const bridge = await renderToReview(responders);
-  fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+  await acceptImportConsent();
   await screen.findByText(PROCESSING_HEADING);
   return bridge;
 }
@@ -701,7 +721,7 @@ describe("DNA import component", () => {
     expect(screen.queryByText(/Non-SNV capture targets/)).toBeNull();
     expect(screen.queryByText(/Panels covered/)).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+    await acceptImportConsent();
 
     await screen.findByText(PROCESSING_HEADING);
 
@@ -719,6 +739,37 @@ describe("DNA import component", () => {
       "snps",
       "upload_meta",
     ]);
+  });
+
+  it("starts analysis after file selection when processing was already permitted", async () => {
+    const bridge = await renderApp({
+      get_consent: makeSuccessResponse(makeConsentData(["genetic_processing", "chatgpt_sharing"])),
+    });
+
+    selectFile(microarrayFile());
+    await screen.findByText(PROCESSING_HEADING);
+    expect(bridge.callsTo("create_report")).toHaveLength(1);
+    expect(bridge.callsTo("save_consent")).toHaveLength(0);
+    expect(screen.queryByText(/Ready to submit/i)).toBeNull();
+  });
+
+  it("runs analysis without reading findings when ChatGPT sharing is declined", async () => {
+    const bridge = await renderApp({
+      poll_analysis_status: (_args, call) =>
+        call === 1 ? STATUS_MISSING : statusResponse("ready"),
+    });
+
+    selectFile(microarrayFile());
+    const processing = await screen.findByRole("checkbox", {
+      name: /Allow Mutant to process my genetic data/i,
+    });
+    fireEvent.click(processing);
+    fireEvent.click(await screen.findByRole("button", { name: /Continue with this DNA file/i }));
+
+    await screen.findByText(/^Analysis ready$/);
+    expect(bridge.callsTo("create_report")).toHaveLength(1);
+    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(0);
+    expect(bridge.callsTo("save_consent")[0]?.arguments.purposes).toEqual(["genetic_processing"]);
   });
 
   it("shows a truthful processing card without internal identifiers", async () => {
@@ -783,7 +834,8 @@ describe("DNA import component", () => {
     expect(JSON.stringify(bridge.modelContextUpdates[0])).toMatch(/do not restate/i);
 
     status = "ready";
-    await screen.findByText(/Analysis ready/i);
+    await screen.findByText(/Your findings/i);
+    await screen.findByText(/Alpha finding/i);
 
     expect(bridge.callsTo("create_report")).toHaveLength(1);
     expect(JSON.stringify(bridge.modelContextUpdates[1])).toMatch(/ready/i);
@@ -804,20 +856,16 @@ describe("DNA import component", () => {
     });
 
     status = "ready";
-    await screen.findByText(/Analysis ready/i);
+    await screen.findByText(/Your findings/i);
+    await screen.findByText(/Alpha finding/i);
     const afterReady = bridge.callsTo("poll_analysis_status").length;
     // Polling stops on completion: no further reads arrive.
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(bridge.callsTo("poll_analysis_status").length).toBe(afterReady);
+  });
 
-    cleanup();
-    activeBridge?.stop();
-    activeBridge = null;
-
-    const failed = await renderToProcessing({
-      poll_analysis_status: (_args, call) =>
-        call === 1 ? STATUS_MISSING : statusResponse("failed"),
-    });
+  it("stops polling after an analysis fails", async () => {
+    const failed = renderWith({ poll_analysis_status: statusResponse("failed") });
     await screen.findByText(/Your analysis isn't available/i);
     const afterFailed = failed.callsTo("poll_analysis_status").length;
     // Polling stops on failure too.
@@ -1987,8 +2035,8 @@ describe("DNA import component", () => {
 
     await screen.findByText(/Drag and drop your DNA file here/i);
     selectFile(microarrayFile());
-    await screen.findByText(/Ready to submit/i);
-    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+    await screen.findByText(/Continue with this DNA file/i);
+    await acceptImportConsent();
 
     await screen.findByText(PROCESSING_HEADING);
     expect(screen.getByText(/Ask ChatGPT when your analysis is ready/i)).toBeDefined();
@@ -2006,10 +2054,10 @@ describe("DNA import component", () => {
           : makeSuccessResponse({ analysis_id: "a-2", status: "processing" }),
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+    await acceptImportConsent();
     await screen.findByText(/could not start your analysis/i);
 
-    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+    await acceptImportConsent();
     await screen.findByText(PROCESSING_HEADING);
 
     const keys = bridge.callsTo("create_report").map((call) => call.arguments.import_request_id);
@@ -2024,12 +2072,14 @@ describe("DNA import component", () => {
       }),
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+    await acceptImportConsent();
 
     await screen.findByText(/Reconnect Mutant to grant it/i);
     // The review screen survives so the same file can be resubmitted after the
     // user reconnects.
-    expect(screen.getByRole("button", { name: /create my mutant analysis/i })).toBeDefined();
+    expect(
+      await screen.findByRole("button", { name: /Continue with this DNA file/i }),
+    ).toBeDefined();
   });
 
   function consentError(): ToolResponse {
@@ -2069,12 +2119,9 @@ describe("DNA import component", () => {
       { toolMeta: { create_report: consentMeta("genetic_processing") } },
     );
     selectFile(microarrayFile());
-    await screen.findByText(/Ready to submit/i);
-    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
-    fireEvent.click(
-      await screen.findByRole("checkbox", { name: "Allow Mutant to process my genetic data" }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Save permissions and continue" }));
+    await screen.findByText(/Continue with this DNA file/i);
+    await acceptImportConsent();
+    fireEvent.click(await screen.findByRole("button", { name: "Save permissions and continue" }));
     await waitFor(() => expect(bridge.callsTo("create_report")).toHaveLength(2));
     expect(bridge.callsTo("create_report")[0]?.arguments.import_request_id).toBe(
       bridge.callsTo("create_report")[1]?.arguments.import_request_id,
@@ -2134,13 +2181,13 @@ describe("DNA import component", () => {
     );
 
     selectFile(microarrayFile());
-    await screen.findByText(/Ready to submit/i);
-    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+    await screen.findByText(/Continue with this DNA file/i);
+    await acceptImportConsent();
 
     // The consent card replaces the review screen: the connection is valid, so it
     // must not ask the user to reconnect, and it names the import purpose.
     await screen.findByText(/Choose whether Mutant can process your genetic data/i);
-    expect(screen.queryByText(/Ready to submit/i)).toBeNull();
+    expect(screen.queryByText(/Continue with this DNA file/i)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /Review data permissions/i }));
     await waitFor(() => expect(bridge.openLinks).toHaveLength(1));
@@ -2163,8 +2210,8 @@ describe("DNA import component", () => {
     );
 
     selectFile(microarrayFile());
-    await screen.findByText(/Ready to submit/i);
-    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+    await screen.findByText(/Continue with this DNA file/i);
+    await acceptImportConsent();
     await screen.findByRole("button", { name: /Review data permissions/i });
 
     const retry = screen.getByRole("button", { name: /I've accepted/i });
@@ -2200,7 +2247,7 @@ describe("DNA import component", () => {
     // Consent is not an outage: no generic error copy, and no import CTA.
     expect(screen.queryByText(/Something went wrong/i)).toBeNull();
     expect(screen.queryByText(/temporarily unavailable/i)).toBeNull();
-    expect(screen.queryByText(/Ready to submit/i)).toBeNull();
+    expect(screen.queryByText(/Continue with this DNA file/i)).toBeNull();
   });
 
   it("resumes the exact blocked findings read once after consent", async () => {
@@ -2322,8 +2369,8 @@ describe("DNA import component", () => {
     });
 
     selectFile(microarrayFile());
-    await screen.findByText(/Ready to submit/i);
-    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+    await screen.findByText(/Continue with this DNA file/i);
+    await acceptImportConsent();
 
     await screen.findByText(/^Deletion in progress$/);
     // Not a connection or consent problem.
@@ -2344,8 +2391,8 @@ describe("DNA import component", () => {
     });
 
     selectFile(microarrayFile());
-    await screen.findByText(/Ready to submit/i);
-    fireEvent.click(screen.getByRole("button", { name: /create my mutant analysis/i }));
+    await screen.findByText(/Continue with this DNA file/i);
+    await acceptImportConsent();
 
     await screen.findByText(/^Data deleted$/);
     expect(screen.queryByText(/Reconnect Mutant/i)).toBeNull();

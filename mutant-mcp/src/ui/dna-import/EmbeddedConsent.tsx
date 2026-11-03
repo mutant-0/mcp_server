@@ -5,8 +5,10 @@ import { consentDataSchema, type ConsentData } from "../../schemas/consent";
 type Props = {
   app: App | null;
   requiredPurpose: string | null;
-  onComplete: () => void;
+  onComplete: (acceptedPurposes: string[]) => void;
   onCancel: () => void;
+  compact?: boolean;
+  autoContinueWhenCurrent?: boolean;
 };
 const PURPOSE_COPY = {
   genetic_processing: {
@@ -57,18 +59,27 @@ async function consentCall(
 }
 
 /** All writes use the authenticated MCP bridge; no portal login or browser fetch. */
-export function EmbeddedConsent({ app, requiredPurpose, onComplete, onCancel }: Props) {
+export function EmbeddedConsent({
+  app,
+  requiredPurpose,
+  onComplete,
+  onCancel,
+  compact = false,
+  autoContinueWhenCurrent = false,
+}: Props) {
   const [data, setData] = useState<ConsentData | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
   const saving = useRef(false);
+  const continued = useRef(false);
   useEffect(() => {
     let active = true;
     setData(null);
     setSelected([]);
     setError(null);
+    continued.current = false;
     if (app)
       void consentCall(app, "get_consent", {})
         .then((value) => {
@@ -89,6 +100,17 @@ export function EmbeddedConsent({ app, requiredPurpose, onComplete, onCancel }: 
   const canContinue = Boolean(
     data && required && (required.current || selected.includes(required.purpose)),
   );
+  useEffect(() => {
+    if (
+      !autoContinueWhenCurrent ||
+      !required?.current ||
+      !data?.purposes.some((row) => row.purpose === "chatgpt_sharing" && row.current) ||
+      continued.current
+    )
+      return;
+    continued.current = true;
+    onComplete(data?.purposes.filter((row) => row.current).map((row) => row.purpose) ?? []);
+  }, [autoContinueWhenCurrent, required?.current, data, onComplete]);
   async function save() {
     if (!app || !data || !canContinue || saving.current) return;
     saving.current = true;
@@ -116,7 +138,8 @@ export function EmbeddedConsent({ app, requiredPurpose, onComplete, onCancel }: 
       ) {
         throw new Error("Your choices could not all be confirmed. Try saving again.");
       }
-      onComplete();
+      continued.current = true;
+      onComplete(confirmed.purposes.filter((row) => row.current).map((row) => row.purpose));
     } catch (failure) {
       setError(
         failure instanceof Error ? failure.message : "Your choices could not be saved. Try again.",
@@ -131,16 +154,34 @@ export function EmbeddedConsent({ app, requiredPurpose, onComplete, onCancel }: 
       {!data && !error ? <p role="status">Loading privacy notice…</p> : null}
       {data ? (
         <>
-          <p style={{ fontSize: "0.8rem", color: "var(--color-text-secondary, #5f6368)" }}>
-            Notice version {data.notice.version}
-          </p>
-          <p>{data.notice.summary}</p>
-          {data.notice.sections.map((section) => (
-            <div key={section.heading}>
-              <h3 style={{ fontSize: 15 }}>{section.heading}</h3>
-              <p>{section.body}</p>
-            </div>
-          ))}
+          {compact ? (
+            <details style={{ marginTop: 12 }}>
+              <summary>Read the full data permissions notice</summary>
+              <p style={{ fontSize: "0.8rem", color: "var(--color-text-secondary, #5f6368)" }}>
+                Notice version {data.notice.version}
+              </p>
+              <p>{data.notice.summary}</p>
+              {data.notice.sections.map((section) => (
+                <div key={section.heading}>
+                  <h3 style={{ fontSize: 15 }}>{section.heading}</h3>
+                  <p>{section.body}</p>
+                </div>
+              ))}
+            </details>
+          ) : (
+            <>
+              <p style={{ fontSize: "0.8rem", color: "var(--color-text-secondary, #5f6368)" }}>
+                Notice version {data.notice.version}
+              </p>
+              <p>{data.notice.summary}</p>
+              {data.notice.sections.map((section) => (
+                <div key={section.heading}>
+                  <h3 style={{ fontSize: 15 }}>{section.heading}</h3>
+                  <p>{section.body}</p>
+                </div>
+              ))}
+            </>
+          )}
           <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: "16px 0" }}>
             <legend style={{ fontSize: 16, fontWeight: 600 }}>Your permissions</legend>
             {data.purposes.map((row) => (
@@ -185,13 +226,19 @@ export function EmbeddedConsent({ app, requiredPurpose, onComplete, onCancel }: 
               opacity: !canContinue || busy ? 0.55 : 1,
             }}
           >
-            {busy ? "Saving…" : "Save permissions and continue"}
+            {busy
+              ? "Saving…"
+              : compact
+                ? "Continue with this DNA file"
+                : "Save permissions and continue"}
           </button>
         </>
       ) : null}
-      <button type="button" disabled={busy} onClick={onCancel} style={{ margin: 12 }}>
-        Not now
-      </button>
+      {compact ? null : (
+        <button type="button" disabled={busy} onClick={onCancel} style={{ margin: 12 }}>
+          Not now
+        </button>
+      )}
       {error ? (
         <div role="alert">
           <p>{error}</p>

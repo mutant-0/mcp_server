@@ -1156,6 +1156,11 @@ export function DnaImportApp({
    * when the refusal arrives from a flow that changed the stage.
    */
   const [analysisReady, setAnalysisReady] = useState(false);
+  /** Only a newly submitted analysis opens its findings without another click. */
+  const [autoOpenFindings, setAutoOpenFindings] = useState(false);
+  /** The upload form's confirmed sharing choice, never inferred from a checkbox. */
+  const [sharingApproved, setSharingApproved] = useState(false);
+  const [autoSubmitAttempted, setAutoSubmitAttempted] = useState(false);
   /**
    * The server refused a sensitive operation because the account has not
    * granted (or has withdrawn) consent. This is distinct from a connection or
@@ -1575,6 +1580,9 @@ export function DnaImportApp({
     startedAtRef.current = null;
     deadlineRef.current = null;
     setParsed(null);
+    setSharingApproved(false);
+    setAutoOpenFindings(false);
+    setAutoSubmitAttempted(false);
     setUploadError(null);
     setProgress(0);
     setPoll(INITIAL_POLL);
@@ -1692,6 +1700,8 @@ export function DnaImportApp({
 
       setStage("submitting_variants");
       setUploadError(null);
+      setAutoOpenFindings(true);
+      setAutoSubmitAttempted(true);
 
       const args: Record<string, unknown> = {
         snps: parsed.snps,
@@ -2378,16 +2388,21 @@ export function DnaImportApp({
     [app, boundTopThree, enterConsentRecovery, reloadOverview],
   );
 
-  // The overview route opens directly on its findings and follow-up hints.
+  // A newly submitted analysis opens its findings on completion. The overview
+  // route may already have a bound snapshot, so it avoids a duplicate read.
   useEffect(() => {
-    if (stage !== "analysis_ready" || importMode !== "overview") return;
+    if (
+      stage !== "analysis_ready" ||
+      (importMode !== "overview" && !(autoOpenFindings && sharingApproved))
+    )
+      return;
     // The card always shows context-aware hints, whether the host pushed the
     // bound snapshot (findings already loaded) or not.
     void loadPromptChips();
     // Only fetch the ranked list when the bound snapshot did not already
     // supply it: a second read would duplicate the card's authoritative list.
     if (findingsRef.current.status === "idle") void loadFindings();
-  }, [stage, importMode, loadFindings, loadPromptChips]);
+  }, [stage, autoOpenFindings, sharingApproved, importMode, loadFindings, loadPromptChips]);
 
   // Quietly prefetch the version-pinned top-three comparison so a later click on
   // the compare chip expands immediately. Gated on the server actually offering
@@ -2721,7 +2736,9 @@ export function DnaImportApp({
     const otherPrompts = secondaryPrompts.filter((chip) => chip.id !== COMPARE_TOP_THREE_PROMPT_ID);
     return (
       <Shell>
-        <h1 style={styles.h1}>Analysis ready</h1>
+        <h1 style={styles.h1}>
+          {autoOpenFindings && sharingApproved ? "Your findings" : "Analysis ready"}
+        </h1>
         <p style={styles.subtitle}>Your DNA analysis is complete.</p>
 
         {analysis?.regenerate ? (
@@ -3150,9 +3167,10 @@ export function DnaImportApp({
   if (stage === "review_variants" && parsed) {
     return (
       <Shell>
-        <h1 style={styles.h1}>Ready to submit</h1>
+        <h1 style={styles.h1}>Add your DNA data</h1>
         <p style={styles.subtitle}>
-          Review what will be sent to Mutant. Your raw DNA file is not uploaded.
+          {parsed.providerLabel} file selected. Your raw DNA file stays on your device; Mutant
+          receives only the genetic calls used for your analysis.
         </p>
         {uploadError ? <ErrorPanel message={uploadError} /> : null}
         <div style={{ marginBottom: 16 }}>
@@ -3175,14 +3193,26 @@ export function DnaImportApp({
             </div>
           ) : null}
         </div>
+        <p style={styles.meta}>
+          Allow genetic processing to start your analysis. Sharing results with ChatGPT is optional.
+        </p>
+        <EmbeddedConsent
+          app={app}
+          requiredPurpose={CONSENT_PURPOSE_GENETIC_PROCESSING}
+          compact
+          autoContinueWhenCurrent={!autoSubmitAttempted}
+          onComplete={(purposes) => {
+            setSharingApproved(purposes.includes(CONSENT_PURPOSE_CHATGPT_SHARING));
+            void submit(app);
+          }}
+          onCancel={resetImport}
+        />
         <div style={styles.buttonRow}>
-          <button type="button" style={styles.primaryButton} onClick={() => void submit(app)}>
-            Create my Mutant analysis
-          </button>
           <button type="button" style={styles.secondaryButton} onClick={openFilePicker}>
             Choose a different file
           </button>
         </div>
+        {fileInput}
       </Shell>
     );
   }
