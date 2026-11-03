@@ -96,8 +96,8 @@ export function logConsentEvent(
  * when the host provides it. Every other host exposes the equivalent MCP Apps
  * `ui/message` request through `App.sendMessage`.
  *
- * The prompt is only ever handed to the host. Nothing here renders it in the
- * widget: a missing or rejected API is reported back to the caller instead.
+ * The prompt becomes a visible user turn. Keep it short and suitable for the
+ * conversation; put action details in model context first.
  */
 export async function deliverFollowUp(app: App | null, prompt: string): Promise<FollowUpOutcome> {
   const host = chatGptHost();
@@ -131,6 +131,27 @@ export async function deliverFollowUp(app: App | null, prompt: string): Promise<
   }
 
   return "unavailable";
+}
+
+/**
+ * Give the model the bound action details without putting them in the user's
+ * chat bubble, then post the short action label as the visible follow-up.
+ */
+export async function deliverContextualFollowUp(
+  app: App | null,
+  visiblePrompt: string,
+  contextPrompt: string,
+): Promise<FollowUpOutcome> {
+  if (!app) return "unavailable";
+  try {
+    await app.updateModelContext({
+      content: [{ type: "text", text: `For the next Mutant request:\n${contextPrompt}` }],
+    });
+  } catch (err) {
+    logBridgeError(err);
+    return "failed";
+  }
+  return deliverFollowUp(app, visiblePrompt);
 }
 
 /** User-visible copy for a handoff the host could not perform. Never a prompt. */
@@ -212,7 +233,10 @@ export function persistSentAction(action: SentAction): void {
       : {};
   try {
     void Promise.resolve(
-      host.setWidgetState({ ...current, [SENT_ACTION_STATE_KEY]: { id: action.id, label: action.label } }),
+      host.setWidgetState({
+        ...current,
+        [SENT_ACTION_STATE_KEY]: { id: action.id, label: action.label },
+      }),
     ).catch(logBridgeError);
   } catch (err) {
     logBridgeError(err);
@@ -237,9 +261,7 @@ export async function fetchCurrentAnalysisVersion(app: App | null): Promise<stri
     if ((result as { isError?: boolean }).isError === true) return null;
     const structured = (result as { structuredContent?: unknown }).structuredContent;
     const envelope =
-      structured && typeof structured === "object"
-        ? (structured as Record<string, unknown>)
-        : null;
+      structured && typeof structured === "object" ? (structured as Record<string, unknown>) : null;
     if (!envelope || envelope.ok !== true) return null;
     return typeof envelope.analysis_version === "string" ? envelope.analysis_version : null;
   } catch (err) {

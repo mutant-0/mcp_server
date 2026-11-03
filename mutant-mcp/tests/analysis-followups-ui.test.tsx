@@ -45,6 +45,7 @@ function toolResultNotification(structured: ToolResponse, meta?: Record<string, 
 
 interface FollowupsBridge {
   openLinks: string[];
+  modelContextUpdates: unknown[];
   completeInitialization(): void;
   sendToolResult(structured: ToolResponse, meta?: Record<string, unknown>): void;
   stop(): void;
@@ -61,6 +62,7 @@ let activeBridge: FollowupsBridge | null = null;
 
 function installHostBridge(options: FollowupsBridgeOptions = {}): FollowupsBridge {
   const openLinks: string[] = [];
+  const modelContextUpdates: unknown[] = [];
   let initialize: (() => void) | null = null;
 
   function reply(id: number, result: unknown): void {
@@ -88,6 +90,11 @@ function installHostBridge(options: FollowupsBridgeOptions = {}): FollowupsBridg
       reply(message.id, {});
       return;
     }
+    if (message.method === "ui/update-model-context") {
+      modelContextUpdates.push(message.params);
+      reply(message.id, {});
+      return;
+    }
     if (message.method === "tools/call" && options.statusVersion) {
       // The stale guard reads the app-only status channel before handing off.
       const envelope = makeSuccessResponse({}, options.statusVersion);
@@ -104,6 +111,7 @@ function installHostBridge(options: FollowupsBridgeOptions = {}): FollowupsBridg
   window.addEventListener("message", onMessage);
   const bridge: FollowupsBridge = {
     openLinks,
+    modelContextUpdates,
     completeInitialization: () => {
       initialize?.();
       initialize = null;
@@ -173,12 +181,10 @@ describe("analysis follow-up card", () => {
       scrollToBottom?: boolean;
     };
     expect(args.scrollToBottom).toBe(true);
-    // The heading instruction comes first; the server prompt is unchanged after it.
-    expect(args.prompt).toContain('Mutant follow-up: Questions about "Alpha finding"');
-    expect(args.prompt).toContain("questions for my clinician");
-    expect(args.prompt.indexOf("Mutant follow-up:")).toBeLessThan(
-      args.prompt.indexOf("questions for my clinician"),
-    );
+    expect(args.prompt).toBe("Questions for my clinician");
+    const context = JSON.stringify(bridge.modelContextUpdates.at(-1));
+    expect(context).toContain('Mutant follow-up: Questions about \\"Alpha finding\\"');
+    expect(context).toContain("questions for my clinician");
   });
 
   it("acknowledges the clicked label without rendering the full prompt", async () => {
@@ -212,6 +218,7 @@ describe("analysis follow-up card", () => {
     await waitFor(() => expect(button.textContent).toBe("Sending…"));
     expect((button as HTMLButtonElement).disabled).toBe(true);
 
+    await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
     resolveSend();
     await waitFor(() => expect(button.textContent).toBe("Questions for my clinician"));
   });
@@ -275,7 +282,10 @@ describe("analysis follow-up card", () => {
     fireEvent.click(screen.getByRole("button", { name: /Open your current findings/i }));
     await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
     const args = sendFollowUpMessage.mock.calls[0]?.[0] as { prompt: string };
-    expect(args.prompt).toContain("Show my current Mutant findings.");
+    expect(args.prompt).toBe("Current findings");
+    expect(JSON.stringify(bridge.modelContextUpdates.at(-1))).toContain(
+      "Show my current Mutant findings.",
+    );
   });
 
   it("uses the comparison label and shows the history action's non-assuming prompt", async () => {
@@ -309,10 +319,12 @@ describe("analysis follow-up card", () => {
 
     await screen.findByText("Keep exploring");
     fireEvent.click(screen.getByRole("button", { name: "Compare with my history" }));
-    await waitFor(() =>
-      expect(sendFollowUpMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ prompt: expect.stringContaining("ask me what I want to share") }),
-      ),
+    await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
+    expect(sendFollowUpMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: "Compare with my history" }),
+    );
+    expect(JSON.stringify(bridge.modelContextUpdates.at(-1))).toContain(
+      "ask me what I want to share",
     );
   });
 

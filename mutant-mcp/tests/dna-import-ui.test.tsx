@@ -1012,13 +1012,14 @@ describe("DNA import component", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /explain finding #1/i })[0]!);
 
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
-    const sent = JSON.stringify(bridge.messages[0]);
-    expect(sent).toMatch(/Alpha finding/);
-    expect(sent).toMatch(/Retrieve the full finding details first/);
-    expect(sent).toMatch(/what would strengthen or weaken it/);
-    expect(sent).toMatch(/symptoms or test results I have not shared/);
-    // Prompts are user-visible natural language, never internal ids.
-    expect(sent).not.toMatch(/HYP_A/);
+    const visible = JSON.stringify(bridge.messages[0]);
+    const context = JSON.stringify(bridge.modelContextUpdates.at(-1));
+    expect(visible).toContain("Explain finding #1");
+    expect(visible).not.toMatch(/Alpha finding|Retrieve the full finding details first|HYP_A/);
+    expect(context).toMatch(/Alpha finding/);
+    expect(context).toMatch(/Retrieve the full finding details first/);
+    expect(context).toMatch(/what would strengthen or weaken it/);
+    expect(context).toMatch(/symptoms or test results I have not shared/);
     // Requesting the findings again must not refetch or re-message.
     expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(1);
   });
@@ -1053,7 +1054,10 @@ describe("DNA import component", () => {
     const chip = await screen.findByRole("button", { name: "Explain #1" });
     fireEvent.click(chip);
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
-    expect(JSON.stringify(bridge.messages[0])).toContain("Explain my #1 finding in plain English.");
+    expect(JSON.stringify(bridge.messages[0])).toContain("Explain #1");
+    expect(JSON.stringify(bridge.modelContextUpdates.at(-1))).toContain(
+      "Explain my #1 finding in plain English.",
+    );
   });
 
   it("opens the overview route with findings and hints already visible", async () => {
@@ -1245,10 +1249,12 @@ describe("DNA import component", () => {
       content?: Array<{ text?: string }>;
     };
     const sent = params.content?.map((block) => block.text ?? "").join("") ?? "";
-    // The heading instruction precedes the untouched server-authored prompt.
+    // The visible message is short; the server-authored prompt stays in model context.
     expect(params.role).toBe("user");
-    expect(sent).toContain("Mutant follow-up: Connect my findings");
-    expect(sent).toContain(
+    expect(sent).toBe("Connect my findings");
+    const context = JSON.stringify(bridge.modelContextUpdates.at(-1));
+    expect(context).toContain("Mutant follow-up: Connect my findings");
+    expect(context).toContain(
       "Look across the findings I can access in this analysis and tell me whether several of them are telling parts of the same biological story.",
     );
     // No topic, symptom, or history is required to answer it.
@@ -1428,7 +1434,10 @@ describe("DNA import component", () => {
       fireEvent.click(compare);
       await waitFor(() => expect(bridge.messages).toHaveLength(1));
       const sent = JSON.stringify(bridge.messages[0]);
-      expect(sent).toContain(historyComparisonPrompt("analysis_1").prompt);
+      expect(sent).toContain("Compare with my history");
+      expect(JSON.stringify(bridge.modelContextUpdates.at(-1))).toContain(
+        historyComparisonPrompt("analysis_1").prompt,
+      );
       expect(bridge.callsTo("poll_analysis_status").length).toBeGreaterThan(1);
       expect(screen.getByText(/Alpha finding/i)).toBeDefined();
     },
@@ -1485,7 +1494,7 @@ describe("DNA import component", () => {
     // The guard makes one click one server-selected prompt; the card never
     // builds a second, hard-coded comparison request.
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
-    expect(JSON.stringify(bridge.messages[0])).toContain(
+    expect(JSON.stringify(bridge.modelContextUpdates.at(-1))).toContain(
       "Which of my findings best fits the history I shared here?",
     );
   });
@@ -1686,15 +1695,15 @@ describe("DNA import component", () => {
       expect(params.role).toBe("user");
       return params.content?.map((block) => block.text ?? "").join("") ?? "";
     });
-    expect(texts[0]).toMatch(/Explain my "Alpha finding"/);
-    // The heading instruction is prepended; the server-selected prompt survives.
-    expect(texts[1]).toContain("## Your Mutant findings explained");
-    expect(texts[1]).toContain("retrieve the supporting details for each identified finding");
-    expect(texts[1]).toContain("the most important uncertainty or limitation");
-    expect(texts[1]).toContain("without asking what I want to know");
-    expect(texts[1]).toContain('"analysis_version":"analysis_1"');
+    expect(texts).toEqual(["Explain finding #1", "Summarize my top 3"]);
+    const context = JSON.stringify(bridge.modelContextUpdates.at(-1));
+    expect(context).toContain("## Your Mutant findings explained");
+    expect(context).toContain("retrieve the supporting details for each identified finding");
+    expect(context).toContain("the most important uncertainty or limitation");
+    expect(context).toContain("without asking what I want to know");
+    expect(context).toContain('\\"analysis_version\\":\\"analysis_1\\"');
     for (const id of ["HYP_A", "HYP_B", "HYP_C"]) {
-      expect(texts[1]).toContain(`"hypothesis_id":"${id}"`);
+      expect(context).toContain(`\\"hypothesis_id\\":\\"${id}\\"`);
     }
 
     // The widget's findings are unchanged and the prompt text is nowhere in the card.
@@ -1722,7 +1731,7 @@ describe("DNA import component", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Summarize my top 3" }));
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
-    const sent = JSON.stringify(bridge.messages[0]);
+    const sent = JSON.stringify(bridge.modelContextUpdates.at(-1));
     for (const id of ["HYP_01", "HYP_02", "HYP_03"]) expect(sent).toContain(id);
     expect(sent).not.toContain("HYP_04");
     expect(sent).not.toContain("HYP_10");
@@ -1747,7 +1756,7 @@ describe("DNA import component", () => {
     expect(screen.queryByRole("button", { name: "Summarize my top 3" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Summarize my findings" }));
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
-    const sent = JSON.stringify(bridge.messages[0]);
+    const sent = JSON.stringify(bridge.modelContextUpdates.at(-1));
     expect(sent).toContain("HYP_A");
     expect(sent).not.toContain("HYP_B");
   });
@@ -1786,9 +1795,10 @@ describe("DNA import component", () => {
 
       await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
       expect(sendFollowUpMessage).toHaveBeenCalledWith({
-        prompt: expect.stringContaining("Alpha finding"),
+        prompt: "Explain finding #1",
         scrollToBottom: true,
       });
+      expect(JSON.stringify(bridge.modelContextUpdates.at(-1))).toContain("Alpha finding");
       // The MCP Apps bridge is not also used: the prompt is sent only once.
       expect(bridge.messages).toHaveLength(0);
       expect(screen.queryByText(/Explain my "Alpha finding"/)).toBeNull();
@@ -1845,17 +1855,17 @@ describe("DNA import component", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Explain #1" }));
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
 
-    const sent =
+    const visible =
       (bridge.messages[0]?.params as { content?: Array<{ text?: string }> }).content
         ?.map((block) => block.text ?? "")
         .join("") ?? "";
-    // The heading instruction precedes the untouched server-selected prompt.
-    expect(sent).toContain(
-      'Start your reply with this heading on its own line: "Mutant follow-up: Explain finding #1"',
-    );
-    expect(sent).toContain("Explain my #1 finding in plain English.");
-    expect(sent.indexOf("Mutant follow-up:")).toBeLessThan(
-      sent.indexOf("Explain my #1 finding in plain English."),
+    const context = JSON.stringify(bridge.modelContextUpdates.at(-1));
+    expect(visible).toBe("Explain #1");
+    expect(context).toContain("Start your reply with this heading on its own line");
+    expect(context).toContain("Mutant follow-up: Explain finding #1");
+    expect(context).toContain("Explain my #1 finding in plain English.");
+    expect(context.indexOf("Mutant follow-up:")).toBeLessThan(
+      context.indexOf("Explain my #1 finding in plain English."),
     );
   });
 
@@ -1885,6 +1895,7 @@ describe("DNA import component", () => {
       await waitFor(() => expect(button.textContent).toBe("Sending…"));
       expect((button as HTMLButtonElement).disabled).toBe(true);
 
+      await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
       resolveSend();
       await waitFor(() => expect(button.textContent).toBe("Summarize my top 3"));
     } finally {
@@ -1925,9 +1936,10 @@ describe("DNA import component", () => {
     // The user explicitly chooses a new action after the displayed snapshot updates.
     fireEvent.click(screen.getByRole("button", { name: "Summarize my top 3" }));
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
-    expect(JSON.stringify(bridge.messages[0])).toContain("analysis_2");
-    expect(JSON.stringify(bridge.messages[0])).toContain("Delta finding");
-    expect(JSON.stringify(bridge.messages[0])).not.toContain("Alpha finding");
+    const context = JSON.stringify(bridge.modelContextUpdates.at(-1));
+    expect(context).toContain("analysis_2");
+    expect(context).toContain("Delta finding");
+    expect(context).not.toContain("Alpha finding");
   });
 
   it("retries a failed in-card update without resubmitting DNA or sending the old action", async () => {
@@ -2669,11 +2681,16 @@ describe("DNA import component", () => {
 
       await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
       expect(sendFollowUpMessage).toHaveBeenCalledWith({
-        prompt: expect.stringContaining("## Comparing your top three findings"),
+        prompt: "Compare top 3",
         scrollToBottom: true,
       });
       const sent = sendFollowUpMessage.mock.calls[0]?.[0] as { prompt: string };
-      expect(sent.prompt).toContain("Compare my top three findings and explain how they differ.");
+      expect(sent.prompt).not.toContain(
+        "Compare my top three findings and explain how they differ.",
+      );
+      const context = JSON.stringify(bridge.modelContextUpdates.at(-1));
+      expect(context).toContain("## Comparing your top three findings");
+      expect(context).toContain("Compare my top three findings and explain how they differ.");
       expect(bridge.messages).toHaveLength(0);
       // The card acknowledges the sent action without echoing the prompt.
       expect(screen.getByRole("status").textContent).toContain("Question sent: Compare top 3");

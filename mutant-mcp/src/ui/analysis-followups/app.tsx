@@ -30,7 +30,7 @@ import {
   STALE_CARD_MESSAGE,
   STALE_CARD_RECOVERY_HEADING,
   STALE_CARD_RECOVERY_PROMPT,
-  deliverFollowUp,
+  deliverContextualFollowUp,
   logBridgeError,
   persistSentAction,
   readSentAction,
@@ -342,7 +342,11 @@ export function AnalysisFollowupsApp() {
           setStaleNotice(true);
           return;
         }
-        const outcome = await deliverFollowUp(app, withCardHeading(action.prompt, action.heading));
+        const outcome = await deliverContextualFollowUp(
+          app,
+          action.label,
+          withCardHeading(action.prompt, action.heading),
+        );
         if (outcome === "sent") {
           const next: SentAction = { id: action.id, label: action.label };
           setSentAction(next);

@@ -42,6 +42,7 @@ import { historyComparisonPrompt } from "../../presentation/prompts";
 import {
   FOLLOW_UP_FAILED_MESSAGE,
   FOLLOW_UP_UNAVAILABLE_MESSAGE,
+  deliverContextualFollowUp,
   deliverFollowUp,
   fetchCurrentAnalysisVersion,
   logBridgeError,
@@ -2421,7 +2422,8 @@ export function DnaImportApp({
   /**
    * Hand control back to ChatGPT only when the user asks for interpretation.
    *
-   * The prompt goes to the host chat API; it is never appended to the card. If
+   * The detailed action goes to model context; the host chat API receives only
+   * the short action label. If
    * no host API is available (or the host rejects it) the user sees an error.
    * A re-entrancy guard makes the server-selected prompt send exactly once, even
    * if the user double-clicks the primary comparison action.
@@ -2444,7 +2446,11 @@ export function DnaImportApp({
           await reloadOverview();
           return;
         }
-        const outcome = await deliverFollowUp(app, withCardHeading(action.prompt, action.heading));
+        const outcome = await deliverContextualFollowUp(
+          app,
+          action.label,
+          withCardHeading(action.prompt, action.heading),
+        );
         if (outcome === "sent") {
           const next: SentAction = { id: action.id, label: action.label };
           setSentAction(next);
