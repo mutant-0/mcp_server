@@ -82,6 +82,8 @@ export function buildCatalogIndexes(catalog) {
   const primarySet = new Set();
   const coordToRsid37 = new Map();
   const coordToRsid38 = new Map();
+  const positionsByChrom37 = new Map();
+  const positionsByChrom38 = new Map();
   const refAlleles = new Map();
 
   for (const [primary, meta] of Object.entries(snps)) {
@@ -92,9 +94,13 @@ export function buildCatalogIndexes(catalog) {
     if (chrom) {
       if (meta && Number.isFinite(Number(meta.position_GRCh37))) {
         coordToRsid37.set(`${chrom}:${meta.position_GRCh37}`, canon);
+        if (!positionsByChrom37.has(chrom)) positionsByChrom37.set(chrom, []);
+        positionsByChrom37.get(chrom).push([Number(meta.position_GRCh37), canon]);
       }
       if (meta && Number.isFinite(Number(meta.position_GRCh38))) {
         coordToRsid38.set(`${chrom}:${meta.position_GRCh38}`, canon);
+        if (!positionsByChrom38.has(chrom)) positionsByChrom38.set(chrom, []);
+        positionsByChrom38.get(chrom).push([Number(meta.position_GRCh38), canon]);
       }
     }
   }
@@ -119,12 +125,17 @@ export function buildCatalogIndexes(catalog) {
   }
 
   const { wgsCaptureById, wgsCaptureRanges, wgsCaptureRangesByChrom } = buildWgsCaptureIndexes(snps);
+  for (const positions of [...positionsByChrom37.values(), ...positionsByChrom38.values()]) {
+    positions.sort((a, b) => a[0] - b[0]);
+  }
 
   return {
     aliasToPrimary,
     primarySet,
     coordToRsid37,
     coordToRsid38,
+    positionsByChrom37,
+    positionsByChrom38,
     referenceAlleles: refAlleles,
     wgsCaptureById,
     wgsCaptureRanges,

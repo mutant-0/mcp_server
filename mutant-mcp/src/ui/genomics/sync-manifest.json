@@ -2,13 +2,13 @@
   "source": "front-end-web/src/genomics",
   "note": "Hashes are of the upstream module body (without the generated header), with line endings normalized to LF.",
   "modules": {
-    "catalog.js": "c068146ddd17af467d790fd69b5a583b9de43ddb0edc6f0d124a60f162fc4e5d",
+    "catalog.js": "c2ed232f0cf6efceb96a78ca34c34679b70dc445a0b7cd515db02d1bfa43af3f",
     "detect.js": "7ed243ebdbc72c89bf64ceacfb3be9c6e94ca7ba3ff0dfa5c0d6554e7bebac79",
     "normalize.js": "214b654f9e504d73efc4d66d66cba283a19189a65070f11fa39e29cdf98a4dd2",
-    "parse.js": "d85ccc216d6acd5dd2cb88516cf6e40eae19b4222f33629898cbda029369ca05",
+    "parse.js": "ebc7cc59bcd6754e2e5c10b7fb0504f22f7cec3117c0c9fafa9a377813a08cd5",
     "parse23andMe.js": "5fbe5a46794e56a284f44fb0a9f0759334749e689a9d8e35fff2f0c43f2e82b3",
     "parseAncestry.js": "b8272b603e4ca8b0ce84e7943050ac28949f4a70ed590e1071d991b1258d068c",
-    "parseVcf.js": "c9d2d96ed85cfa4c529b69895c0351d2038b8abc0c3589daaf57891b24ca5509",
+    "parseVcf.js": "d8d81ee81fbe6f87024ae9b2ff704eda7a5b4ec5b0bca21ecbe76519d4540359",
     "sexChromosome.js": "3bc36db05621a50e636630ad211a3dc66f206c124071484f25f97ca3e5250892",
     "stream.js": "08f7ba94dbbb1e651dc81b26f5880419b75a1109e37283aeecf6fd7975057bf7"
   }

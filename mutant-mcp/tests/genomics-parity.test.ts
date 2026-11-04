@@ -300,7 +300,7 @@ describe("genomics parity: VCF input", () => {
     expect(result.snps).toEqual({ rs328: "GT", rs671: "GG" });
   });
 
-  it("skips no-calls and gVCF reference blocks", async () => {
+  it("skips no-calls and gVCF reference blocks without sufficient depth", async () => {
     const file = fakeFile(
       "sample.g.vcf",
       [
@@ -316,6 +316,21 @@ describe("genomics parity: VCF input", () => {
     expect(result.snps).toEqual({});
     expect(result.wgsVariantCalls).toEqual({});
     expect(result.coverage.matched).toBe(0);
+  });
+
+  it("counts a well-covered gVCF reference block as a called SNP", async () => {
+    const file = fakeFile(
+      "sample.g.vcf",
+      [
+        ...VCF_HEADER,
+        "8\t19962200\t.\tA\t<NON_REF>\t.\tPASS\tEND=19962220\tGT:MIN_DP:GQ\t0/0:24:40",
+      ].join("\n"),
+    );
+
+    const result = await parse(file, catalog);
+
+    expect(result.snps).toEqual({ rs328: "AA" });
+    expect(result.coverage.matched).toBe(1);
   });
 
   it("captures non-SNV target records with native REF/ALT/GT intact", async () => {

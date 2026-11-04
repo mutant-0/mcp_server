@@ -18,6 +18,8 @@ export const PROVIDER_LABELS = { vcf: 'WGS', '23andme': '23andMe', ancestry: 'An
 export async function parseLines(iterable, indexes) {
   const snps = {};
   const wgsVariantCalls = {};
+  const inferredReferenceCalls = {};
+  const explicitSnps = new Set();
   // Chromosome X/Y counters are collected during this same pass, from raw
   // records, so no second scan of the file is required.
   const sexChromosomeStats = createSexChromosomeStats();
@@ -41,7 +43,7 @@ export async function parseLines(iterable, indexes) {
     totalLines += 1;
 
     if (provider === 'vcf') {
-      parseVcfLine(line, { indexes, snps, build, wgsVariantCalls, sexChromosomeStats });
+      parseVcfLine(line, { indexes, snps, build, wgsVariantCalls, sexChromosomeStats, inferredReferenceCalls, explicitSnps });
     } else if (provider === 'ancestry') {
       parseAncestryLine(line, { indexes, snps, sexChromosomeStats });
     } else {
@@ -49,5 +51,5 @@ export async function parseLines(iterable, indexes) {
     }
   }
 
-  return { snps, provider, totalLines, wgsVariantCalls, sexChromosomeStats };
+  return { snps, provider, totalLines, wgsVariantCalls, inferredReferenceCalls, sexChromosomeStats };
 }

@@ -157,6 +157,38 @@ export function buildWgsVariantCallRecord(parts, chrom, pos) {
   return record;
 }
 
+function addWgsCaptureRecord(ctx, rsid, record, inferredReference = false) {
+  if (!ctx.wgsVariantCalls) return;
+  const existing = ctx.wgsVariantCalls[rsid];
+  if (inferredReference && existing) return;
+  if (!existing) {
+    ctx.wgsVariantCalls[rsid] = {
+      schema_version: 1,
+      source_format: 'vcf',
+      genome_build: ctx.build,
+      records: [],
+    };
+  }
+  const records = ctx.wgsVariantCalls[rsid].records;
+  if (!inferredReference) {
+    // An actual allele row takes precedence over a reference block.
+    ctx.wgsVariantCalls[rsid].records = records.filter((r) => !r.inferred_reference_block);
+    if (ctx.inferredReferenceCalls) delete ctx.inferredReferenceCalls[rsid];
+  }
+  ctx.wgsVariantCalls[rsid].records.push(inferredReference
+    ? { ...record, inferred_reference_block: true }
+    : record);
+}
+
+function referenceDepth(format, sample) {
+  const keys = format.split(':');
+  const values = sample.split(':');
+  const minDp = values[keys.indexOf('MIN_DP')];
+  const dp = values[keys.indexOf('DP')];
+  const depth = Number(minDp && minDp !== '.' ? minDp : dp);
+  return Number.isFinite(depth) ? depth : 0;
+}
+
 export function parseVcfLine(line, ctx) {
   const parts = line.split('\t');
   if (parts.length < 10) return;
@@ -170,10 +202,74 @@ export function parseVcfLine(line, ctx) {
   const info = parts[7] || '';
   const format = parts[8] || '';
   const sample = parts[9] || '';
+  const referenceOnlyAlt = alts === '.' || alts === '<NON_REF>' || alts === '<*>';
 
-  // gVCF reference block: only emit for explicit variant rows, never synthesize.
+  // A block's REF belongs to POS only. Use the catalog's base for each interior
+  // target, and retain provenance so these calls are distinguishable downstream.
   const endMatch = info.match(/END=(\d+)/);
-  if (endMatch && Number(endMatch[1]) > pos) return;
+  if (endMatch && Number(endMatch[1]) > pos) {
+    const end = Number(endMatch[1]);
+    if (parts[6] !== 'PASS' || !referenceOnlyAlt) return;
+    const formatKeys = format.split(':');
+    const sampleValues = sample.split(':');
+    const field = (key) => sampleValues[formatKeys.indexOf(key)];
+    const gt = field('GT');
+    const haploidReference = gt === '0' && (chrom === 'X' || chrom === 'Y' || chrom === 'MT');
+    if (gt !== '0/0' && gt !== '0|0' && !haploidReference) return;
+    const minDepth = Number(field('MIN_DP'));
+    if (!Number.isFinite(minDepth) || minDepth < 10) return;
+    const rawGq = field('GQ');
+    const gq = rawGq != null && rawGq !== '.' && rawGq !== '' && Number.isFinite(Number(rawGq)) ? Number(rawGq) : null;
+    const positions = (ctx.build === 'GRCh37' ? ctx.indexes.positionsByChrom37 : ctx.indexes.positionsByChrom38)?.get(chrom) || [];
+    let low = 0;
+    let high = positions.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (positions[mid][0] < pos) low = mid + 1;
+      else high = mid;
+    }
+    for (let i = low; i < positions.length && positions[i][0] <= end; i += 1) {
+      const rsid = positions[i][1];
+      const base = ctx.indexes.referenceAlleles.get(rsid)?.[ctx.build];
+      if (!/^[ACGT]$/.test(base || '') || ctx.explicitSnps?.has(rsid)) continue;
+      if (ctx.indexes.wgsCaptureById?.has(rsid)) {
+        addWgsCaptureRecord(ctx, rsid, {
+          chromosome: chrom, position: positions[i][0], vcf_id: null,
+          ref: base, alts: ['.'], gt: '0/0', phased: false,
+          filter: 'PASS', dp: minDepth, gq,
+        }, true);
+        if (ctx.inferredReferenceCalls && ctx.wgsVariantCalls?.[rsid]?.records[0]?.inferred_reference_block) {
+          ctx.inferredReferenceCalls[rsid] = { min_dp: minDepth, gq, ploidy: 2 };
+        }
+        continue;
+      }
+      ctx.snps[rsid] = base + base;
+      if (ctx.inferredReferenceCalls) ctx.inferredReferenceCalls[rsid] = { min_dp: minDepth, gq, ploidy: haploidReference ? 1 : 2 };
+    }
+    return;
+  }
+
+  // A single-position hom-ref gVCF row can establish the reference genotype
+  // at an exact registered non-SNV locus. A nearby row cannot.
+  if (referenceOnlyAlt) {
+    if (parts[6] !== 'PASS' || !['0/0', '0|0'].includes(sample.split(':')[format.split(':').indexOf('GT')])) return;
+    const rsid = ctx.indexes[ctx.build === 'GRCh37' ? 'coordToRsid37' : 'coordToRsid38']?.get(`${chrom}:${pos}`);
+    const base = ctx.indexes.referenceAlleles.get(rsid)?.[ctx.build];
+    const depth = referenceDepth(format, sample);
+    if (ctx.indexes.wgsCaptureById?.has(rsid) && /^[ACGT]$/.test(base || '') && ref === base && depth >= 10) {
+      const rawGq = sample.split(':')[format.split(':').indexOf('GQ')];
+      const gq = rawGq && rawGq !== '.' && Number.isFinite(Number(rawGq)) ? Number(rawGq) : null;
+      addWgsCaptureRecord(ctx, rsid, {
+        chromosome: chrom, position: pos, vcf_id: null,
+        ref, alts: ['.'], gt: '0/0', phased: false,
+        filter: 'PASS', dp: depth, gq,
+      }, true);
+      if (ctx.inferredReferenceCalls && ctx.wgsVariantCalls?.[rsid]?.records[0]?.inferred_reference_block) {
+        ctx.inferredReferenceCalls[rsid] = { min_dp: depth, gq, ploidy: 2 };
+      }
+    }
+    return;
+  }
 
   // Sex-chromosome evidence. Guarded to X/Y (and to explicit variant rows) so
   // the autosomal hot path of a multi-million-line VCF pays nothing. PAR
@@ -192,25 +288,13 @@ export function parseVcfLine(line, ctx) {
   // otherwise drop still yield a captured record.
   const idColumn = (parts[2] || '').trim();
 
-  // A "." or empty ALT marks a gVCF reference site (no alternate allele). Only
-  // capture rows that carry a real alternate allele, so a target with no
-  // variant stays absent (not_assessed) rather than being emitted as a
-  // homozygous-reference record. (`alts` is already trimmed + uppercased above.)
-  if (alts && alts !== '.') {
+  if (alts) {
     const captureTargets = matchWgsCaptureTargets(ctx, chrom, pos, idColumn);
     if (captureTargets.size) {
       if (!ctx.wgsVariantCalls) ctx.wgsVariantCalls = {};
       const record = buildWgsVariantCallRecord(parts, chrom, pos);
       for (const rsid of captureTargets) {
-        if (!ctx.wgsVariantCalls[rsid]) {
-          ctx.wgsVariantCalls[rsid] = {
-            schema_version: 1,
-            source_format: 'vcf',
-            genome_build: ctx.build,
-            records: [],
-          };
-        }
-        ctx.wgsVariantCalls[rsid].records.push(record);
+        addWgsCaptureRecord(ctx, rsid, record);
       }
     }
   }
@@ -231,5 +315,9 @@ export function parseVcfLine(line, ctx) {
   if (!primary) return;
 
   const gt = genotypeFromGt(ref, alts, format, sample);
-  if (gt) ctx.snps[primary] = gt;
+  if (gt) {
+    ctx.snps[primary] = gt;
+    if (ctx.explicitSnps) ctx.explicitSnps.add(primary);
+    if (ctx.inferredReferenceCalls) delete ctx.inferredReferenceCalls[primary];
+  }
 }
