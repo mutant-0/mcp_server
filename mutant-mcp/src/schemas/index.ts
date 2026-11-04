@@ -259,6 +259,21 @@ const wgsVariantCallsSchema = z
   })
   .describe("Optional, additive map of non-SNV capture targets to their VCF records.");
 
+/** Provenance for reference genotypes inferred from passing gVCF blocks. */
+const inferredReferenceCallsSchema = z
+  .record(
+    z.string().regex(RSID_PATTERN),
+    z.strictObject({
+      min_dp: z.number().int().nonnegative(),
+      gq: z.number().finite().nonnegative().nullable(),
+      ploidy: z.union([z.literal(1), z.literal(2)]),
+    }),
+  )
+  .refine((calls) => Object.keys(calls).length <= MAX_SNP_ENTRIES, {
+    message: `inferred_reference_calls must contain at most ${MAX_SNP_ENTRIES} entries.`,
+  })
+  .describe("Optional provenance for SNPs inferred from gVCF reference blocks.");
+
 /**
  * Non-identifying import provenance. The original filename is deliberately not
  * part of the plugin contract: it is retained locally for the user's own review
@@ -319,6 +334,7 @@ const analysisContextSchema = z
 export const createReportInputSchema = z.strictObject({
   snps: snpsSchema,
   wgs_variant_calls: wgsVariantCallsSchema.optional(),
+  inferred_reference_calls: inferredReferenceCallsSchema.optional(),
   upload_meta: uploadMetaSchema.optional(),
   analysis_context: analysisContextSchema.optional(),
   report_id: z

@@ -49,8 +49,16 @@ const CATALOG = {
         capture_range_GRCh38: { start: 50729860, end: 50729870 },
       },
     },
+    rs1799836: {
+      rsID: "rs1799836",
+      chromosome: "X",
+      position_GRCh37: 43627999,
+      position_GRCh38: 43768752,
+      risk_allele: "C",
+    },
   },
   aliases: { rs671: ["rs2230021"] },
+  reference_alleles: { rs1799836: { GRCh37: "T", GRCh38: "T" } },
 };
 
 const VCF_COLUMNS = "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE";
@@ -116,9 +124,53 @@ const FIXTURES: Array<[string, () => File]> = [
         [VCF_COLUMNS, "1\t1000\t.\tA\tG\t.\tPASS\t.\tGT\t0/1", ""].join("\n"),
       ),
   ],
+  [
+    "gzipped gVCF reference block covering MAOB rs1799836",
+    () =>
+      fakeFile(
+        "maob.vcf.gz",
+        gzipSync(
+          strToU8(
+            [
+              "##fileformat=VCFv4.2",
+              "##reference=GRCh38",
+              VCF_COLUMNS,
+              "X\t43768700\t.\tT\t<NON_REF>\t.\tPASS\tEND=43768800\tGT:MIN_DP\t0:20",
+              "",
+            ].join("\n"),
+          ),
+        ),
+      ),
+  ],
 ];
 
 describe("parser parity: worker path vs main-thread path", () => {
+  it("recovers the MAOB reference genotype from a gzipped X-chromosome block", async () => {
+    const makeFile = FIXTURES.find(([label]) => label.includes("MAOB rs1799836"))![1];
+    const parsed = await parseDnaFileCore(makeFile(), { catalog: CATALOG });
+    expect((parsed.snps as Record<string, string>).rs1799836).toBe("TT");
+    expect((parsed.inferredReferenceCalls as Record<string, unknown>).rs1799836).toEqual({ min_dp: 20, gq: null, ploidy: 1 });
+  });
+
+  it("does not infer MAOB from a reference block with minimum depth below ten", async () => {
+    const file = fakeFile(
+      "maob-low-depth.vcf.gz",
+      gzipSync(
+        strToU8(
+          [
+            "##fileformat=VCFv4.2",
+            "##reference=GRCh38.p13",
+            VCF_COLUMNS,
+            "X\t43760342\t.\tG\t.\t.\tPASS\tEND=43776429\tGT:DP:GQ:MIN_DP\t0:19:0:7",
+            "",
+          ].join("\n"),
+        ),
+      ),
+    );
+    const parsed = await parseDnaFileCore(file, { catalog: CATALOG });
+    expect((parsed.snps as Record<string, string>).rs1799836).toBeUndefined();
+  });
+
   for (const [label, makeFile] of FIXTURES) {
     it(`produces identical output with cooperative yielding on and off: ${label}`, async () => {
       const onMainThread = await parseDnaFileCore(makeFile(), {

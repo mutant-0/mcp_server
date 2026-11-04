@@ -66,6 +66,20 @@ describe("detectSexChromosomeContext", () => {
 });
 
 describe("parseDnaFile exposes the sex-chromosome context", () => {
+  it("uses whole-VCF chromosome evidence when the catalog has no Y SNPs", async () => {
+    const catalog = { ...CATALOG, snps: { rs4680: CATALOG.snps.rs4680 } };
+    const lines = ["##fileformat=VCFv4.2", "##reference=GRCh38", "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE"];
+    for (let i = 0; i < 30; i += 1) {
+      lines.push(`X\t${5000000 + i}\t.\tA\tG\t.\tPASS\t.\tGT\t0`);
+    }
+    for (let i = 0; i < 6; i += 1) {
+      lines.push(`Y\t${5000000 + i}\t.\tA\tG\t.\tPASS\t.\tGT\t1`);
+    }
+    lines.push("22\t19951271\trs4680\tG\tA\t.\tPASS\t.\tGT\t0/1");
+    const result = await parseDnaFile(fakeFile("genome.vcf", lines.join("\n")), { catalog });
+    expect(result.sexChromosome).toEqual({ pattern: "XY", confidence: "high" });
+  });
+
   it("carries a high-confidence header signal through the parse result", async () => {
     const file = fakeFile(
       "23andme.txt",

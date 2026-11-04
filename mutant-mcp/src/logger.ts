@@ -35,6 +35,8 @@ export function createLogger(level: string, sink?: LogSink): AppLogger {
         "*.snps",
         "wgs_variant_calls",
         "*.wgs_variant_calls",
+        "inferred_reference_calls",
+        "*.inferred_reference_calls",
         "analysis_context",
         "*.analysis_context",
         "upload_meta",
