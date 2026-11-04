@@ -399,6 +399,7 @@ describe("genomics parity: component payload contract", () => {
       "fileName",
       "fileSizeBytes",
       "genomeBuild",
+      "inferredReferenceCalls",
       "provider",
       "providerLabel",
       "sexChromosome",

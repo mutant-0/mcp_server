@@ -20,6 +20,7 @@ import { buildCatalogIndexes } from "../genomics/catalog.js";
 import { detectBuild } from "../genomics/detect.js";
 import { normalizeChrom } from "../genomics/normalize.js";
 import { parseLines, PROVIDER_LABELS } from "../genomics/parse.js";
+import { safeInferSexChromosomePattern } from "../genomics/sexChromosome.js";
 import { readLines, supportsStreaming } from "../genomics/stream.js";
 
 /** Provider label the backend uses for sequencing input. */
@@ -94,7 +95,7 @@ async function* capturingHeaders(iterable, sink) {
  * Parse a raw DNA file in the browser and reduce it to Mutant-relevant variants.
  *
  * The raw file is read and discarded locally: only the returned normalized
- * `snps` / `wgsVariantCalls` maps ever leave this function.
+ * `snps` / `wgsVariantCalls` / `inferredReferenceCalls` maps ever leave this function.
  *
  * @param {File} file - raw file chosen by the user.
  * @param {object} options
@@ -119,6 +120,7 @@ export async function parseDnaFileCore(
       supported: false,
       snps: {},
       wgsVariantCalls: {},
+      inferredReferenceCalls: {},
       provider: WGS_PROVIDER,
       providerLabel: WGS_PROVIDER,
       genomeBuild: null,
@@ -132,7 +134,7 @@ export async function parseDnaFileCore(
 
   const indexes = buildCatalogIndexes(catalog || {});
   const headerLines = [];
-  const { snps, provider, totalLines, wgsVariantCalls } = await parseLines(
+  const { snps, provider, totalLines, wgsVariantCalls, inferredReferenceCalls, sexChromosomeStats } = await parseLines(
     capturingHeaders(readLines(file, { onProgress, signal, cooperative }), headerLines),
     indexes,
   );
@@ -144,12 +146,18 @@ export async function parseDnaFileCore(
   // microarray files are matched by rsID, so reporting a build there would imply
   // a precision the parse does not use.
   const genomeBuild = isWgs ? detectBuild(headerLines) : null;
-  const sexChromosome = detectSexChromosomeContext(headerLines, snps, catalog);
+  const inferredSexChromosome = safeInferSexChromosomePattern(sexChromosomeStats, provider);
+  const sexChromosome =
+    inferredSexChromosome.confidence === "high" &&
+    (inferredSexChromosome.pattern === "XX" || inferredSexChromosome.pattern === "XY")
+      ? inferredSexChromosome
+      : detectSexChromosomeContext(headerLines, {}, catalog);
 
   return {
     supported: true,
     snps,
     wgsVariantCalls: wgsVariantCalls || {},
+    inferredReferenceCalls: inferredReferenceCalls || {},
     provider: providerLabel,
     providerLabel,
     genomeBuild,

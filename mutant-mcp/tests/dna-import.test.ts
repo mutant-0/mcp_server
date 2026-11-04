@@ -352,6 +352,7 @@ describe("create_report", () => {
       name: "create_report",
       arguments: {
         snps: { rs4680: "GG" },
+        inferred_reference_calls: { rs4680: { min_dp: 20, gq: 0, ploidy: 2 } },
         import_request_id: "12345678-abcd-4ef0-9876-1234567890ab",
         upload_meta: {
           provider: "WGS",
@@ -393,6 +394,9 @@ describe("create_report", () => {
     expect(result.isError).toBe(false);
 
     const forwarded = backendClient.calls[0]?.arguments as Record<string, unknown>;
+    expect(forwarded.inferred_reference_calls).toEqual({
+      rs4680: { min_dp: 20, gq: 0, ploidy: 2 },
+    });
     expect(forwarded.upload_meta).toEqual({
       provider: "WGS",
       file_size_bytes: 999,

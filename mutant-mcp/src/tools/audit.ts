@@ -70,13 +70,14 @@ const KNOWN_ARGUMENTS: Record<ToolName, readonly string[]> = {
     "snps",
     "upload_meta",
     "wgs_variant_calls",
+    "inferred_reference_calls",
   ],
 };
 
 /**
  * The routing-relevant argument values a golden trace needs, per tool. These are
  * emitted only in a designated synthetic capture; `snps`, `wgs_variant_calls`,
- * `upload_meta`, and `analysis_context` are never routed to a trace, so even a
+ * `inferred_reference_calls`, `upload_meta`, and `analysis_context` are never routed to a trace, so even a
  * capture cannot persist genotypes, filenames, or the transient context.
  */
 const ROUTING_ARGUMENTS: Record<ToolName, readonly string[]> = {

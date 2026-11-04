@@ -106,6 +106,7 @@ interface ParsedResult {
   supported: boolean;
   snps: Record<string, string>;
   wgsVariantCalls: Record<string, unknown>;
+  inferredReferenceCalls: Record<string, { min_dp: number; gq: number | null; ploidy: number }>;
   provider: string;
   providerLabel: string;
   genomeBuild: string | null;
@@ -1718,6 +1719,9 @@ export function DnaImportApp({
       };
       if (Object.keys(parsed.wgsVariantCalls).length) {
         args.wgs_variant_calls = parsed.wgsVariantCalls;
+      }
+      if (Object.keys(parsed.inferredReferenceCalls).length) {
+        args.inferred_reference_calls = parsed.inferredReferenceCalls;
       }
       // Request-only context: only a high-confidence XX/XY detection is sent, so
       // sex-specific storm conditions can be evaluated in memory. The backend
