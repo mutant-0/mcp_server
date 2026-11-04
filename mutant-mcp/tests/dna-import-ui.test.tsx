@@ -2183,6 +2183,29 @@ describe("DNA import component", () => {
     ).toBe(true);
   });
 
+  it("resumes a refused question automatically when sharing is already accepted", async () => {
+    const args = {
+      hypothesis_id: "RC_B6_PLP_HOMEOSTASIS_FRAGILITY",
+      analysis_version: "analysis_1",
+    };
+    const bridge = await renderApp({
+      get_consent: makeSuccessResponse(makeConsentData(["chatgpt_sharing"])),
+      explain_health_hypothesis: makeSuccessResponse({
+        name: "B6 finding",
+        summary: "Synthetic result.",
+      }),
+    });
+    bridge.sendToolResult(consentError(), {
+      mutant: {
+        consent: { purpose: "chatgpt_sharing" },
+        pending_action: { tool: "explain_health_hypothesis", args },
+      },
+    });
+    await waitFor(() => expect(bridge.callsTo("explain_health_hypothesis")).toHaveLength(1));
+    expect(bridge.callsTo("save_consent")).toHaveLength(0);
+    expect(bridge.callsTo("explain_health_hypothesis")[0]?.arguments).toEqual(args);
+  });
+
   it("routes an import refused for consent to the portal consent page", async () => {
     const bridge = await renderApp(
       { create_report: consentError() },

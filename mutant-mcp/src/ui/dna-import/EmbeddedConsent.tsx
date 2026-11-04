@@ -104,13 +104,14 @@ export function EmbeddedConsent({
     if (
       !autoContinueWhenCurrent ||
       !required?.current ||
-      !data?.purposes.some((row) => row.purpose === "chatgpt_sharing" && row.current) ||
+      (compact &&
+        !data?.purposes.some((row) => row.purpose === "chatgpt_sharing" && row.current)) ||
       continued.current
     )
       return;
     continued.current = true;
     onComplete(data?.purposes.filter((row) => row.current).map((row) => row.purpose) ?? []);
-  }, [autoContinueWhenCurrent, required?.current, data, onComplete]);
+  }, [autoContinueWhenCurrent, compact, required?.current, data, onComplete]);
   async function save() {
     if (!app || !data || !canContinue || saving.current) return;
     saving.current = true;

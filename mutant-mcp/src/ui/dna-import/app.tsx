@@ -2594,6 +2594,7 @@ export function DnaImportApp({
             <EmbeddedConsent
               app={app}
               requiredPurpose={consentRequired.purpose}
+              autoContinueWhenCurrent
               onComplete={retryAfterConsent}
               onCancel={cancelConsent}
             />

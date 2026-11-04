@@ -33,6 +33,25 @@ function setup(options: { saveFails?: boolean; confirmFails?: boolean; getFails?
 }
 
 describe("embedded consent", () => {
+  it("continues a recovery request when its required permission is already current", async () => {
+    const completed = vi.fn();
+    const callServerTool = vi.fn(async (_call: { name: string }) => ({
+      structuredContent: makeSuccessResponse(makeConsentData(["chatgpt_sharing"])),
+    }));
+    render(
+      <EmbeddedConsent
+        app={{ callServerTool } as unknown as App}
+        requiredPurpose="chatgpt_sharing"
+        autoContinueWhenCurrent
+        onComplete={completed}
+        onCancel={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(completed).toHaveBeenCalledOnce());
+    expect(completed).toHaveBeenCalledWith(["chatgpt_sharing"]);
+    expect(callServerTool).toHaveBeenCalledTimes(1);
+    expect(callServerTool.mock.calls[0]?.[0].name).toBe("get_consent");
+  });
   it("loads the notice, leaves missing permissions unchecked, and saves only explicit choices", async () => {
     const test = setup();
     await screen.findByText("Notice version 2026-10-01");
