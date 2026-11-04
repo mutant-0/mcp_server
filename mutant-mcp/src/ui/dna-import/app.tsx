@@ -3201,7 +3201,7 @@ export function DnaImportApp({
           ) : null}
         </div>
         <p style={styles.meta}>
-          Allow genetic processing to start your analysis. Sharing results with ChatGPT is optional.
+          Allow both permissions to create your analysis and use its results in ChatGPT.
         </p>
         <EmbeddedConsent
           app={app}

@@ -96,22 +96,34 @@ export function EmbeddedConsent({
     };
   }, [app, reload]);
 
-  const required = data?.purposes.find((row) => row.purpose === requiredPurpose);
+  const requiredPurposes = compact
+    ? ["genetic_processing", "chatgpt_sharing"]
+    : requiredPurpose
+      ? [requiredPurpose]
+      : [];
   const canContinue = Boolean(
-    data && required && (required.current || selected.includes(required.purpose)),
+    data &&
+      requiredPurposes.length > 0 &&
+      requiredPurposes.every((purpose) =>
+        data.purposes.some(
+          (row) => row.purpose === purpose && (row.current || selected.includes(purpose)),
+        ),
+      ),
   );
   useEffect(() => {
     if (
       !autoContinueWhenCurrent ||
-      !required?.current ||
-      (compact &&
-        !data?.purposes.some((row) => row.purpose === "chatgpt_sharing" && row.current)) ||
+      !data ||
+      !requiredPurposes.length ||
+      !requiredPurposes.every((purpose) =>
+        data.purposes.some((row) => row.purpose === purpose && row.current),
+      ) ||
       continued.current
     )
       return;
     continued.current = true;
-    onComplete(data?.purposes.filter((row) => row.current).map((row) => row.purpose) ?? []);
-  }, [autoContinueWhenCurrent, compact, required?.current, data, onComplete]);
+    onComplete(data.purposes.filter((row) => row.current).map((row) => row.purpose));
+  }, [autoContinueWhenCurrent, compact, requiredPurpose, data, onComplete]);
   async function save() {
     if (!app || !data || !canContinue || saving.current) return;
     saving.current = true;
@@ -132,7 +144,9 @@ export function EmbeddedConsent({
         throw new Error("The privacy notice changed. Review it and select your choices again.");
       }
       if (
-        !confirmed.purposes.some((row) => row.purpose === requiredPurpose && row.current) ||
+        !requiredPurposes.every((purpose) =>
+          confirmed.purposes.some((row) => row.purpose === purpose && row.current),
+        ) ||
         selected.some(
           (purpose) => !confirmed.purposes.some((row) => row.purpose === purpose && row.current),
         )
@@ -206,7 +220,7 @@ export function EmbeddedConsent({
                 <small style={{ marginLeft: 24 }}>
                   {row.current
                     ? "Already accepted"
-                    : row.purpose === requiredPurpose
+                    : compact || row.purpose === requiredPurpose
                       ? "Required to continue this request"
                       : "Optional for this request"}
                 </small>

@@ -753,7 +753,7 @@ describe("DNA import component", () => {
     expect(screen.queryByText(/Ready to submit/i)).toBeNull();
   });
 
-  it("runs analysis without reading findings when ChatGPT sharing is declined", async () => {
+  it("requires ChatGPT sharing before starting the analysis in the ChatGPT import flow", async () => {
     const bridge = await renderApp({
       poll_analysis_status: (_args, call) =>
         call === 1 ? STATUS_MISSING : statusResponse("ready"),
@@ -764,12 +764,23 @@ describe("DNA import component", () => {
       name: /Allow Mutant to process my genetic data/i,
     });
     fireEvent.click(processing);
-    fireEvent.click(await screen.findByRole("button", { name: /Continue with this DNA file/i }));
+    const continueButton = await screen.findByRole("button", {
+      name: /Continue with this DNA file/i,
+    });
+    expect((continueButton as HTMLButtonElement).disabled).toBe(true);
+    expect(bridge.callsTo("create_report")).toHaveLength(0);
+    expect(bridge.callsTo("save_consent")).toHaveLength(0);
+    expect(screen.getAllByText("Required to continue this request")).toHaveLength(2);
 
-    await screen.findByText(/^Analysis ready$/);
-    expect(bridge.callsTo("create_report")).toHaveLength(1);
-    expect(bridge.callsTo("list_health_hypotheses")).toHaveLength(0);
-    expect(bridge.callsTo("save_consent")[0]?.arguments.purposes).toEqual(["genetic_processing"]);
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Allow Mutant to share my results with ChatGPT/i }),
+    );
+    fireEvent.click(continueButton);
+    await screen.findByText(PROCESSING_HEADING);
+    expect(bridge.callsTo("save_consent")[0]?.arguments.purposes).toEqual([
+      "genetic_processing",
+      "chatgpt_sharing",
+    ]);
   });
 
   it("shows a truthful processing card without internal identifiers", async () => {
