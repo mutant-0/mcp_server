@@ -2243,7 +2243,7 @@ describe("DNA import component", () => {
     expect(bridge.openLinks[0]).toContain("client_id=connector-1");
   });
 
-  it("re-runs the import only once when the user retries after accepting", async () => {
+  it("re-runs the import only once when the required permission is already accepted", async () => {
     const bridge = await renderApp(
       {
         create_report: (_args, call) =>
@@ -2258,15 +2258,9 @@ describe("DNA import component", () => {
     selectFile(microarrayFile());
     await screen.findByText(/Continue with this DNA file/i);
     await acceptImportConsent();
-    await screen.findByRole("button", { name: /Review data permissions/i });
-
-    const retry = screen.getByRole("button", { name: /I've accepted/i });
-    fireEvent.click(retry);
-    fireEvent.click(retry);
-
     await screen.findByText(PROCESSING_HEADING);
-    // One submit before the refusal, one retry after acceptance. The second click
-    // lands on the already-replaced card and cannot submit again.
+    // The consent card confirms the saved permission and resumes automatically.
+    // The refused import and its recovery are the only submissions.
     expect(bridge.callsTo("create_report")).toHaveLength(2);
   });
 
