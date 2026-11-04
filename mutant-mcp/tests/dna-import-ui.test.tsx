@@ -965,9 +965,13 @@ describe("DNA import component", () => {
 
     await screen.findByText(/Your analysis isn't available/i);
     expect(screen.queryByText(/did not finish successfully/i)).toBeNull();
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.click(screen.getByRole("button", { name: /resubmit DNA file/i }));
 
-    await screen.findByText(/Drag and drop your DNA file here/i);
+    expect(document.querySelector('input[type="file"]')).toBe(input);
+    expect(screen.getByText(/Your analysis isn't available/i)).toBeDefined();
+    fireEvent.change(input, { target: { files: [microarrayFile()] } });
+    await screen.findByRole("button", { name: /Continue with this DNA file/i });
     expect(bridge.callsTo("create_report")).toHaveLength(0);
   });
 
@@ -988,8 +992,11 @@ describe("DNA import component", () => {
 
     await screen.findByText(/Resubmit your DNA file to generate a new analysis/i);
     expect(screen.queryByText(/did not finish successfully/i)).toBeNull();
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.click(screen.getByRole("button", { name: /resubmit DNA file/i }));
-    await screen.findByText(/Drag and drop your DNA file here/i);
+    expect(document.querySelector('input[type="file"]')).toBe(input);
+    fireEvent.change(input, { target: { files: [microarrayFile()] } });
+    await screen.findByRole("button", { name: /Continue with this DNA file/i });
     expect(bridge.callsTo("create_report")).toHaveLength(0);
   });
 
@@ -2042,9 +2049,17 @@ describe("DNA import component", () => {
     // No re-import control while processing; a quiet one when ready.
     expect(screen.queryByRole("button", { name: /import another file/i })).toBeNull();
 
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /replace dna data/i }));
+    // Keep the same input mounted until the native picker returns its selection.
+    // A cancelled picker leaves the current analysis visible.
+    expect(document.querySelector('input[type="file"]')).toBe(input);
+    expect(screen.getByText(/Analysis ready/i)).toBeDefined();
+    expect(bridge.callsTo("create_report")).toHaveLength(0);
 
-    await screen.findByText(/Drag and drop your DNA file here/i);
+    fireEvent.change(input, { target: { files: [microarrayFile()] } });
+    await screen.findByRole("button", { name: /Continue with this DNA file/i });
     expect(bridge.callsTo("create_report")).toHaveLength(0);
   });
 

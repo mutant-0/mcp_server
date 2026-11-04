@@ -1586,7 +1586,7 @@ export function DnaImportApp({
     setAutoSubmitAttempted(false);
     setUploadError(null);
     setProgress(0);
-    setPoll(INITIAL_POLL);
+    setPoll((previous) => ({ ...INITIAL_POLL, scopeBlocked: previous.scopeBlocked }));
     promptsLoadedRef.current = false;
     // A new import is a new analysis: drop the pinned overview revision so the
     // next status read (and the resulting card) can bind the new version.
@@ -1597,7 +1597,6 @@ export function DnaImportApp({
   }, [setFindingsState]);
 
   const openFilePicker = useCallback(() => {
-    resetImport();
     const input = fileInputRef.current;
     if (!input) return;
     try {
@@ -1606,7 +1605,7 @@ export function DnaImportApp({
       // Some hosts deny writes to the input; selecting the same file still fires.
     }
     input.click();
-  }, [resetImport]);
+  }, []);
 
   /**
    * Stop an in-flight parse.
@@ -2644,6 +2643,7 @@ export function DnaImportApp({
       onChange={(event) => {
         const file = event.target.files?.[0];
         if (!file || !catalog) return;
+        resetImport();
         void handleFile(file, app, catalog);
       }}
     />
