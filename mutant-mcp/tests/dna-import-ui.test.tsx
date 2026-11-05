@@ -1481,19 +1481,14 @@ describe("DNA import component", () => {
     expect(bridge.messages).toHaveLength(0);
   });
 
-  it("sends the server-selected comparison prompt once, even on a double click", async () => {
+  it("sends the current history comparison prompt once, even on a double click", async () => {
+    const comparison = historyComparisonPrompt("analysis_1");
     const bridge = renderWith({
       poll_analysis_status: statusResponse("ready"),
       get_analysis_context: makeSuccessResponse(
         makeContextData({
           suggested_prompts: [
-            {
-              id: "compare-medical-records",
-              label: "Compare with my history",
-              prompt: "Which of my findings best fits the history I shared here?",
-              intent: "comparison",
-              action: { analysis_version: "analysis_1", intent: "comparison" },
-            },
+            comparison,
             {
               id: "explain-first",
               label: "Explain #1",
@@ -1512,11 +1507,9 @@ describe("DNA import component", () => {
     fireEvent.click(compare);
     fireEvent.click(compare);
 
-    // The guard makes one click one server-selected prompt; the card never
-    // builds a second, hard-coded comparison request.
     await waitFor(() => expect(bridge.messages).toHaveLength(1));
     expect(JSON.stringify(bridge.modelContextUpdates.at(-1))).toContain(
-      "Which of my findings best fits the history I shared here?",
+      comparison.prompt,
     );
   });
 
