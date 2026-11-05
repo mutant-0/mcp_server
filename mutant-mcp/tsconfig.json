@@ -14,9 +14,8 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "isolatedModules": true,
-    // The vendored shared DNA processor (src/ui/genomics) is plain JavaScript
-    // synced from front-end-web by scripts/sync-genomics.mjs. It is not checked
-    // (checkJs is off) but must resolve so the component can import it.
+    // The browser adapters and compatibility exports are plain JavaScript.
+    // The shared parser package supplies its own declaration file.
     "allowJs": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

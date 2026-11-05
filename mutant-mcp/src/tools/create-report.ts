@@ -70,6 +70,9 @@ export function describeDnaPayload(args: Record<string, unknown>): {
   provider: string | null;
   sourceFormat: string | null;
   genomeBuild: string | null;
+  parserVersion: string | null;
+  catalogVersion: number | null;
+  catalogDigest: string | null;
 } {
   const snps = (args.snps ?? {}) as Record<string, unknown>;
   const wgs = (args.wgs_variant_calls ?? {}) as Record<string, { records?: unknown[] }>;
@@ -77,6 +80,9 @@ export function describeDnaPayload(args: Record<string, unknown>): {
     provider?: unknown;
     source_format?: unknown;
     file_size_bytes?: unknown;
+    parser_version?: unknown;
+    catalog_version?: unknown;
+    catalog_digest?: unknown;
   };
 
   let wgsRecordCount = 0;
@@ -103,6 +109,9 @@ export function describeDnaPayload(args: Record<string, unknown>): {
     provider: typeof upload.provider === "string" ? upload.provider : null,
     sourceFormat: formats.size === 1 ? [...formats][0]! : null,
     genomeBuild: builds.size === 1 ? [...builds][0]! : null,
+    parserVersion: typeof upload.parser_version === "string" ? upload.parser_version : null,
+    catalogVersion: typeof upload.catalog_version === "number" ? upload.catalog_version : null,
+    catalogDigest: typeof upload.catalog_digest === "string" ? upload.catalog_digest : null,
   };
 }
 

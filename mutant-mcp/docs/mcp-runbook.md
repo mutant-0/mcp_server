@@ -462,22 +462,12 @@ then choose staged submission or an S3 handoff. `MUTANT_MAX_REQUEST_BYTES` and
 `MUTANT_SNP_CATALOG_MAX_BYTES` are optional stack variables; verify the real
 `/snp-catalog` size before lowering the catalog cap.
 
-**Vendored processor.** `src/ui/genomics/*` is generated from
-`front-end-web/src/genomics`. If the component starts parsing differently from
-the portal, run `npm run check:genomics` first; it fails when the vendored copy
-was edited by hand or drifted from upstream. The vendored set is nine modules
-(the format parsers plus `catalog.js`, `sexChromosome.js`, and `stream.js`);
-the portal's `parseInWorker.js` / `parse.worker.js` are intentionally excluded
-(they fetch a catalog over the portal session, and this component injects the one
-`get_snp_catalog` returned).
-
-If `check:genomics` reports *every* module as modified, it is not drift: it is
-line endings. The manifest hashes the module body with LF endings and
-`mutant-mcp/.gitattributes` pins `src/ui/*` to LF, because git would otherwise
-hand Windows a CRLF working tree and CI an LF one — the same commit passing in one
-place and failing in the other. Re-run `npm run sync:genomics`, which writes LF
-copies and rewrites the manifest, and check that `.gitattributes` is still there.
-A genuine hand edit reports exactly the module that was edited.
+**Shared processor.** Both browser apps bundle the same pinned
+`@mutant/genomics-parser` tarball. Run `npm run check:genomics` in each app to
+verify its version and SHA-256. The package source and update steps are in
+`../packages/genomics-parser/README.md`. The portal obtains the catalog over
+its HTTP session; ChatGPT obtains it through `get_snp_catalog`. Compare the
+stored `parser_version` and `catalog_digest` when investigating differences.
 
 **Worker vs main-thread divergence.** The worker path and the fallback path must
 produce identical output; `tests/parse-parity.test.ts` parses every fixture both

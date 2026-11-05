@@ -303,6 +303,9 @@ const uploadMetaSchema = z
       .max(32)
       .optional()
       .describe("Detected reference build, e.g. 'GRCh38'. Non-identifying provenance."),
+    parser_version: z.string().regex(/^\d+\.\d+\.\d+$/).optional(),
+    catalog_version: z.number().int().nonnegative().optional(),
+    catalog_digest: z.string().regex(/^[0-9a-f]{16}$/).optional(),
   })
   .describe("Non-sensitive provenance for the import; never includes file contents or a filename.");
 

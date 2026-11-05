@@ -134,14 +134,13 @@ mutant-mcp/
 │   │   │   ├── worker-protocol.js # worker <-> client message types
 │   │   │   ├── resource.ts        # registers ui://mutant/dna-import/v1.html
 │   │   │   └── generated/html.ts  # GENERATED: bundled component document
-│   │   ├── genomics/              # GENERATED: vendored portal DNA processor
-│   │   └── api.js                 # GENERATED: portal-free fetchSnpCatalog shim
+│   │   └── genomics/              # compatibility exports from shared parser package
 │   └── responses/
 │       ├── errors.ts              # JSON-RPC + WWW-Authenticate challenges
 │       └── tool-result.ts         # envelope -> CallToolResult + deterministic content
 ├── scripts/
 │   ├── build-ui.mjs               # esbuild -> generated/html.ts
-│   └── sync-genomics.mjs          # vendor front-end-web/src/genomics (+ --check)
+│   └── check-parser-package.mjs   # verify the pinned shared parser artifact
 ├── plugin.json                    # packaged-plugin interface copy + entry prompts
 ├── docs/
 │   ├── mcp-contract.md            # implemented schemas, semantics, error codes
@@ -199,20 +198,14 @@ evaluation reads these records through `npm run record:trace`.
 
 ### The shared DNA processor
 
-`src/ui/genomics/*` is **generated**: `scripts/sync-genomics.mjs` copies it
-verbatim from `front-end-web/src/genomics/`, so the portal and the ChatGPT
-component parse 23andMe / Ancestry / VCF / gzipped VCF input with the same code.
-The vendored set is deliberately nine modules — the loader and the format
-parsers, `catalog.js` (indexes only), `sexChromosome.js` (`parse.js` imports it),
-and `stream.js`. The portal's own
-`parseInWorker.js` / `parse.worker.js` are **not** vendored: they fetch a catalog
-over the portal's HTTP session and return a different result shape, whereas this
-component injects the catalog `get_snp_catalog` gave it and runs everything
-through `workerEntry.js`.
-`npm run check:genomics` fails the build if a vendored module was edited by hand
-or drifted from upstream, and `tests/genomics-parity.test.ts` pins the same
-behaviour on golden fixtures. Never edit those files directly — change the
-upstream module and re-run `npm run sync:genomics`.
+Both the portal and this component call `@mutant/genomics-parser` directly.
+The package source is `../packages/genomics-parser`; each app pins the same
+versioned tarball in its `vendor/` directory. The portal fetches its catalog
+over HTTP, while this component receives it through `get_snp_catalog`.
+File reading and genotype interpretation happen inside the package in both
+browser paths. `src/ui/genomics/*` only keeps old import paths working.
+`npm run check:genomics` verifies this app's pinned artifact and version.
+See `../packages/genomics-parser/README.md` for the update procedure.
 
 ### Worker parsing in the DNA import component
 

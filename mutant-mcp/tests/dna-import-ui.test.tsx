@@ -731,6 +731,9 @@ describe("DNA import component", () => {
       provider: "23andMe",
       source_format: "array",
       file_size_bytes: MICROARRAY_BODY.length,
+      parser_version: "0.1.2",
+      catalog_version: 1,
+      catalog_digest: "65daf179433a22ff",
     });
     // Identity is derived server-side from the token; the component must not
     // send any of it, and must not send the raw file either.

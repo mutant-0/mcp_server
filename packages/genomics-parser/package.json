@@ -1,0 +1,28 @@
+{
+  "name": "@mutant/genomics-parser",
+  "version": "0.1.2",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "node build.mjs",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

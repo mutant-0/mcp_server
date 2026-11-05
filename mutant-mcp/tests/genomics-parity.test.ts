@@ -1,21 +1,13 @@
-import { readdir, readFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { gzipSync, strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
-// The manifest contract is shared with the sync script, so the drift guard cannot
-// disagree with `npm run check:genomics` about the header or the hashing rules.
-import { GENERATED_HEADER, normalizeNewlines, sha256 } from "../scripts/genomics-manifest.mjs";
+import { PARSER_VERSION, catalogFingerprint } from "@mutant/genomics-parser";
 import { parseDnaFile } from "../src/ui/dna-import/parseFile.js";
-import { fetchSnpCatalog } from "../src/ui/api.js";
 import { concatBytes, fakeFile } from "./genomics-fixtures.js";
 
 /**
- * Portal/ChatGPT parity for the vendored DNA processor.
+ * Portal/ChatGPT parity for the shared DNA parser package.
  *
- * `src/ui/genomics/*` is copied verbatim from `front-end-web/src/genomics/` by
- * `scripts/sync-genomics.mjs`. These tests are the MCP-side half of the parity
- * gate: they pin the vendored copies to the sync manifest, then drive the exact
+ * These tests drive the exact
  * function the Apps SDK component calls (`parseDnaFile`) over the same fixture
  * shapes the portal's own suite uses, and assert the full normalized payload.
  *
@@ -24,19 +16,6 @@ import { concatBytes, fakeFile } from "./genomics-fixtures.js";
  * (and, through it, the same `parseDnaFileCore` the worker entry runs).
  */
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const GENOMICS_DIR = path.resolve(HERE, "..", "src", "ui", "genomics");
-const API_SHIM = path.resolve(HERE, "..", "src", "ui", "api.js");
-const MANIFEST = path.join(GENOMICS_DIR, "sync-manifest.json");
-
-interface Manifest {
-  source: string;
-  modules: Record<string, string>;
-}
-
-async function readManifest(): Promise<Manifest> {
-  return JSON.parse(await readFile(MANIFEST, "utf8")) as Manifest;
-}
 
 /** Shared fixture catalog: three markers, one alias, one WGS capture target. */
 const catalog = {
@@ -107,32 +86,12 @@ async function parse(file: File, snpCatalog: Record<string, unknown> = microarra
   return result;
 }
 
-describe("vendored processor drift guard", () => {
-  it("ships exactly the modules the sync manifest declares", async () => {
-    const manifest = await readManifest();
-    const files = (await readdir(GENOMICS_DIR)).filter((name) => name !== "sync-manifest.json");
-    expect([...files].sort()).toEqual(Object.keys(manifest.modules).sort());
-    expect(manifest.source).toBe("front-end-web/src/genomics");
-  });
-
-  it("keeps every vendored module identical to its manifest hash", async () => {
-    const manifest = await readManifest();
-    for (const [name, expected] of Object.entries(manifest.modules)) {
-      // Normalised first: git hands this file to Windows as CRLF and to CI as LF,
-      // and the manifest hash must not depend on which.
-      const raw = normalizeNewlines(await readFile(path.join(GENOMICS_DIR, name), "utf8"));
-      expect(raw.startsWith(GENERATED_HEADER), `${name} must keep the generated header`).toBe(true);
-      const body = raw.slice(GENERATED_HEADER.length);
-      expect(sha256(body), `${name} drifted from the manifest; run npm run sync:genomics`).toBe(
-        expected,
-      );
-    }
-  });
-
-  it("cannot fetch a catalog from the portal (the component injects it instead)", async () => {
-    expect(() => fetchSnpCatalog()).toThrow(/explicit SNP catalog/);
-    const shim = await readFile(API_SHIM, "utf8");
-    expect(shim).not.toContain("fetch(");
+describe("shared parser identity", () => {
+  it("records the exact package and catalog used for a parse", async () => {
+    const parsed = await parseDnaFile(fakeFile("sample.txt", "rs328\t8\t19819724\tAA"), { catalog });
+    expect(parsed.parserVersion).toBe(PARSER_VERSION);
+    expect(parsed.catalogDigest).toBe(catalogFingerprint(catalog));
+    expect(parsed.catalogVersion).toBe(catalog.version);
   });
 });
 
@@ -390,19 +349,23 @@ describe("genomics parity: VCF input", () => {
 });
 
 describe("genomics parity: component payload contract", () => {
-  it("returns only the fields create_report consumes, plus local coverage", async () => {
+  it("returns import fields, parser identity, and local coverage", async () => {
     const file = fakeFile("23andme.txt", "# rsid\tgenotype\nrs328\t8\t19819724\tAG\n");
     const result = await parse(file);
 
     expect(Object.keys(result).sort()).toEqual([
+      "catalogDigest",
+      "catalogVersion",
       "coverage",
       "fileName",
       "fileSizeBytes",
       "genomeBuild",
       "inferredReferenceCalls",
+      "parserVersion",
       "provider",
       "providerLabel",
       "sexChromosome",
+      "sexChromosomeInference",
       "snps",
       "supported",
       "totalLines",

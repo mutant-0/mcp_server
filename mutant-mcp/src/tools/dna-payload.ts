@@ -35,7 +35,7 @@ export const WGS_RECORD_FIELDS = [
 const WGS_ENTRY_FIELDS = ["schema_version", "source_format", "genome_build"] as const;
 
 /** Upload-metadata fields that carry no direct personal identifier. */
-const UPLOAD_META_FIELDS = ["provider", "source_format", "genome_build", "file_size_bytes"] as const;
+const UPLOAD_META_FIELDS = ["provider", "source_format", "genome_build", "file_size_bytes", "parser_version", "catalog_version", "catalog_digest"] as const;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

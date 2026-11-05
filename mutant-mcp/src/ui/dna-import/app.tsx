@@ -117,6 +117,9 @@ interface ParsedResult {
   sexChromosome: { pattern: string; confidence: string } | null;
   fileName: string;
   fileSizeBytes: number;
+  parserVersion: string;
+  catalogVersion: number | null;
+  catalogDigest: string;
   coverage: { matched: number; total: number };
   totalLines: number;
 }
@@ -1714,6 +1717,9 @@ export function DnaImportApp({
           source_format: parsed.providerLabel === "WGS" ? "vcf" : "array",
           ...(parsed.genomeBuild ? { genome_build: parsed.genomeBuild } : {}),
           file_size_bytes: parsed.fileSizeBytes,
+          ...(parsed.parserVersion ? { parser_version: parsed.parserVersion } : {}),
+          ...(parsed.catalogVersion !== null && parsed.catalogVersion !== undefined ? { catalog_version: parsed.catalogVersion } : {}),
+          ...(parsed.catalogDigest ? { catalog_digest: parsed.catalogDigest } : {}),
         },
         import_request_id: importRequestId,
       };
