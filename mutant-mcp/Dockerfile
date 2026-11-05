@@ -2,6 +2,8 @@
 FROM public.ecr.aws/docker/library/node:22-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
+# npm ci resolves the shared parser from the local tarball in vendor/.
+COPY vendor ./vendor
 RUN npm ci
 COPY tsconfig.json ./
 COPY scripts ./scripts
