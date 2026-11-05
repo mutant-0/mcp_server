@@ -217,7 +217,9 @@ export function parseVcfLine(line, ctx) {
     const haploidReference = gt === '0' && (chrom === 'X' || chrom === 'Y' || chrom === 'MT');
     if (gt !== '0/0' && gt !== '0|0' && !haploidReference) return;
     const minDepth = Number(field('MIN_DP'));
-    if (!Number.isFinite(minDepth) || minDepth < 10) return;
+    // The portal's genome-parser infers a trusted catalog reference genotype
+    // from a covering block even when its minimum depth is below ten.
+    if (!Number.isInteger(minDepth) || minDepth < 0) return;
     const rawGq = field('GQ');
     const gq = rawGq != null && rawGq !== '.' && rawGq !== '' && Number.isFinite(Number(rawGq)) ? Number(rawGq) : null;
     const positions = (ctx.build === 'GRCh37' ? ctx.indexes.positionsByChrom37 : ctx.indexes.positionsByChrom38)?.get(chrom) || [];

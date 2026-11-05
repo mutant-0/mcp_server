@@ -8,7 +8,7 @@
     "parse.js": "ebc7cc59bcd6754e2e5c10b7fb0504f22f7cec3117c0c9fafa9a377813a08cd5",
     "parse23andMe.js": "5fbe5a46794e56a284f44fb0a9f0759334749e689a9d8e35fff2f0c43f2e82b3",
     "parseAncestry.js": "b8272b603e4ca8b0ce84e7943050ac28949f4a70ed590e1071d991b1258d068c",
-    "parseVcf.js": "d8d81ee81fbe6f87024ae9b2ff704eda7a5b4ec5b0bca21ecbe76519d4540359",
+    "parseVcf.js": "3b5c32b2abae18027007817b23132bdb87f52cd6b7dea451ca50f943f52228a8",
     "sexChromosome.js": "3bc36db05621a50e636630ad211a3dc66f206c124071484f25f97ca3e5250892",
     "stream.js": "08f7ba94dbbb1e651dc81b26f5880419b75a1109e37283aeecf6fd7975057bf7"
   }

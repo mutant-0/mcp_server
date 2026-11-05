@@ -56,9 +56,19 @@ const CATALOG = {
       position_GRCh38: 43768752,
       risk_allele: "C",
     },
+    rs4826508: {
+      rsID: "rs4826508",
+      chromosome: "X",
+      position_GRCh37: 56811695,
+      position_GRCh38: 56785262,
+      risk_allele: "T",
+    },
   },
   aliases: { rs671: ["rs2230021"] },
-  reference_alleles: { rs1799836: { GRCh37: "T", GRCh38: "T" } },
+  reference_alleles: {
+    rs1799836: { GRCh37: "T", GRCh38: "T" },
+    rs4826508: { GRCh37: "C", GRCh38: "C" },
+  },
 };
 
 const VCF_COLUMNS = "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE";
@@ -152,7 +162,7 @@ describe("parser parity: worker path vs main-thread path", () => {
     expect((parsed.inferredReferenceCalls as Record<string, unknown>).rs1799836).toEqual({ min_dp: 20, gq: null, ploidy: 1 });
   });
 
-  it("does not infer MAOB from a reference block with minimum depth below ten", async () => {
+  it("matches the portal's MAOB call from a low-depth reference block", async () => {
     const file = fakeFile(
       "maob-low-depth.vcf.gz",
       gzipSync(
@@ -168,7 +178,37 @@ describe("parser parity: worker path vs main-thread path", () => {
       ),
     );
     const parsed = await parseDnaFileCore(file, { catalog: CATALOG });
-    expect((parsed.snps as Record<string, string>).rs1799836).toBeUndefined();
+    expect((parsed.snps as Record<string, string>).rs1799836).toBe("TT");
+    expect((parsed.inferredReferenceCalls as Record<string, unknown>).rs1799836).toEqual({
+      min_dp: 7,
+      gq: 0,
+      ploidy: 1,
+    });
+  });
+
+  it("matches the portal's NBDY call from the low-depth GRCh38 block", async () => {
+    const file = fakeFile(
+      "nbdy-low-depth.vcf.gz",
+      gzipSync(
+        strToU8(
+          [
+            "##fileformat=VCFv4.2",
+            "##reference=GRCh38.p13",
+            VCF_COLUMNS,
+            "X\t56781703\t.\tT\t.\t279.85\tPASS\tEND=56791072\tGT:DP:GQ:MIN_DP:AD\t0:19:0:8:179489",
+            "X\t56801978\t.\tA\t.\t281.4\tPASS\tEND=56813657\tGT:DP:GQ:MIN_DP:AD\t0:20:0:7:227947",
+            "",
+          ].join("\n"),
+        ),
+      ),
+    );
+    const parsed = await parseDnaFileCore(file, { catalog: CATALOG });
+    expect((parsed.snps as Record<string, string>).rs4826508).toBe("CC");
+    expect((parsed.inferredReferenceCalls as Record<string, unknown>).rs4826508).toEqual({
+      min_dp: 8,
+      gq: 0,
+      ploidy: 1,
+    });
   });
 
   for (const [label, makeFile] of FIXTURES) {
