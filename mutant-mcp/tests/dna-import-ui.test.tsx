@@ -1574,7 +1574,11 @@ describe("DNA import component", () => {
     });
 
     await screen.findByText(/Analysis ready/i);
-    expect(screen.getByText(/newer analysis platform is available/i)).toBeDefined();
+    const notice = screen.getByText(/newer analysis platform is available/i);
+    expect(notice.textContent).toContain("Your current results are ready to use");
+    expect(notice.textContent).toContain("the newer version may rank them differently");
+    expect(notice.textContent).toContain("latest scoring");
+    expect(notice.textContent).toContain("keeps the raw file on your device");
     fireEvent.click(screen.getByRole("button", { name: /refresh analysis/i }));
     await screen.findByText(/Resubmit your DNA to refresh/i);
     expect(screen.getByRole("button", { name: /choose dna file/i })).toBeDefined();

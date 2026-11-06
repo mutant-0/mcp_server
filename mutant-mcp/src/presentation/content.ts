@@ -8,6 +8,7 @@
  */
 import type { ToolName, ToolResponse } from "../contract.js";
 import { processingStatusText } from "./processing.js";
+import { DNA_REFRESH_EXPLANATION, OPTIONAL_DNA_REFRESH } from "./refresh.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -68,6 +69,11 @@ function errorContent(response: ToolResponse): string {
       'Only if no form is displayed, call show_dna_import with view "consent".'
     );
   }
+  if (error?.code === "REGENERATION_REQUIRED") {
+    return "The saved DNA analysis is unavailable for this request. " +
+      DNA_REFRESH_EXPLANATION +
+      " Continue with any health records actually available in this conversation. Offer the import form and open it only if the user chooses to re-import.";
+  }
   const lines = [`error: ${error?.code ?? "UNKNOWN"}`, error?.message ?? "Unknown error"];
   const nextAction = asRecord(error?.next_action);
   const nextTool = nextAction ? asText(nextAction.tool) : null;
@@ -82,11 +88,10 @@ function errorContent(response: ToolResponse): string {
 const EXPERIENCE_SENTENCES: Record<string, string> = {
   NO_DNA: "No DNA data has been imported for this account yet.",
   READY: "Your current DNA analysis is ready.",
-  READY_REFRESH_AVAILABLE:
-    "Your current DNA analysis is ready, and a newer platform version is available; refreshing is optional and your current results remain usable.",
+  READY_REFRESH_AVAILABLE: OPTIONAL_DNA_REFRESH,
   READY_REFRESH_PROCESSING:
     "Your current DNA analysis is ready while a refreshed analysis is being generated.",
-  PROCESSING_FAILED: "The analysis could not be served and must be regenerated.",
+  PROCESSING_FAILED: "The saved DNA analysis is unavailable. " + DNA_REFRESH_EXPLANATION,
 };
 
 function statusContent(data: JsonObject): string {
@@ -112,7 +117,7 @@ function statusContent(data: JsonObject): string {
     parts.push(
       "For an overview, call show_analysis_overview; this status check mounts no card by itself.",
     );
-  } else {
+  } else if (experience !== "PROCESSING_FAILED") {
     const nextAction = asRecord(data.next_action);
     const nextTool = nextAction ? asText(nextAction.tool) : null;
     if (nextTool) parts.push(`Next: call ${nextTool}.`);

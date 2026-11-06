@@ -39,6 +39,7 @@ import {
 } from "../../contract";
 import { DARK_PALETTE, LIGHT_PALETTE, paletteVars } from "../shared/theme";
 import { historyComparisonPrompt } from "../../presentation/prompts";
+import { DNA_REFRESH_EXPLANATION, OPTIONAL_DNA_REFRESH } from "../../presentation/refresh";
 import {
   FOLLOW_UP_FAILED_MESSAGE,
   FOLLOW_UP_UNAVAILABLE_MESSAGE,
@@ -2763,7 +2764,7 @@ export function DnaImportApp({
             <p style={{ ...styles.meta, margin: "0 0 8px" }}>
               {analysis.regenerationRequired
                 ? "A refreshed analysis is needed to include the newer patterns. Resubmit your DNA to refresh it."
-                : "A newer analysis platform is available. Your current results are still usable, and refreshing is optional."}
+                : OPTIONAL_DNA_REFRESH}
             </p>
             <button
               type="button"
@@ -3244,8 +3245,7 @@ export function DnaImportApp({
         <div style={styles.notice} role="status">
           <p style={{ margin: "0 0 4px", fontWeight: 600 }}>Resubmit your DNA to refresh</p>
           <p style={{ margin: 0, color: "var(--color-text-secondary, #5f6368)" }}>
-            Mutant cannot rescore a stored file, so submit your DNA again to include the newer
-            patterns. Your current results stay available until the refreshed analysis is ready.
+            {DNA_REFRESH_EXPLANATION}
           </p>
         </div>
       ) : null}

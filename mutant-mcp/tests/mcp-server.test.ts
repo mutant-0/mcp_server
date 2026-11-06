@@ -255,12 +255,12 @@ describe("MCP server integration", () => {
     expect(meta?.ui).toBeUndefined();
     expect(meta?.mutant).toBeUndefined();
     expect(meta?.["openai/outputTemplate"]).toBeUndefined();
-    expect((result.content as Array<{ text: string }>)[0]?.text).toContain(
-      "refreshing is optional and your current results remain usable",
-    );
-    expect((result.content as Array<{ text: string }>)[0]?.text).toContain(
-      "show_analysis_overview",
-    );
+    const text = (result.content as Array<{ text: string }>)[0]?.text;
+    expect(text).toContain("Your current results are ready to use, and refreshing is optional");
+    expect(text).toContain("the newer version may rank them differently");
+    expect(text).toContain("latest scoring");
+    expect(text).toContain("keeps the raw file on your device");
+    expect(text).toContain("show_analysis_overview");
   });
 
   it("advertises the overview UI descriptor on the display tool", async () => {
