@@ -8,6 +8,7 @@ import { Effect, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { Architecture, DockerImageCode, DockerImageFunction } from "aws-cdk-lib/aws-lambda";
 import { LogGroup, LogRetention, RetentionDays, type ILogGroup } from "aws-cdk-lib/aws-logs";
 import type { Construct } from "constructs";
+import { DEFAULT_MUTANT_SNP_CATALOG_MAX_BYTES } from "../../src/config.js";
 import { getRetentionStore } from "./retention-policy.js";
 
 /** CloudWatch-supported retention values, keyed by day count. */
@@ -189,7 +190,9 @@ export class MutantMcpStack extends Stack {
         MUTANT_OPENAI_DOMAIN_VERIFICATION_TOKEN: props.openAiDomainVerificationToken ?? "",
         MUTANT_REQUEST_TIMEOUT_MS: String(props.requestTimeoutMs ?? 25000),
         MUTANT_MAX_RESPONSE_BYTES: String(props.maxResponseBytes ?? 512000),
-        MUTANT_SNP_CATALOG_MAX_BYTES: String(props.snpCatalogMaxBytes ?? 2000000),
+        MUTANT_SNP_CATALOG_MAX_BYTES: String(
+          props.snpCatalogMaxBytes ?? DEFAULT_MUTANT_SNP_CATALOG_MAX_BYTES,
+        ),
         // Defaults below the 6 MiB synchronous lambda:InvokeFunction limit.
         MUTANT_MAX_REQUEST_BYTES: String(props.maxRequestBytes ?? 5 * 1024 * 1024),
         LOG_LEVEL: props.logLevel ?? "info",

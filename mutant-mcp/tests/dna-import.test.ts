@@ -8,6 +8,7 @@ import {
   resetMockAnalyses,
   responseCapFor,
 } from "../src/clients/mutant-lambda-client.js";
+import { loadConfig } from "../src/config.js";
 import { CONTRACT_VERSION, type ToolResponse } from "../src/contract.js";
 import { createMcpServer } from "../src/server.js";
 import { DNA_IMPORT_UI_URI } from "../src/ui/dna-import/resource.js";
@@ -544,6 +545,16 @@ describe("create_report", () => {
 });
 
 describe("transport size caps", () => {
+  it("allows catalogs above the old default without raising the general response cap", () => {
+    const config = loadConfig({});
+    const catalog = JSON.stringify({ snps: {}, padding: "x".repeat(2_000_000) });
+
+    expect(enforceResponseCap(catalog, responseCapFor(config, "get_snp_catalog"))).toBeNull();
+    expect(
+      enforceResponseCap(catalog, responseCapFor(config, "get_analysis_status"))?.error?.code,
+    ).toBe("RESPONSE_TOO_LARGE");
+  });
+
   it("rejects an oversized request", () => {
     expect(enforceRequestCap({ a: "x".repeat(100) }, 10)?.error?.code).toBe("PAYLOAD_TOO_LARGE");
     expect(enforceRequestCap({ a: "x" }, 1000)).toBeNull();

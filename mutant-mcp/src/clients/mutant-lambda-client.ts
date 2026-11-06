@@ -1,6 +1,10 @@
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import type { MutantUserContext } from "../auth/user-context.js";
-import { DEFAULT_MUTANT_MAX_REQUEST_BYTES, type AppConfig } from "../config.js";
+import {
+  DEFAULT_MUTANT_MAX_REQUEST_BYTES,
+  DEFAULT_MUTANT_SNP_CATALOG_MAX_BYTES,
+  type AppConfig,
+} from "../config.js";
 import {
   APP_ERROR_CODES,
   CONTRACT_VERSION,
@@ -444,7 +448,7 @@ export class MockMutantBackendClient implements MutantBackendClient {
   constructor(caps: MockClientCaps = {}) {
     this.maxRequestBytes = caps.maxRequestBytes ?? DEFAULT_MUTANT_MAX_REQUEST_BYTES;
     this.maxResponseBytes = caps.maxResponseBytes ?? 512000;
-    this.snpCatalogMaxBytes = caps.snpCatalogMaxBytes ?? 2000000;
+    this.snpCatalogMaxBytes = caps.snpCatalogMaxBytes ?? DEFAULT_MUTANT_SNP_CATALOG_MAX_BYTES;
     this.analysisProcessingMs = caps.analysisProcessingMs ?? DEFAULT_MOCK_ANALYSIS_PROCESSING_MS;
   }
 

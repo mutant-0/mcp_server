@@ -10,6 +10,9 @@ const DEFAULT_MAX_REQUEST_BYTES = 5 * 1024 * 1024;
 /** Exported so the dev-mode mock client applies the same default cap. */
 export const DEFAULT_MUTANT_MAX_REQUEST_BYTES = DEFAULT_MAX_REQUEST_BYTES;
 
+/** Maximum response size of the synchronous report-generator Lambda invocation. */
+export const DEFAULT_MUTANT_SNP_CATALOG_MAX_BYTES = 6 * 1024 * 1024;
+
 const EnvSchema = z.object({
   MUTANT_SERVICE_LAMBDA_ARN: z.string().trim().default(""),
   MUTANT_OAUTH_ISSUER: z.string().trim().default(""),
@@ -38,7 +41,11 @@ const EnvSchema = z.object({
   MUTANT_MAX_RESPONSE_BYTES: z.coerce.number().int().positive().default(512000),
   // The SNP catalog is application data for the DNA import component, not model
   // context, so it is allowed a much larger response than the default cap.
-  MUTANT_SNP_CATALOG_MAX_BYTES: z.coerce.number().int().positive().default(2000000),
+  MUTANT_SNP_CATALOG_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_MUTANT_SNP_CATALOG_MAX_BYTES),
   MUTANT_MAX_REQUEST_BYTES: z.coerce.number().int().positive().default(DEFAULT_MAX_REQUEST_BYTES),
   MUTANT_DEV_MODE: z.string().trim().default("false"),
   // OpenAI Apps SDK domain-verification token. Unset by default; when set, a GET

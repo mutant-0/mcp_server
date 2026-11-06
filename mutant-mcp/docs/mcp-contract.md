@@ -1481,7 +1481,7 @@ application data, not model context. Proxies `operation: "get_snp_catalog"` and
 returns the catalog **unchanged** under `data` (no summarizing, no filtering).
 
 The catalog is allowed a larger response than the default cap
-(`MUTANT_SNP_CATALOG_MAX_BYTES`, default 2 MB). Oversize responses map to
+(`MUTANT_SNP_CATALOG_MAX_BYTES`, default 6 MiB). Oversize responses map to
 `RESPONSE_TOO_LARGE`; upstream transport failures map to `CATALOG_UNAVAILABLE`
 (`app_code: "catalog_unavailable"`, `retryable` carried over). Logs record
 version, byte size, and marker count — never catalog contents.

@@ -91,7 +91,7 @@ MCP Lambda (`mutant-mcp`):
 | `MUTANT_CORS_ORIGINS` | `https://chatgpt.com,https://chat.openai.com` |
 | `MUTANT_OPENAI_DOMAIN_VERIFICATION_TOKEN` | OpenAI Apps SDK domain-verification token; unset by default (challenge paths then 404). Served verbatim, unauthenticated, on GET `/.well-known/openai-apps-challenge` |
 | `MUTANT_PLAN_INFO_URL` | `https://mutantgenomics.com/plans` (informational plan page; must be https on `mutantgenomics.com`) |
-| `MUTANT_SNP_CATALOG_MAX_BYTES` | optional, default `2000000` (per-tool cap for `get_snp_catalog`) |
+| `MUTANT_SNP_CATALOG_MAX_BYTES` | optional, default `6291456` (per-tool cap for `get_snp_catalog`) |
 | `MUTANT_MAX_REQUEST_BYTES` | optional, default `5242880` (cap for `create_report` payloads) |
 
 report-generator Lambda:
