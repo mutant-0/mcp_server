@@ -1575,7 +1575,7 @@ describe("DNA import component", () => {
 
     await screen.findByText(/Analysis ready/i);
     const notice = screen.getByText(/newer analysis platform is available/i);
-    expect(notice.textContent).toContain("Your current results are ready to use");
+    expect(notice.textContent).toContain("Your current DNA analysis is ready");
     expect(notice.textContent).toContain("the newer version may rank them differently");
     expect(notice.textContent).toContain("latest scoring");
     expect(notice.textContent).toContain("keeps the raw file on your device");

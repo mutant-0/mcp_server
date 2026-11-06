@@ -256,7 +256,7 @@ describe("MCP server integration", () => {
     expect(meta?.mutant).toBeUndefined();
     expect(meta?.["openai/outputTemplate"]).toBeUndefined();
     const text = (result.content as Array<{ text: string }>)[0]?.text;
-    expect(text).toContain("Your current results are ready to use, and refreshing is optional");
+    expect(text).toContain("Your current DNA analysis is ready, and refreshing is optional");
     expect(text).toContain("the newer version may rank them differently");
     expect(text).toContain("latest scoring");
     expect(text).toContain("keeps the raw file on your device");
