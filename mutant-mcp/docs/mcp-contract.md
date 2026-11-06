@@ -1663,14 +1663,15 @@ add a `suggested_prompts` array to their `data`
   why-refresh and start-refresh in the refresh states), the two no-usable-analysis
   processing states (**none** — the component owns those states), `PROCESSING_FAILED`
   (regenerate), analysis context
-  (compare with the health history shared in the chat **first**, then explain #1,
+  (compare with the user's health history **first**, then explain #1,
   compare top three, and compare consented family history, plus connect-findings
   and compare-all for Full; the ready
   card renders the
-  comparison chip as its visually primary action with the helper line `Uses
-  history shared in this chat; a relative's connected Health records stay in
-  their own account.`, and the card sends the
-  server-selected prompt once per click; Free accounts with locked findings get no
+  comparison chip as its visually primary action. The card sends
+  `@health Compare with my history` once per click, with model context to use the
+  user's connected Health records when available and history shared in the chat.
+  A relative's connected Health records stay in their own account.
+  Free accounts with locked findings get no
   Full-scope chip, and the separate element is the factual `Learn about Mutant
   plans` link from the notice), and
   hypothesis detail (why ranked / evidence / confirmation /

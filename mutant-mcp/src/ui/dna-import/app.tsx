@@ -223,7 +223,7 @@ interface CardAction {
  */
 const COMPARISON_PROMPT_ID = "compare-medical-records";
 const COMPARISON_HELPER =
-  "Uses history shared in this chat; a relative's connected Health records stay in their own account.";
+  "Uses your connected Health records when available and history shared in this chat. A relative's connected Health records stay in their own account.";
 
 /**
  * The server's top-three comparison chip. Unlike the other chip actions, its
@@ -2458,7 +2458,7 @@ export function DnaImportApp({
         }
         const outcome = await deliverContextualFollowUp(
           app,
-          action.label,
+          action.id === COMPARISON_PROMPT_ID ? `@health ${action.label}` : action.label,
           withCardHeading(action.prompt, action.heading),
         );
         if (outcome === "sent") {

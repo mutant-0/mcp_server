@@ -174,7 +174,7 @@ export function historyComparisonPrompt(analysisVersion: string | null): PromptS
     id: "compare-medical-records",
     label: "Compare with my history",
     prompt:
-      "Which of my top three Mutant findings seems most relevant to the health history I've shared? What supports or argues against each? If I have not shared any health history in this conversation, ask me what I want to share before comparing; do not imply access to records I have not provided, and do not assume symptoms or test results I have not given you.",
+      "Which of my top three Mutant findings seems most relevant to my health history? Use my connected ChatGPT Health records if accessible and any health history I've shared in this conversation. What supports or argues against each finding? If neither source is available, ask me what I want to share before comparing. Do not imply access to unavailable records, assume symptoms or test results, or send my health history to Mutant tools.",
     heading: "Mutant follow-up: Compare with my history",
     intent: "comparison",
     action: action("comparison", analysisVersion),
@@ -188,7 +188,7 @@ function contextPrompts(data: JsonObject, analysisVersion: string | null): Promp
   const firstPreview = asRecord(previews[0]);
   const firstId = firstPreview ? asText(firstPreview.id) : null;
 
-  // Comparison with the history shared in the chat is the primary opening
+  // Comparison with the user's health history is the primary opening
   // action, so it leads the list; the ready card renders the first entry as its
   // prominent action and the rest as secondary. Explain and compare-top-three
   // and family comparison stay available, and Full keeps its separate broader

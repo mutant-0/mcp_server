@@ -1421,7 +1421,7 @@ describe("DNA import component", () => {
     expect(screen.getByRole("button", { name: "Compare family history" })).toBeDefined();
     // Comparison leads the card and spells out the data boundary.
     expect(
-      screen.getByText(/a relative's connected Health records stay in their own account\./),
+      screen.getByText(/A relative's connected Health records stay in their own account\./),
     ).toBeDefined();
     expect(screen.queryByRole("button", { name: "Compare all with Full" })).toBeNull();
     expect(
@@ -1455,7 +1455,7 @@ describe("DNA import component", () => {
       fireEvent.click(compare);
       await waitFor(() => expect(bridge.messages).toHaveLength(1));
       const sent = JSON.stringify(bridge.messages[0]);
-      expect(sent).toContain("Compare with my history");
+      expect(sent).toContain("@health Compare with my history");
       expect(JSON.stringify(bridge.modelContextUpdates.at(-1))).toContain(
         historyComparisonPrompt("analysis_1").prompt,
       );
@@ -1482,6 +1482,11 @@ describe("DNA import component", () => {
   });
 
   it("sends the current history comparison prompt once, even on a double click", async () => {
+    const sendFollowUpMessage = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window, "openai", {
+      value: { sendFollowUpMessage },
+      configurable: true,
+    });
     const comparison = historyComparisonPrompt("analysis_1");
     const bridge = renderWith({
       poll_analysis_status: statusResponse("ready"),
@@ -1507,7 +1512,11 @@ describe("DNA import component", () => {
     fireEvent.click(compare);
     fireEvent.click(compare);
 
-    await waitFor(() => expect(bridge.messages).toHaveLength(1));
+    await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(1));
+    expect(sendFollowUpMessage).toHaveBeenCalledWith({
+      prompt: "@health Compare with my history",
+      scrollToBottom: true,
+    });
     expect(JSON.stringify(bridge.modelContextUpdates.at(-1))).toContain(
       comparison.prompt,
     );
